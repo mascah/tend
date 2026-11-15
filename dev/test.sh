@@ -11,22 +11,15 @@ tend=${TEND:-$top/tend}
 [ -n "${TEND:-}" ] || (cd "$(dirname "$0")/.." && go build -o "$tend" .) || exit 1
 export GIT_AUTHOR_NAME=Test GIT_AUTHOR_EMAIL=test@example.com GIT_COMMITTER_NAME=Test GIT_COMMITTER_EMAIL=test@example.com
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+export TEND_TERMINAL=herdr # rex only where a scenario says
 
 mkdir "$top/bin"
-cat >"$top/bin/herdr" <<'EOS'
-#!/usr/bin/env bash
-# Herdr stand-in. An agent's turn happens at once in tend's working directory:
-# the implementer archives every change and commits, or for a repair commits a
-# fix; the reviewer writes the verdict its prompt names, shaped by $REVIEW.
-# IMPL_FAIL, REPAIR_FAIL and REV_FAIL fail that prompt with the code they hold,
-# leaving its turn pending; an agent whose status file says working then takes
-# that turn when waited for, as one that outlived tend would. IMPL_SLEEP holds
-# the implementer's prompt that long. BLOCK_AFTER_BUILD leaves it blocked once
-# its build turn has settled. As Herdr does, a blocked agent refuses a prompt.
-set -euo pipefail
-s=$HERDR_STATE
-printf '%s\n' "$*" >>"$s/log"
-said() { jq -n --arg st "$1" '{result: {agent: {agent_status: $st, pane_id: "p9"}}}'; }
+# An agent's turn, shared by the Herdr and rex stand-ins: it happens at once in
+# tend's working directory. The implementer archives every change and commits,
+# or for a repair commits a fix; the reviewer writes the verdict its prompt
+# names, shaped by $REVIEW. BLOCK_AFTER_BUILD leaves the implementer blocked
+# once its build turn has settled.
+cat >"$top/bin/turn.sh" <<'EOS'
 turn() { # name text
 	case $1 in
 	impl-*)
@@ -76,6 +69,20 @@ turn() { # name text
 		esac >"$v" ;;
 	esac
 }
+EOS
+cat >"$top/bin/herdr" <<'EOS'
+#!/usr/bin/env bash
+# Herdr stand-in, its agents taking their turns from turn.sh.
+# IMPL_FAIL, REPAIR_FAIL and REV_FAIL fail that prompt with the code they hold,
+# leaving its turn pending; an agent whose status file says working then takes
+# that turn when waited for, as one that outlived tend would. IMPL_SLEEP holds
+# the implementer's prompt that long. As Herdr does, a blocked agent refuses a
+# prompt.
+set -euo pipefail
+s=$HERDR_STATE
+printf '%s\n' "$*" >>"$s/log"
+said() { jq -n --arg st "$1" '{result: {agent: {agent_status: $st, pane_id: "p9"}}}'; }
+. "$(dirname "$0")/turn.sh"
 case "$1 $2" in
 "worktree create")
 	shift 2
@@ -122,6 +129,84 @@ case "$1 $2" in
 esac
 EOS
 chmod +x "$top/bin/herdr"
+cat >"$top/bin/rex" <<'EOS'
+#!/usr/bin/env bash
+# rex stand-in. Sessions and blocks are lines of rex-sessions ("id label") and
+# rex-blocks ("session block label"). A block labelled with an agent's name is
+# that agent, sharing the Herdr stand-in's agent-, status- and pending- files
+# and its log lines, so the same turns happen. A prompt is the text sent, then
+# Enter. program_status reports status-<name> (idle when absent), with an
+# updated_at that each turn moves; "none" is no record, as at a dialog; a
+# working agent with a pending turn takes it when polled again. TRUST_DIALOG starts
+# agents at the trust dialog; REX_STALL leaves a prompt untaken and pending.
+set -euo pipefail
+s=$HERDR_STATE
+. "$(dirname "$0")/turn.sh"
+args=()
+for a in "$@"; do case $a in --autostart=false | --json | --focus=false | --trim | --split=right) ;; *) args+=("$a") ;; esac; done
+set -- "${args[@]}"
+printf 'rex %s\n' "$*" >>"$s/rexlog"
+touch "$s/rex-sessions" "$s/rex-blocks"
+arg() { local flag=$1; shift; while [ $# -gt 1 ]; do [ "$1" != "$flag" ] || { echo "$2"; return; }; shift; done; }
+name() { awk -v b="$(arg -b "$@")" '$2 == b { print $3 }' "$s/rex-blocks"; }
+bump() { echo $(($(cat "$s/updated-$1" 2>/dev/null || echo 0) + 1)) >"$s/updated-$1"; }
+case $1 in
+ls) jq -Rn '{sessions: [inputs | split(" ") | {session_id: .[0], label: .[1]}]}' <"$s/rex-sessions" ;;
+new)
+	id=session:$(($(wc -l <"$s/rex-sessions") + 1))
+	echo "$id $2" >>"$s/rex-sessions"
+	echo "$id $id-0 shell" >>"$s/rex-blocks"
+	jq -n --arg id "$id" '{session_id: $id, initial_windows: [{block_ids: [($id + "-0")]}]}' ;;
+split)
+	n=$(arg --label "$@") b=$(arg -s "$@")-$(($(wc -l <"$s/rex-blocks") + 1))
+	echo "$(arg -s "$@") $b $n" >>"$s/rex-blocks"
+	shift "$(($(printf '%s\n' "$@" | grep -nx -- -- | cut -d: -f1)))"
+	printf 'agent start %s --kind %s -- %s\n' "$n" "$1" "${*:2}" >>"$s/log"
+	touch "$s/agent-$n"
+	[ -z "${TRUST_DIALOG:-}" ] || { echo none >"$s/status-$n"; touch "$s/trust-$n"; }
+	jq -n --arg b "$b" '{block_ids: [$b]}' ;;
+block)
+	case $2 in
+	ls) jq -Rn --arg s "$(arg -s "$@")" '{blocks: [inputs | split(" ") | select(.[0] == $s) | {block_id: .[1], label: .[2]}]}' <"$s/rex-blocks" ;;
+	close) grep -v " ${!#} " "$s/rex-blocks" >"$s/rb" || true; mv "$s/rb" "$s/rex-blocks" ;;
+	call)
+		n=$(name "$@")
+		case ${!#} in
+		modes) echo '{"screen":"alternate","modes":[{"name":"bracketed_paste","number":2004,"set":true}]}' ;;
+		program_status)
+			# A working agent is seen working once, then finishes its turn.
+			if [ "$(cat "$s/status-$n" 2>/dev/null)" = working ] && [ -f "$s/pending-$n" ] && [ -e "$s/seen-$n" ]; then
+				turn "$n" "$(cat "$s/pending-$n")"
+				rm "$s/pending-$n" "$s/status-$n" "$s/seen-$n"
+				bump "$n"
+			elif [ "$(cat "$s/status-$n" 2>/dev/null)" = working ]; then
+				touch "$s/seen-$n"
+			fi
+			st=$(cat "$s/status-$n" 2>/dev/null || echo idle)
+			if [ "$st" = none ]; then echo '{"records":[]}'; else
+				jq -n --arg st "$st" --arg u "$(cat "$s/updated-$n" 2>/dev/null || echo 0)" '{records: [{state: $st, updated_at: $u, app: "agent"}]}'
+			fi ;;
+		esac ;;
+	esac ;;
+send) n=$(name "$@"); printf '%s' "${!#}" | sed $'s/\e\\[20[01]~//g' >>"$s/typed-$n" ;;
+send-key)
+	n=$(name "$@")
+	if [ -e "$s/trust-$n" ]; then
+		rm "$s/trust-$n" "$s/status-$n"
+		bump "$n"
+	elif [ -f "$s/typed-$n" ]; then
+		text=$(cat "$s/typed-$n")
+		rm "$s/typed-$n"
+		printf 'agent prompt %s %s\n' "$n" "$text" >>"$s/log"
+		if [ -n "${REX_STALL:-}" ]; then printf '%s' "$text" >"$s/pending-$n"; exit 0; fi
+		turn "$n" "$text"
+		bump "$n"
+		[ -z "${block:-}" ] || echo blocked >"$s/status-$block"
+	fi ;;
+capture) [ ! -e "$s/trust-$(name "$@")" ] || echo "Yes, I trust this folder" ;;
+esac
+EOS
+chmod +x "$top/bin/rex"
 cat >"$top/bin/gh" <<'EOS'
 #!/usr/bin/env bash
 # GitHub stand-in. "auth token --user A" gives tok-A, and every write records the
@@ -234,7 +319,7 @@ scenario() {
 	t=$top/$name
 	mkdir -p "$t/state"
 	export HERDR_STATE=$t/state TEND_STATE=$t/tend
-	unset NO_NOTES REVIEW IMPL_FAIL IMPL_SLEEP REPAIR_FAIL REV_FAIL BLOCK_AFTER_BUILD CREATE_LOST REQUEST_FAIL PROPOSE_FAIL FOLLOW_FAIL DECLINE EDIT_FAIL CAP
+	unset NO_NOTES REVIEW IMPL_FAIL IMPL_SLEEP REPAIR_FAIL REV_FAIL BLOCK_AFTER_BUILD CREATE_LOST REQUEST_FAIL PROPOSE_FAIL FOLLOW_FAIL DECLINE EDIT_FAIL CAP TRUST_DIALOG REX_STALL
 }
 run() { "$tend" "$t/repo" 261114-k0000 >"$t/out${1:-}" 2>"$t/err${1:-}"; } # [suffix for out and err]
 reviews() { grep -c '^agent prompt rev-' "$HERDR_STATE/log"; }
@@ -782,5 +867,59 @@ wait "$first" 2>/dev/null
 kill "$(cat "$HERDR_STATE/sleeper")" 2>/dev/null
 sleep 0.5
 check "after a kill, status says to run tend again" grep -q "tend stopped before this finished" <<<"$(status)"
+
+# The same attempts with the agents in rex, whose state is what each agent reports.
+rexwt() { git -C "$t/repo" worktree list --porcelain | awk '/^worktree /{w=substr($0,10)} /^branch refs\/heads\/grove\//{print w}'; }
+rexrun() { TEND_TERMINAL=rex run "$@"; }
+
+scenario rex
+project "$t/repo"
+rexrun
+check "under rex, a cycle is claimed, built and reviewed" passed
+check "its worktree is made by Git under the state folder" test "$(dirname "$(rexwt)")" -ef "$TEND_STATE/worktrees"
+check "and opened as a session of its own" test "$(cut -d' ' -f2 "$HERDR_STATE/rex-sessions")" = "$(basename "$(rexwt)")"
+check "each agent runs in a block named for it" grep -q ' impl-' "$HERDR_STATE/rex-blocks"
+check "the reviewer's block is closed after its verdict" test "$(grep -c ' rev-' "$HERDR_STATE/rex-blocks")" = 0
+check "prompts go as a paste" grep -q $'^rex send .*\e\[200~/grove-implement' "$HERDR_STATE/rexlog"
+check "nothing was asked of Herdr" test ! -e "$HERDR_STATE/log" -o "$(grep -c '^worktree\|^pane\|^agent get' "$HERDR_STATE/log")" = 0
+rexrun 2
+check "a rerun finds its session and reviews nothing again" test "$(wc -l <"$HERDR_STATE/rex-sessions" | tr -d ' ') $(reviews)" = "1 1"
+
+scenario rex-repair
+project "$t/repo"
+REVIEW=repairable rexrun
+check "under rex, a failed review is repaired once and passes" passed
+check "the repair was asked once" test "$(prompts An)" = 1
+
+scenario rex-stalled
+project "$t/repo"
+REX_STALL=1 rexrun
+check "under rex, a prompt the agent never takes up stops" test $? = 3
+check "as stalled" said "agent_prompt_stalled"
+agent working impl
+rexrun 2
+check "the rerun waits for the agent once it is working" test $? = 0 -a "$(jq -r .conclusion "$t/out2" 2>/dev/null)" = success
+check "and does not prompt it again" test "$(prompts /grove-implement)" = 1
+check "and says so" grep -q "still working on an earlier prompt" "$t/err2"
+
+scenario rex-dialog
+project "$t/repo"
+REVIEW=repairable BLOCK_AFTER_BUILD=1 rexrun
+check "under rex, an agent reporting blocked stops before the repair" test $? = 3
+check "saying it is blocked" said "impl-.* is blocked"
+agent none impl
+REVIEW=repairable rexrun
+check "an agent reporting nothing, as at a dialog, is not prompted" test $? = 3
+check "it is unknown, a person's" said "is unknown; look at it"
+check "and the repair is not used" test ! -e "$(echo "$TEND_STATE"/runs/*)/repair-asked"
+agent idle impl
+REVIEW=repairable rexrun
+check "once it reports idle, the repair is asked and passes" passed
+
+scenario rex-trust
+project "$t/repo"
+TRUST_DIALOG=1 rexrun
+check "under rex, the trust dialog of a new folder is answered" passed
+check "by choosing to trust it" grep -q '^rex send-key .* down enter' "$HERDR_STATE/rexlog"
 
 [ "$fails" = 0 ] && echo "all passed" || { echo "$fails failed"; exit 1; }

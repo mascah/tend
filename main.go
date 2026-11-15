@@ -36,12 +36,13 @@ import (
 )
 
 var (
-	mode, state, repo, cycle, run        string
-	kind, n, target, branch, id, dir, ws string
-	impl, root, what, notes, trailer, v  string
-	head, pr, account, where             string
-	issue, rec                           any
-	lock                                 *os.File // held open: its flock is the runner's
+	mode, state, repo, cycle, run       string
+	kind, n, target, branch, id, dir    string
+	impl, root, what, notes, trailer, v string
+	head, pr, account, where            string
+	issue, rec                          any
+	lock                                *os.File // held open: its flock is the runner's
+	term                                terminal
 )
 
 // ---- commands
@@ -214,7 +215,7 @@ func stop(f string, a ...any) {
 	msg := fmt.Sprintf(f, a...)
 	say("%s", msg)
 	stage("needs-you", msg, "a person deals with that, then runs tend again")
-	quiet("herdr", "notification", "show", "tend "+cycle+" needs you", "--body", msg, "--sound", "request")
+	term.notify("tend "+cycle+" needs you", msg, "request")
 	os.Exit(3)
 }
 
@@ -254,6 +255,14 @@ func main() {
 	must("", os.MkdirAll(state+"/runs", 0o755))
 	state = must(abs(state)) // tend changes into the attempt later
 
+	// The terminal the agents run in: TEND_TERMINAL, or rex when tend itself
+	// runs in rex rather than Herdr.
+	switch t := os.Getenv("TEND_TERMINAL"); {
+	case t == "rex", t == "" && os.Getenv("REX_SESSION") != "" && os.Getenv("HERDR_ENV") != "1":
+		term = &rex{}
+	default:
+		term = &herdr{}
+	}
 	if mode == "watch" {
 		watch(args)
 	}
@@ -541,66 +550,49 @@ func takeLock() {
 
 // ---- agents
 
-// Start an agent in a pane. A pane just split is not yet at its prompt, so a
-// busy pane is retried. A folder the harness has never seen gets its trust
-// dialog, Claude's per worktree and Codex's per repository, answered here.
+// Start an agent. A folder the harness has never seen gets its trust dialog,
+// Claude's per worktree and Codex's per repository, answered here.
 // ponytail: trusts whatever repo the caller passed; the real tool should
 // answer only for repos the owner registered.
-func start(name, kind, pane string, agentArgs ...string) {
-	var o string
-	for range 10 {
-		var err error
-		o, err = both("herdr", append([]string{"agent", "start", name, "--kind", kind, "--pane", pane, "--timeout", "60000", "--"}, agentArgs...)...)
-		if err == nil {
-			return
-		}
-		if str(get(parse(o), "error", "code")) != "agent_pane_busy" {
-			break
-		}
-		time.Sleep(time.Second)
+func start(name, kind string, fresh bool, args ...string) string {
+	p, err := term.start(name, kind, fresh, args)
+	if err == nil {
+		return p
 	}
-	screen, _ := quiet("herdr", "agent", "read", name, "--source", "visible", "--lines", "40")
+	screen := term.read(name)
 	switch {
 	case strings.Contains(screen, "Yes, I trust this folder"):
-		quiet("herdr", "agent", "send-keys", name, "down", "enter")
+		term.keys(name, "down", "enter")
 	case strings.Contains(screen, "Trust and continue"):
-		quiet("herdr", "agent", "send-keys", name, "enter")
+		term.keys(name, "enter")
 	default:
-		code := str(get(parse(o), "error", "code"))
+		code := err.Error()
 		if code == "" {
 			code = "unknown"
 		}
 		stop("%s did not start: %s", name, code)
 	}
 	// Codex comes out of its dialog as done, not idle.
-	if _, err := both("herdr", "agent", "wait", name, "--until", "idle", "--until", "done", "--timeout", "60000"); err != nil {
+	if _, why := term.wait(name, "60000", "idle", "done"); why != "" {
 		stop("%s did not start", name)
 	}
-}
-
-func agentStatus(name string) string {
-	s, _ := quiet("herdr", "agent", "get", name)
-	return str(get(parse(s), "result", "agent", "agent_status"))
+	return p
 }
 
 // Carry on only if a prompt or wait settled the agent idle or done.
-func settled(name, o string) {
-	switch st := str(get(parse(o), "result", "agent", "agent_status")); st {
+func settled(name, st, why string) {
+	switch st {
 	case "idle", "done":
 	case "":
-		code := str(get(parse(o), "error", "code"))
-		if code == "" {
-			code = "no answer"
-		}
-		stop("%s: %s", name, code)
+		stop("%s: %s", name, why)
 	default:
 		stop("%s is %s", name, st)
 	}
 }
 
 func await(name string) {
-	o, _ := both("herdr", "agent", "wait", name, "--timeout", timeout())
-	settled(name, o)
+	st, why := term.wait(name, timeout())
+	settled(name, st, why)
 }
 
 // Prompt an agent and wait for it to settle. An agent still working, as after
@@ -609,7 +601,7 @@ func await(name string) {
 // stall does not prove a prompt undelivered, so nothing here sends one twice.
 // mark, if given, records HEAD just before the prompt is sent.
 func ask(name, text, mark string) {
-	switch st := agentStatus(name); st {
+	switch st := term.status(name); st {
 	case "working":
 		say("%s is still working on an earlier prompt; waiting for it, not prompting again", name)
 		await(name)
@@ -621,36 +613,19 @@ func ask(name, text, mark string) {
 		write(mark+".tmp", git("rev-parse", "HEAD")+"\n")
 		must("", os.Rename(mark+".tmp", mark))
 	}
-	o, _ := both("herdr", "agent", "prompt", name, text, "--wait", "--timeout", timeout())
-	settled(name, o)
-}
-
-// A new pane for a new agent, split from the workspace's first.
-func split() string {
-	panes := must(out("herdr", "pane", "list", "--workspace", ws))
-	s := must(out("herdr", "pane", "split", str(get(parse(panes), "result", "panes", 0, "pane_id")), "--direction", "right", "--cwd", dir, "--no-focus"))
-	return str(get(parse(s), "result", "pane", "pane_id"))
+	st, why := term.prompt(name, text)
+	settled(name, st, why)
 }
 
 // The implementer is a name, not a session: if its pane is gone, a new session
 // takes the name and finds the work in Git.
 func implementer() {
-	if ok("herdr", "agent", "get", impl) {
+	if term.pane(impl) != "" {
 		return
-	}
-	p := ""
-	for _, x := range list(get(parse(must(out("herdr", "pane", "list", "--workspace", ws))), "result", "panes")) {
-		if get(x, "agent") == nil {
-			p = str(get(x, "pane_id"))
-			break
-		}
-	}
-	if p == "" {
-		p = split()
 	}
 	// Auto mode, so that routine commands ask nobody. It may write in the run
 	// folder, where the commit message goes.
-	start(impl, "claude", p, "--permission-mode", "auto", "--add-dir", run)
+	start(impl, "claude", false, "--permission-mode", "auto", "--add-dir", run)
 }
 
 // ---- Git and GitHub
@@ -683,21 +658,8 @@ func pushAs(b string) bool {
 	return err == nil
 }
 
-func openWorkspace(path string) string {
-	s := must(out("herdr", "worktree", "list", "--cwd", repo))
-	for _, w := range list(get(parse(s), "result", "worktrees")) {
-		if str(get(w, "path")) == path {
-			if x := str(get(w, "open_workspace_id")); x != "" {
-				return x
-			}
-		}
-	}
-	s = must(out("herdr", "worktree", "open", "--cwd", repo, "--path", path, "--no-focus"))
-	return str(get(parse(s), "result", "workspace", "workspace_id"))
-}
-
-// The worktree holding branch b, opened in Herdr, or a new one from base: sets
-// dir and ws. A branch is found wherever its worktree is, so a rerun finds its
+// The worktree holding branch b, opened as the place, or a new one from base:
+// sets dir. A branch is found wherever its worktree is, so a rerun finds its
 // work.
 func worktreeFor(b, base, label string) {
 	dir = ""
@@ -710,11 +672,10 @@ func worktreeFor(b, base, label string) {
 		}
 	}
 	if dir != "" {
-		ws = openWorkspace(dir)
+		term.open(dir)
 		return
 	}
-	wt := parse(must(out("herdr", "worktree", "create", "--cwd", repo, "--branch", b, "--base", base, "--label", label, "--no-focus")))
-	dir, ws = str(get(wt, "result", "worktree", "path")), str(get(wt, "result", "workspace", "workspace_id"))
+	dir = term.worktree(b, base, label)
 }
 
 func commits(rng string) bool { return git("rev-list", rng) != "" }
@@ -800,7 +761,7 @@ func draft(slug, num string) {
 			stage("working", impl+" drafts a proposal from issue #"+num, "tend has it commit the draft, then opens a pull request")
 			ask(impl, "/grove-propose --unattended "+quoted("GitHub issue "), run+"/asked")
 		}
-		if agentStatus(impl) == "working" {
+		if term.status(impl) == "working" {
 			await(impl)
 		}
 		if exists(run + "/followed") {
@@ -934,12 +895,11 @@ func attempt() {
 		rec = firstRun(proj, "cycle", cycle)
 		dir = str(get(rec, "checkout"))
 		if dir != "" && gitQ("-C", dir, "branch", "--show-current") == str(get(rec, "branch")) {
-			ws = openWorkspace(dir)
+			term.open(dir)
 			cd(dir)
 			say("carrying on attempt %s in %s", str(get(rec, "id")), dir)
 		} else {
-			wt := parse(must(out("herdr", "worktree", "create", "--cwd", repo, "--branch", "tend-"+time.Now().Format("150405"), "--base", target, "--label", "tend: "+cycle, "--no-focus")))
-			dir, ws = str(get(wt, "result", "worktree", "path")), str(get(wt, "result", "workspace", "workspace_id"))
+			dir = term.worktree("tend-"+time.Now().Format("150405"), target, "tend: "+cycle)
 			cd(dir)
 			if _, err := sh(nil, os.Stderr, false, "grove", "claim", cycle); err != nil {
 				stop("grove claim refused %s", cycle)
@@ -1020,7 +980,7 @@ func attempt() {
 		reviewed := git("rev-parse", "HEAD")
 		asked := cat(run + "/repair-asked")
 		if asked == "" || asked == reviewed {
-			if asked != "" && agentStatus(impl) != "working" {
+			if asked != "" && term.status(impl) != "working" {
 				stop("the repair asked of %s for %s has no commit and %s is not working on it. Look at its pane, then commit a fix and run tend again, or delete %s/repair-asked to have it asked once more", impl, short(reviewed), impl, run)
 			}
 			implementer()
@@ -1061,7 +1021,7 @@ func attempt() {
 			break
 		}
 		rid, who := str(get(req, "id")), str(get(req, "user", "login"))
-		if exists(run+"/request-"+rid) && agentStatus(impl) != "working" {
+		if exists(run+"/request-"+rid) && term.status(impl) != "working" {
 			stop("the changes %s requested on %s (review %s) were asked of %s, which committed nothing and is not working on them. Look at its pane, then commit and run tend again, or delete %s/request-%s to have them asked once more", who, pr, rid, impl, run, rid)
 		}
 		comments, err := out("gh", "api", reviewsAPI()+"/"+rid+"/comments", "--paginate", "--jq", `.[] | "\(.path):\(.line // .original_line // "?"): \(.body)"`)
@@ -1088,7 +1048,7 @@ func attempt() {
 
 	verdict := parse(cat(v))
 	conclusion, h := str(get(verdict, "conclusion")), short(str(get(verdict, "head")))
-	quiet("herdr", "notification", "show", "tend "+cycle+": "+conclusion, "--body", where+" at "+h+" is ready for you", "--sound", "done")
+	term.notify("tend "+cycle+": "+conclusion, where+" at "+h+" is ready for you", "done")
 	stage("done", fmt.Sprintf("%s for %s at %s, verdict %s", conclusion, branch, h, v), "a person reviews "+where+" and decides whether to merge it")
 	say("done: %s, verdict %s", branch, v)
 	var pretty bytes.Buffer
@@ -1157,11 +1117,9 @@ func review() {
 	}
 	rev := "rev-" + short(h)
 	// A reviewer left by an earlier run, working or not, is reused.
-	s, _ := quiet("herdr", "agent", "get", rev)
-	rpane := str(get(parse(s), "result", "agent", "pane_id"))
+	rpane := term.pane(rev)
 	if rpane == "" {
-		rpane = split()
-		start(rev, "codex", rpane, "-s", "workspace-write", "-a", "never", "--add-dir", run)
+		rpane = start(rev, "codex", true, "-s", "workspace-write", "-a", "never", "--add-dir", run)
 	}
 	stage("working", rev+" reviews "+short(h), "tend waits for its verdict")
 	ask(rev, fmt.Sprintf(`You are the independent reviewer of branch %s at commit %s. You did not write it and nobody can answer questions. The change is 'git diff %s...HEAD'; what it must do is %s. Check the code against those requirements and run the project's tests. Report only material findings: a defect, an unmet requirement, or a claim in %s the code does not support. Edit, stage and commit nothing. Your only output is the file %s, exactly this JSON shape: {"head": "%s", "conclusion": "success or failure", "actionable": true or false, "summary": "findings with file:line and what you ran"}. actionable is true only when every finding is an in-scope code fix that needs no decision from the owner.`, branch, h, target, what, notes, v, h), "")
@@ -1169,7 +1127,7 @@ func review() {
 	if !valid(v, h) {
 		stop("%s settled without a valid verdict for %s; look at pane %s", rev, short(h), rpane)
 	}
-	quiet("herdr", "pane", "close", rpane)
+	term.closePane(rpane)
 	if git("rev-parse", "HEAD") != h || !clean() {
 		stop("%s changed the checkout", rev)
 	}

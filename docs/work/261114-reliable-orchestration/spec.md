@@ -12,10 +12,10 @@ Read this document and the repository instructions, then inspect the current
 branch, worktrees, diff and relevant implementation before acting. The baseline
 below is historical evidence, not a claim about the checkout you find.
 
-**Next Tend work: slice 4's terminal interface.** Agreed with the owner on
-2026-11-15: the non-Grove work item is done (branch `tend/slice4-issue-items`, not
-merged); the port to Go is done on the same branch (`main.go`, the script
-removed); next the terminal interface drawn from Herdr and rex (the
+**Next Tend work: a live attempt under rex, then the remaining terminal.** Agreed
+with the owner on 2026-11-15: the non-Grove work item, the port to Go and the
+terminal interface with Herdr and rex are done on branch `tend/slice4-issue-items`
+(not merged); a live attempt under rex has not run yet; then drawn from Herdr and rex (the
 owner's next multiplexer) or tmux if rex cannot report agent state; then the
 remaining terminal; then a second tracker. Slices 1–3 are merged into `main`. Slices 1, 2
 and 2a are done on `tend/slice1-claim-verdict` (not merged; merging is the
@@ -322,7 +322,7 @@ here describes delivery, not how strongly the architectural direction is agreed.
 | 2 — One real shared-runner workflow | Done on `tend/slice1-claim-verdict`, live on sandbox PRs #1–#3; not merged | Slice 1 | [Publication](#shared-review-and-publication) |
 | 2a — Act on requested changes | Done on `tend/slice1-claim-verdict`, live on sandbox PR #3; not merged | Slice 2 | [Below](#2a--act-on-requested-changes) |
 | 3 — Explicit request-to-proposal intake | Done on `tend/slice3-intake`, live on the sandbox; not merged | Slice 2 and G available | [Intake and handoffs](#request-intake-and-explicit-handoffs) |
-| 4 — Prove portability | In progress: non-Grove work item live and Go port done on `tend/slice4-issue-items` (not merged); terminal interface (Herdr with rex or tmux), the other terminal and a second tracker remain | Earlier lifecycle demonstrated | [Portability](#portability) |
+| 4 — Prove portability | In progress: non-Grove work item live, Go port and the rex terminal (regressions only) done on `tend/slice4-issue-items` (not merged); a live rex attempt, terminal interface (Herdr with rex or tmux), the other terminal and a second tracker remain | Earlier lifecycle demonstrated | [Portability](#portability) |
 
 ### G — Finish Grove #164 independently
 
@@ -885,12 +885,44 @@ get, wait, prompt, read, send-keys, panes and worktrees) as the interface, and
 check whether rex can report agent state (`rex` skill); if not, tmux, where tend
 must establish working, idle and blocked itself.
 
+2026-11-15 — Terminal interface; rex. rex (0.1.0-preview.19, from the Ghostty
+makers) reports agent state: Claude Code 2.1.325 and Codex 0.169.0 send the program
+status protocol (OSC 7501), and `rex block call … program_status` returns it. Probed
+live in a throwaway rex session: Claude reported idle after its trust dialog,
+working then done for a turn, and blocked with `kind=question` and the question as
+its message; during the trust dialog it reported nothing, and its record cleared
+when it exited. Codex reported idle, working, done; at a dialog the owner approved
+by hand it reported nothing. So tmux is not needed for agent state.
+- `herdr.go`: a `terminal` interface (worktree, open, pane, start, read, keys,
+  status, prompt, wait, closePane, notify) with Herdr behind it, every call as
+  before; shared code keeps the agent rules (wait for working, stop on blocked or
+  unknown, the trust dialog, marks).
+- `rex.go`: a session per worktree, named after its folder; each agent a block named
+  after it, running the agent as the block's program. The state is the root record;
+  no record while the agent runs is `unknown`, so a dialog the agent does not report
+  stops tend instead of being prompted into (Herdr reports such a dialog idle).
+  Prompts go as a bracketed paste then Enter, delivered only if the record changes
+  within five seconds, else `agent_prompt_stalled`. Git makes worktrees under
+  `TEND_STATE/worktrees/`. tend reports its own needs-you and done to its tab with
+  OSC 7501. Chosen by `TEND_TERMINAL`, else rex when `REX_SESSION` is set outside
+  Herdr.
+- Checks: 215 pass, 23 of them new rex scenarios (claim, build, review and rerun;
+  repair; a stalled prompt then a working agent waited for and not prompted again;
+  blocked and silent agents stopped before the repair; the trust dialog answered).
+  The stand-ins share one file of agent turns.
+- Not shown: a live attempt under rex; whether the first Enter after a paste is
+  ever lost (seen once in the probe, likely the owner's dialog); `rex block close`
+  syntax against the real CLI; rex is not on PATH by default (the CLI is inside
+  `Rex Beta.app`).
+
+Next action: a live attempt under rex on the sandbox, watched in the Rex app.
+
 A suitable prompt for a future implementation session is:
 
 > Read `docs/work/261114-reliable-orchestration/spec.md` in Tend and the repository
-> instructions. Revalidate the current handoff and continue slice 4 with the
-> terminal interface: draw it from Herdr and rex (or tmux if rex cannot report
-> agent state), behind `dev/test.sh`. Preserve unrelated work and active Grove
+> instructions. Revalidate the current handoff and continue slice 4: a live
+> attempt under rex if it has not run, then the remaining terminal or the second
+> tracker, behind `dev/test.sh`. Preserve unrelated work and active Grove
 > implementation. Update the delivery status with the revision, checks and next
 > action; do not advance into proposal intake or broader polling.
 

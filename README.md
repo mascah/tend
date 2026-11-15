@@ -24,9 +24,9 @@ handoff. Start there when continuing development across sessions.
 
 ## Run it
 
-Build it with Go 1.26 (`go build -o bin/tend .`). It needs `herdr`, `grove`,
-`git` and `gh` on PATH, and Claude Code and Codex signed in. Run it inside a
-Herdr pane:
+Build it with Go 1.26 (`go build -o bin/tend .`). It needs `grove`, `git` and
+`gh` on PATH, Herdr or rex, and Claude Code and Codex signed in. Run it inside
+a Herdr pane or a rex terminal:
 
 ```sh
 bin/tend <repo> <cycle-id>
@@ -35,6 +35,14 @@ bin/tend status <repo> [<cycle-id>]
 bin/tend watch [<repo>...]
 bin/tend propose <repo>
 ```
+
+The agents run in Herdr, or in rex when tend runs in rex (not in Herdr);
+`TEND_TERMINAL=herdr` or `rex` chooses. In rex each worktree gets a session
+named after its folder and each agent a block named after it. Its state is
+what the agent reports with rex's program status protocol, as Claude Code and
+Codex do, so a dialog the agent does not report shows as unknown and stops
+tend rather than being prompted into. rex worktrees are made by Git under
+`TEND_STATE/worktrees/`, and tend reports its own state to its tab.
 
 - Exit 0: the head is reviewed, and the verdict is printed.
 - Exit 3: a person is needed. A Herdr notification says why.
