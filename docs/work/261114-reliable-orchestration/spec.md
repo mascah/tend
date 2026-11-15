@@ -12,10 +12,11 @@ Read this document and the repository instructions, then inspect the current
 branch, worktrees, diff and relevant implementation before acting. The baseline
 below is historical evidence, not a claim about the checkout you find.
 
-**Next Tend work: the remaining terminal, then a second tracker.** Agreed with the
-owner on 2026-11-15: the non-Grove work item, the port to Go and the terminal
-interface with Herdr and rex (shown live) are done on branch
-`tend/slice4-issue-items` (not merged); then drawn from Herdr and rex (the
+**Next Tend work: slice 4 is complete; choose what follows with the owner.**
+Agreed with the owner on 2026-11-15: the non-Grove work item, the port to Go and
+the terminal interface with Herdr and rex (shown live) are merged into `main`;
+tmux is dropped; Jira as the second tracker is done on `tend/slice4-jira` (not
+merged). Before that the order was drawn from Herdr and rex (the
 owner's next multiplexer) or tmux if rex cannot report agent state; then the
 remaining terminal; then a second tracker. Slices 1–3 are merged into `main`. Slices 1, 2
 and 2a are done on `tend/slice1-claim-verdict` (not merged; merging is the
@@ -322,7 +323,7 @@ here describes delivery, not how strongly the architectural direction is agreed.
 | 2 — One real shared-runner workflow | Done on `tend/slice1-claim-verdict`, live on sandbox PRs #1–#3; not merged | Slice 1 | [Publication](#shared-review-and-publication) |
 | 2a — Act on requested changes | Done on `tend/slice1-claim-verdict`, live on sandbox PR #3; not merged | Slice 2 | [Below](#2a--act-on-requested-changes) |
 | 3 — Explicit request-to-proposal intake | Done on `tend/slice3-intake`, live on the sandbox; not merged | Slice 2 and G available | [Intake and handoffs](#request-intake-and-explicit-handoffs) |
-| 4 — Prove portability | In progress: non-Grove work item live, Go port and the rex terminal (live) done on `tend/slice4-issue-items` (not merged); terminal interface (Herdr with rex or tmux), the other terminal and a second tracker remain | Earlier lifecycle demonstrated | [Portability](#portability) |
+| 4 — Prove portability | Done: non-Grove work item, Go port and the rex terminal merged into `main`; Jira as the second tracker on `tend/slice4-jira` (not merged); tmux dropped | Earlier lifecycle demonstrated | [Portability](#portability) |
 
 ### G — Finish Grove #164 independently
 
@@ -1000,11 +1001,41 @@ one COMMENT review. No dialog stopped it and no Enter was lost.
 
 Next action: the remaining terminal, then a second tracker.
 
+2026-11-15 — Jira as the second tracker (4b). The owner dropped tmux and chose Jira;
+`tend/slice4-issue-items` was merged into `main` and pushed first. The design in 4b
+was reviewed with Codex over three rounds: fixed the label trust boundary (create
+and edit), unfinished handoffs, a live proof both repository states cannot give,
+search and comment paging, links lost from descriptions, and two wording points;
+key renames accepted. Implemented in `jira.go`: a `request` (GitHub or Jira issue)
+that intake and work items share, the GitHub calls unchanged; Jira through `curl`
+with the token on standard input; descriptions as text keeping link targets and
+smart-link URLs; `linked` marks a finished handoff and every pass completes folders
+with a `pr` and no `linked`; a proposal is pushed only before its pull request
+exists, so a merged and deleted branch is never pushed again.
+- Checks: 250 pass, 35 new for Jira (drafting past the first search page; done and
+  unlabelled left alone; description links, smart links, lists and code reaching
+  the drafter; `Refs <KEY>`; the comment once, though on a later comment page; the
+  token never in curl's arguments; the overview; a failed comment finished on the
+  next pass with the label gone; a decline; a build with its comment and attempt
+  name; unlabelled, done, unmapped and wrongly mapped issues refused).
+- Live: project SCRUM on mikeascah03.atlassian.net mapped to `mascah/tend-sandbox`,
+  agents in rex. SCRUM-5 ("ledger list should filter by category", with a link to
+  the record-listing spec) became PR #10 by `mascah-bot`, "Propose filtering ledger
+  list by category", body ending `Refs SCRUM-5`, a review with six open questions
+  (consequential first), and one comment on SCRUM-5 naming the PR. A second pass
+  repeated nothing. Credentials are the owner's own Jira account, in the repository's
+  ignored `.envrc`, so the Jira comment is the owner's until tend has an account.
+
+Next action: agree the next unit with the owner. Candidates from the record: the
+known gaps (no fetch of the target before branching, leftover worktrees, a declined
+change request silent on the PR, a description stale after a scope-changing
+request), a Jira account for tend, and multi-repository polling.
+
 A suitable prompt for a future implementation session is:
 
 > Read `docs/work/261114-reliable-orchestration/spec.md` in Tend and the repository
-> instructions. Revalidate the current handoff and continue slice 4: the
-> remaining terminal or the second tracker, behind `dev/test.sh`. Preserve unrelated work and active Grove
+> instructions. Revalidate the current handoff; slice 4 is complete, so agree the
+> next unit with the owner from the recorded gaps and deferred scope. Preserve unrelated work and active Grove
 > implementation. Update the delivery status with the revision, checks and next
 > action; do not advance into proposal intake or broader polling.
 

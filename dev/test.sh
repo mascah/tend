@@ -30,7 +30,7 @@ turn() { # name text
 			done
 			git add -A && git commit -qm build
 			[ -z "${BLOCK_AFTER_BUILD:-}" ] || block=$1 ;;
-		"Implement GitHub issue"*)
+		"Implement GitHub issue"* | "Implement Jira issue"*)
 			echo "built" >>a.txt && git commit -qam "Build the issue"
 			[ -n "${NO_NOTES:-}" ] || echo "Built it; ran the tests." >"$(grep -oE '[^ ,]*/implemented' <<<"$2" | head -1)" ;;
 		*"requested changes at commit"*)
@@ -108,7 +108,7 @@ case "$1 $2" in
 	said "$(cat "$s/status-$3" 2>/dev/null || echo idle)" ;;
 "agent prompt")
 	case $3 in
-	impl-*) case $4 in /grove-implement* | "Implement GitHub issue"*) fail=${IMPL_FAIL:-} ;; *"requested changes at commit"*) fail=${REQUEST_FAIL:-} ;; *) fail=${REPAIR_FAIL:-} ;; esac ;;
+	impl-*) case $4 in /grove-implement* | "Implement GitHub issue"* | "Implement Jira issue"*) fail=${IMPL_FAIL:-} ;; *"requested changes at commit"*) fail=${REQUEST_FAIL:-} ;; *) fail=${REPAIR_FAIL:-} ;; esac ;;
 	prop-*) case $4 in /grove-propose*) fail=${PROPOSE_FAIL:-} ;; *) fail=${FOLLOW_FAIL:-} ;; esac ;;
 	*) fail=${REV_FAIL:-} ;;
 	esac
@@ -207,6 +207,46 @@ capture) [ ! -e "$s/trust-$(name "$@")" ] || echo "Yes, I trust this folder" ;;
 esac
 EOS
 chmod +x "$top/bin/rex"
+cat >"$top/bin/curl" <<'EOS'
+#!/usr/bin/env bash
+# Jira stand-in, reached through curl. Issues are a JSON array in jira, each
+# {key, fields: {summary, description, labels, status}, comments: [{body}]}.
+# Search and comments come two to a page, so paging is always exercised. The
+# config on standard input must carry the credentials; the arguments never.
+# COMMENT_FAIL fails the first comment post, as when Jira is briefly down.
+set -euo pipefail
+s=$HERDR_STATE
+cfg=$(cat)
+grep -q '^user = "' <<<"$cfg" || { echo "no credentials on stdin" >&2; exit 2; }
+printf 'curl %s\n' "$*" >>"$s/log"
+method=GET data= url=${!#}
+while [ $# -gt 1 ]; do case $1 in -X) method=$2 ;; --data-binary) data=${2#@} ;; esac; shift; done
+path=${url#*://*/} path=/${path%%\?*} query=${url#*\?}
+[ "$query" != "$url" ] || query=
+q() { local v; v=$(tr '&' '\n' <<<"$query" | sed -n "s/^$1=//p"); v=${v//+/ }; printf '%b' "${v//%/\\x}"; }
+issue='.[] | select(.key == $k)'
+case "$method $path" in
+"GET /rest/api/3/search/jql")
+	p=$(q jql | sed -n 's/^project = "\([^"]*\)".*/\1/p') at=$(q nextPageToken)
+	jq --arg p "$p" --argjson at "${at:-0}" '[.[] | select((.key | startswith($p + "-")) and (.fields.labels | index("tend")) and .fields.status.statusCategory.key != "done")]
+		| {issues: (.[$at:$at + 2] | map(del(.comments))), isLast: (length <= $at + 2)} + (if length > $at + 2 then {nextPageToken: ($at + 2 | tostring)} else {} end)' "$s/jira" ;;
+"GET /rest/api/3/issue/"*/comment)
+	k=${path#/rest/api/3/issue/} k=${k%/comment} at=$(q startAt)
+	jq --arg k "$k" --argjson at "${at:-0}" "$issue"' | .comments | {comments: .[$at:$at + 2], startAt: $at, maxResults: 2, total: length}' "$s/jira" ;;
+"POST /rest/api/3/issue/"*/comment)
+	if [ -n "${COMMENT_FAIL:-}" ] && [ ! -e "$s/comment-failed" ]; then touch "$s/comment-failed"; echo '{"errorMessages":["down"]}'; exit 22; fi
+	k=${path#/rest/api/3/issue/} k=${k%/comment}
+	jq --arg k "$k" --slurpfile b "$data" 'map(if .key == $k then .comments += [$b[0]] else . end)' "$s/jira" >"$s/j.new" && mv "$s/j.new" "$s/jira"
+	echo '{}' ;;
+"PUT /rest/api/3/issue/"*)
+	k=${path#/rest/api/3/issue/}
+	jq --arg k "$k" --slurpfile b "$data" 'map(if .key == $k then .fields.labels -= [$b[0].update.labels[].remove] else . end)' "$s/jira" >"$s/j.new" && mv "$s/j.new" "$s/jira" ;;
+"GET /rest/api/3/issue/"*)
+	k=${path#/rest/api/3/issue/}
+	jq -e --arg k "$k" "$issue"' | del(.comments)' "$s/jira" || { echo '{"errorMessages":["Issue does not exist"]}'; exit 22; } ;;
+esac
+EOS
+chmod +x "$top/bin/curl"
 cat >"$top/bin/gh" <<'EOS'
 #!/usr/bin/env bash
 # GitHub stand-in. "auth token --user A" gives tok-A, and every write records the
@@ -319,7 +359,7 @@ scenario() {
 	t=$top/$name
 	mkdir -p "$t/state"
 	export HERDR_STATE=$t/state TEND_STATE=$t/tend
-	unset NO_NOTES REVIEW IMPL_FAIL IMPL_SLEEP REPAIR_FAIL REV_FAIL BLOCK_AFTER_BUILD CREATE_LOST REQUEST_FAIL PROPOSE_FAIL FOLLOW_FAIL DECLINE EDIT_FAIL CAP TRUST_DIALOG REX_STALL
+	unset NO_NOTES REVIEW IMPL_FAIL IMPL_SLEEP REPAIR_FAIL REV_FAIL BLOCK_AFTER_BUILD CREATE_LOST REQUEST_FAIL PROPOSE_FAIL FOLLOW_FAIL DECLINE EDIT_FAIL CAP TRUST_DIALOG REX_STALL COMMENT_FAIL
 }
 run() { "$tend" "$t/repo" 261114-k0000 >"$t/out${1:-}" 2>"$t/err${1:-}"; } # [suffix for out and err]
 reviews() { grep -c '^agent prompt rev-' "$HERDR_STATE/log"; }
@@ -867,6 +907,108 @@ wait "$first" 2>/dev/null
 kill "$(cat "$HERDR_STATE/sleeper")" 2>/dev/null
 sleep 0.5
 check "after a kill, status says to run tend again" grep -q "tend stopped before this finished" <<<"$(status)"
+
+# Jira as a source of requests and work items, through the curl stand-in.
+export JIRA_EMAIL=owner@example.test JIRA_API_TOKEN=tok-secret-1
+jmap() { mkdir -p "$TEND_STATE" && echo "https://jira.test SCRUM $(git -C "$t/repo" remote get-url origin)" >>"$TEND_STATE/jira"; } # map SCRUM to the repo's origin
+# key labels status [description ADF] [comment count]: add an issue
+jissue() {
+	[ -f "$HERDR_STATE/jira" ] || echo '[]' >"$HERDR_STATE/jira"
+	jq --arg k "$1" --arg l "$2" --arg st "$3" --argjson d "${4:-null}" --argjson c "${5:-0}" \
+		'. + [{key: $k, fields: {summary: "Request \($k)", description: (if $d == null then {type: "doc", version: 1, content: [{type: "paragraph", content: [{type: "text", text: "Make \($k) better."}]}]} else $d end), labels: ($l | split(",") | map(select(. != ""))), status: {statusCategory: {key: $st}}}, comments: [range($c) | {body: {type: "doc", version: 1, content: [{type: "paragraph", content: [{type: "text", text: "Earlier comment \(.)"}]}]}}]}]' \
+		"$HERDR_STATE/jira" >"$t/j" && mv "$t/j" "$HERDR_STATE/jira"
+}
+jcomments() { jq -r --arg k "$1" '.[] | select(.key == $k) | [.comments[].body.content[].content[]?.text] | join("\n")' "$HERDR_STATE/jira"; }
+rich='{"type":"doc","version":1,"content":[{"type":"paragraph","content":[{"type":"text","text":"Implement "},{"type":"text","text":"the spec","marks":[{"type":"link","attrs":{"href":"https://docs.test/spec"}}]},{"type":"text","text":" and "},{"type":"inlineCard","attrs":{"url":"https://jira.test/browse/SCRUM-9"}}]},{"type":"bulletList","content":[{"type":"listItem","content":[{"type":"paragraph","content":[{"type":"text","text":"keep totals"}]}]}]},{"type":"codeBlock","content":[{"type":"text","text":"ledger list --json"}]}]}'
+
+scenario jira-propose
+project "$t/repo" main remote
+allow
+jmap
+issues
+jissue SCRUM-1 tend new "$rich" 3
+jissue SCRUM-2 tend done
+jissue SCRUM-3 "" new
+jissue SCRUM-4 tend,bug indeterminate
+jissue SCRUM-5 tend new
+propose
+check "tend propose takes Jira requests and exits 0" test $? = 0
+check "each labelled, unfinished one is drafted once, past the first page" test "$(grep -c '^agent prompt prop-scrum-[0-9]* /grove-propose' "$HERDR_STATE/log")" = 3
+check "the drafter gets the description with its links, list and code" grep -q '^agent prompt prop-scrum-1 /grove-propose --unattended Request SCRUM-1. Implement the spec (https://docs.test/spec) and https://jira.test/browse/SCRUM-9 - keep totals ledger list --json (Jira issue https://jira.test/browse/SCRUM-1)' "$HERDR_STATE/log"
+check "a done or unlabelled request is left alone" test ! -e "$HERDR_STATE/pr-tend_jira-SCRUM-2" -a ! -e "$HERDR_STATE/pr-tend_jira-SCRUM-3"
+check "a pull request from its branch, by the account" test "$(cat "$HERDR_STATE/pr-tend_jira-SCRUM-1.by")" = the-bot
+check "the drafter is asked to end the commit with the key" grep -q "^agent prompt prop-scrum-1 .*ends with the line 'Refs SCRUM-1'" "$HERDR_STATE/log"
+check "the review says where it came from" grep -q 'Proposal drafted from SCRUM-1 ' "$HERDR_STATE/reviews"
+check "the Jira issue is told where its proposal is" grep -q 'tend opened https://example.test/pr/tend_jira-SCRUM-1 ' <<<"$(jcomments SCRUM-1)"
+check "the handoff is recorded finished" test -s "$TEND_STATE"/intake/o_r-jira-SCRUM-1/linked
+check "the token is never in curl's arguments" test "$(grep -c 'tok-secret-1' "$HERDR_STATE/log")" = 0
+propose 2
+check "a second pass drafts and opens nothing again" test "$(grep -c '^agent prompt prop-scrum-[0-9]* /grove-propose' "$HERDR_STATE/log") $(creates)" = "3 3"
+check "nor comments again, though its comment is on a later page" test "$(jcomments SCRUM-1 | grep -c 'tend opened')" = 1
+jissue SCRUM-6 tend new
+check "the overview lists a Jira request waiting, not the handled ones" test "$("$tend" status "$t/repo" | sed -n '/^Requests waiting/,$p' | grep -c 'SCRUM-')" = 1 -a -n "$("$tend" status "$t/repo" | grep '  SCRUM-6 Request SCRUM-6 https://jira.test/browse/SCRUM-6')"
+check "and its proposals to review" grep -A3 '^Proposals to review' <<<"$("$tend" status "$t/repo")" | grep -q 'example.test/pr/tend_jira'
+
+scenario jira-handoff
+project "$t/repo" main remote
+allow
+jmap
+issues
+jissue SCRUM-1 tend new
+COMMENT_FAIL=1 propose
+check "a Jira comment that fails after the pull request stops" test $? = 3
+check "and says a rerun finishes" said "run tend propose again to finish"
+jq 'map(.fields.labels = [])' "$HERDR_STATE/jira" >"$t/j" && mv "$t/j" "$HERDR_STATE/jira"
+propose 2
+check "the next pass finishes it, though the label is gone" test "$(jcomments SCRUM-1 | grep -c 'tend opened')" = 1
+check "without a second pull request" test "$(creates)" = 1
+check "and records it finished" test -s "$TEND_STATE"/intake/o_r-jira-SCRUM-1/linked
+
+scenario jira-declined
+project "$t/repo" main remote
+allow
+jmap
+issues
+jissue SCRUM-1 tend new
+DECLINE=1 propose
+check "a Jira request no proposal can be drafted from is answered" grep -q 'No proposal could be drafted from this request' <<<"$(jcomments SCRUM-1)"
+check "with the drafter's reason" grep -q '^It names no outcome' <<<"$(jcomments SCRUM-1)"
+check "and a marker to find it by" grep -q '^\[tend:declined [0-9]*\]$' <<<"$(jcomments SCRUM-1)"
+check "and loses its tend label" test "$(jq -r '.[0].fields.labels | length' "$HERDR_STATE/jira")" = 0
+check "its run folder is set aside" test -n "$(ls -d "$TEND_STATE"/intake/o_r-jira-SCRUM-1.declined-* 2>/dev/null)"
+
+jbuild() { "$tend" "$t/repo" SCRUM-7 >"$t/out${1:-}" 2>"$t/err${1:-}"; }
+scenario jira-build
+plain
+allow
+jmap
+jissue SCRUM-7 tend-build new "$rich"
+jbuild
+check "a Jira issue labelled tend-build is built, reviewed and published" passed
+check "the implementer is given the Jira issue as its scope" grep -q '^agent prompt impl-jira-scrum-7-[0-9]* Implement Jira issue SCRUM-7 .* Implement the spec (https://docs.test/spec)' "$HERDR_STATE/log"
+check "on branch tend/build-SCRUM-7, pushed" test -n "$(git -C "$t/repo.git" rev-parse --verify -q tend/build-SCRUM-7)"
+check "the commit message is asked to refer to the key" grep -q "^agent prompt impl-jira-scrum-7-.*End with the line 'Refs SCRUM-7'" "$HERDR_STATE/log"
+check "the Jira issue is told where its pull request is" grep -q 'tend opened https://example.test/pr/tend_build-SCRUM-7 ' <<<"$(jcomments SCRUM-7)"
+check "its attempt is named for the key and repository" test -d "$TEND_STATE/runs/jira-scrum-7-$(printf %s "$t/repo" | cksum | cut -d' ' -f1)"
+check "status finds it" grep -q '^attempt jira-scrum-7-.* of SCRUM-7: tend/build-SCRUM-7' <<<"$("$tend" status "$t/repo" SCRUM-7)"
+jbuild 2
+check "a rerun builds, reviews and comments nothing again" test "$(grep -c '^agent prompt impl-jira' "$HERDR_STATE/log") $(reviews) $(jcomments SCRUM-7 | grep -c 'tend opened')" = "2 1 1"
+
+scenario jira-ineligible
+plain
+allow
+jmap
+jissue SCRUM-7 "" new
+jissue SCRUM-8 tend-build done
+jbuild
+check "an unlabelled Jira issue is not built" test $? = 3 && said "issue SCRUM-7 is not labelled tend-build"
+"$tend" "$t/repo" SCRUM-8 >"$t/out" 2>"$t/err"
+check "a done one has nothing to do" test $? = 0 && said "issue SCRUM-8 is closed"
+"$tend" "$t/repo" OTHER-1 >"$t/out" 2>"$t/err"
+check "an unmapped project is refused" test $? = 3 && said "Jira project OTHER is not mapped"
+sed -i '' 's| [^ ]*$| git@github.com:someone/else.git|' "$TEND_STATE/jira"
+jbuild
+check "a project mapped to another repository is refused" test $? = 3 && said "not to this repository's origin"
 
 # The same attempts with the agents in rex, whose state is what each agent reports.
 rexwt() { git -C "$t/repo" worktree list --porcelain | awk '/^worktree /{w=substr($0,10)} /^branch refs\/heads\/grove\//{print w}'; }

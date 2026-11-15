@@ -140,6 +140,21 @@ hands its text to an agent running in auto mode, so only people who may label
 (triage access) can send requests. Approving the proposal (merging it) and
 planning its cycle stay with people.
 
+Jira is a second source of requests and work items; code, pull requests and
+reviews stay on GitHub. A line of `TEND_STATE/jira` maps a project to the
+repository it feeds, `<site> <project-key> <origin-url>` (the origin must also
+be listed in `publish`), and tend authenticates with `JIRA_EMAIL` and
+`JIRA_API_TOKEN` from the environment, through `curl` with the token on its
+standard input. `tend propose` then also drafts the project's issues labelled
+`tend` and not done, on `tend/jira-<KEY>`, and comments the pull request's URL
+on the Jira issue; `tend <repo> <KEY>` builds one labelled `tend-build` in a
+repository without Grove, as `issue-<n>` does, ending its commit message `Refs
+<KEY>`. Anyone who can create or edit issues in a mapped project can start an
+agent this way, so map only projects whose members you trust with that. A
+handoff stopped between the pull request and the Jira comment is finished by
+the next `tend propose`, which completes every intake folder with a `pr` and no
+`linked`. tend never moves Jira issues through their workflow.
+
 To cancel, stop tend (Ctrl-C or a kill). The agents keep their work and
 their turns. Stop an agent in its pane if you want it stopped too; running
 tend again carries on from what Git and the run folder hold.

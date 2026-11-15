@@ -37,10 +37,11 @@ import (
 
 var (
 	mode, state, repo, cycle, run       string
-	kind, n, target, branch, id, dir    string
+	kind, target, branch, id, dir       string
 	impl, root, what, notes, trailer, v string
 	head, pr, account, where            string
 	issue, rec                          any
+	item                                request  // the work item, when not a Grove cycle
 	lock                                *os.File // held open: its flock is the runner's
 	term                                terminal
 )
@@ -419,7 +420,7 @@ func overview() {
 		if a[0] != repo || !exists(d+"/status") || len(a) < 2 {
 			continue
 		}
-		if !isIssue(a[1]) && !cycleOpen(proj, a[1]) {
+		if !isItem(a[1]) && !cycleOpen(proj, a[1]) {
 			continue
 		}
 		line := strings.SplitN(cat(d+"/status"), "\n", 2)[0]
@@ -439,7 +440,7 @@ func overview() {
 	}
 	fmt.Println("Proposals to review (answer their questions, revise or merge):")
 	for _, p := range prs {
-		if strings.HasPrefix(str(get(p, "headRefName")), "tend/issue-") {
+		if h := str(get(p, "headRefName")); strings.HasPrefix(h, "tend/issue-") || strings.HasPrefix(h, "tend/jira-") {
 			fmt.Println(pull(p))
 		}
 	}
@@ -454,7 +455,7 @@ func overview() {
 		}
 	}
 	fmt.Println("Requests waiting for tend propose:")
-	handled, _ := quiet("gh", "pr", "list", "--state", "all", "--limit", "1000", "--json", "headRefName", "--jq", `[.[].headRefName | select(startswith("tend/issue-"))]`)
+	handled, _ := quiet("gh", "pr", "list", "--state", "all", "--limit", "1000", "--json", "headRefName", "--jq", `[.[].headRefName | select(startswith("tend/issue-") or startswith("tend/jira-"))]`)
 	done := list(parse(handled))
 	lines, _ := quiet("gh", "issue", "list", "--label", "tend", "--state", "open", "--json", "number,title,url", "--jq", `.[] | "  #\(.number) \(.title) \(.url)"`)
 	for _, line := range strings.Split(lines, "\n") {
@@ -464,6 +465,21 @@ func overview() {
 		num, _, _ := strings.Cut(strings.TrimPrefix(line, "  #"), " ")
 		if !slices.Contains(done, any("tend/issue-"+num)) {
 			fmt.Println(line)
+		}
+	}
+	origin := gitQ("remote", "get-url", "origin")
+	for _, m := range jiraMaps() {
+		if m.origin != origin {
+			continue
+		}
+		if os.Getenv("JIRA_EMAIL") == "" || os.Getenv("JIRA_API_TOKEN") == "" {
+			fmt.Printf("  Jira %s: not readable without JIRA_EMAIL and JIRA_API_TOKEN\n", m.project)
+			continue
+		}
+		for _, x := range jiraSearch(m, fmt.Sprintf(`project = "%s" AND labels = "tend" AND statusCategory != Done ORDER BY created ASC`, m.project)) {
+			if k := str(get(x, "key")); !slices.Contains(done, any("tend/jira-"+k)) {
+				fmt.Printf("  %s %s %s/browse/%s\n", k, str(get(x, "fields", "summary")), m.site, k)
+			}
 		}
 	}
 	os.Exit(0)
@@ -476,15 +492,21 @@ func runDirs() []string {
 }
 
 func isIssue(c string) bool { return regexp.MustCompile(`^issue-[0-9]`).MatchString(c) }
+func isItem(c string) bool  { return isIssue(c) || isJira(c) }
 
+// An issue's attempt is named after it and its repository: issue-7-<cksum>,
+// jira-scrum-5-<cksum>.
 func issueRun(c string) string {
+	if isJira(c) {
+		c = "jira-" + strings.ToLower(c)
+	}
 	return fmt.Sprintf("%s/runs/%s-%d", state, c, cksum([]byte(repo)))
 }
 
 // tend status <repo> <cycle>: the newest attempt at it, what it last recorded
 // and whether a tend is on it now. Reads only; takes no lock, prompts nobody.
 func status() {
-	if isIssue(cycle) {
+	if isItem(cycle) {
 		run = issueRun(cycle)
 		if !exists(run) {
 			fmt.Printf("no attempt at %s\n", cycle)
@@ -689,16 +711,19 @@ func postJSON(path string, body map[string]any) error {
 	return err
 }
 
-// tend propose <repo>: one pass of intake from the repository's GitHub issues.
-// Each open issue labelled tend, oldest first, becomes a Grove change drafted
-// by Claude with no one in the session, on branch tend/issue-<n>, opened as a
-// pull request by the publishing account; or, when no change can be drafted
-// from it, a comment on the issue saying why, and the label taken off, so it
-// is not tried again until a person puts it back. The issue's number is its
-// identity: a pull request from its branch, in any state, means it is handled.
-// At most CAP (default 5) proposal pull requests stay open per repository.
-// Each prompt is marked just before it goes, as in an attempt, so none is sent
-// twice or skipped.
+// tend propose <repo>: one pass of intake from the repository's GitHub issues
+// and the Jira projects mapped to it. Each open request labelled tend, oldest
+// first, becomes a Grove change drafted by Claude with no one in the session,
+// on branch tend/issue-<n> or tend/jira-<KEY>, opened as a pull request by the
+// publishing account; or, when no change can be drafted from it, a comment on
+// it saying why, and the label taken off, so it is not tried again until a
+// person puts it back. The request's number or key is its identity: a pull
+// request from its branch, in any state, means it is not drafted again. A
+// handoff is finished when the run folder records linked: a folder with a pull
+// request and no linked is completed on every pass, whatever the cap or the
+// request's label. At most CAP (default 5) proposal pull requests stay open
+// per repository. Each prompt is marked just before it goes, as in an attempt,
+// so none is sent twice or skipped.
 func propose() {
 	cd(repo)
 	account = accountOf()
@@ -716,85 +741,117 @@ func propose() {
 	if err != nil {
 		stop("gh cannot see %s's repository", repo)
 	}
+	prefix := state + "/intake/" + strings.ReplaceAll(slug, "/", "_") + "-"
 	limit, err := strconv.Atoi(os.Getenv("CAP"))
 	if err != nil {
 		limit = 5
 	}
-	nums, _ := out("gh", "issue", "list", "--label", "tend", "--state", "open", "--json", "number", "--jq", "sort_by(.number) | .[].number")
-	for _, num := range strings.Fields(nums) {
-		if s, _ := out("gh", "pr", "list", "--head", "tend/issue-"+num, "--state", "all", "--json", "url", "--jq", ".[0].url // empty"); s != "" {
+	origin := gitQ("remote", "get-url", "origin")
+
+	// Handoffs a stopped pass left unfinished.
+	folders, _ := filepath.Glob(prefix + "*")
+	for _, f := range folders {
+		rest := strings.TrimPrefix(f, prefix)
+		if strings.Contains(rest, ".declined-") || !exists(f+"/pr") || exists(f+"/linked") {
 			continue
 		}
-		o, _ := out("gh", "pr", "list", "--author", account, "--state", "open", "--json", "headRefName", "--jq", `[.[] | select(.headRefName | startswith("tend/issue-"))] | length`)
+		if k, isJ := strings.CutPrefix(rest, "jira-"); isJ {
+			draft(prefix, jiraGet(k))
+		} else {
+			draft(prefix, ghRequest(rest, "title,body,url"))
+		}
+	}
+
+	type pending struct {
+		branch string
+		get    func() request
+	}
+	var todo []pending
+	nums, _ := out("gh", "issue", "list", "--label", "tend", "--state", "open", "--json", "number", "--jq", "sort_by(.number) | .[].number")
+	for _, num := range strings.Fields(nums) {
+		todo = append(todo, pending{"tend/issue-" + num, func() request { return ghRequest(num, "title,body,url") }})
+	}
+	for _, m := range jiraMaps() {
+		if m.origin != origin {
+			continue
+		}
+		for _, x := range jiraSearch(m, fmt.Sprintf(`project = "%s" AND labels = "tend" AND statusCategory != Done ORDER BY created ASC`, m.project)) {
+			todo = append(todo, pending{"tend/jira-" + str(get(x, "key")), func() request { return jiraRequest(m, x) }})
+		}
+	}
+	for _, t := range todo {
+		if s, _ := out("gh", "pr", "list", "--head", t.branch, "--state", "all", "--json", "url", "--jq", ".[0].url // empty"); s != "" {
+			continue
+		}
+		o, _ := out("gh", "pr", "list", "--author", account, "--state", "open", "--json", "headRefName", "--jq", `[.[] | select(.headRefName | startswith("tend/issue-") or startswith("tend/jira-"))] | length`)
 		if open, _ := strconv.Atoi(o); open >= limit {
 			say("%d proposal pull requests are open, the cap; the rest wait", open)
 			break
 		}
-		draft(slug, num)
+		draft(prefix, t.get())
 	}
 	os.Exit(0)
 }
 
 const marker = "<!-- tend:declined"
 
-func draft(slug, num string) {
-	b := "tend/issue-" + num
-	run = state + "/intake/" + strings.ReplaceAll(slug, "/", "_") + "-" + num
+func draft(prefix string, r request) {
+	b := "tend/" + r.slug
+	run = prefix + r.folder
 	must("", os.MkdirAll(run, 0o755))
 	if !nonempty(run + "/id") {
 		write(run+"/id", strconv.FormatInt(time.Now().Unix(), 10)+"\n")
 	}
 	id = cat(run + "/id")
-	s, err := out("gh", "issue", "view", num, "--json", "title,body,url")
-	if err != nil {
-		stop("could not read issue #%s", num)
-	}
-	issue = parse(s)
-	worktreeFor(b, target, "tend: issue "+num)
+	issue = r.fields
+	worktreeFor(b, target, "tend: "+r.ref)
 	cd(dir)
-	impl = "prop-" + num
+	impl = "prop-" + r.agent
 
 	// Draft, unless an earlier run already has the outcome: a commit, or a reason.
 	if !commits(target+"..HEAD") && !nonempty(run+"/declined") {
 		implementer()
 		if !exists(run + "/asked") {
-			stage("working", impl+" drafts a proposal from issue #"+num, "tend has it commit the draft, then opens a pull request")
-			ask(impl, "/grove-propose --unattended "+quoted("GitHub issue "), run+"/asked")
+			stage("working", impl+" drafts a proposal from "+r.ref, "tend has it commit the draft, then opens a pull request")
+			ask(impl, "/grove-propose --unattended "+quoted(r.source), run+"/asked")
 		}
 		if term.status(impl) == "working" {
 			await(impl)
 		}
 		if exists(run + "/followed") {
-			stop("issue #%s: %s was asked to commit its draft or say why there is none, did neither, and is not working. Look at its pane, then commit the draft or write %s/declined, or delete %s/followed to have it asked again", num, impl, run, run)
+			stop("%s: %s was asked to commit its draft or say why there is none, did neither, and is not working. Look at its pane, then commit the draft or write %s/declined, or delete %s/followed to have it asked again", r.ref, impl, run, run)
 		}
-		stage("working", impl+" commits its proposal from issue #"+num, "tend opens a pull request, or tells the issue why there is none")
-		ask(impl, fmt.Sprintf("Without asking anyone: if you wrote a change, commit everything you wrote on this branch as one commit. Its subject proposes the change in this repository's commit style (see git log %s); its body says what the proposal asks for and why, for someone reading the history later, and ends with the line 'Refs #%s'. Then write to %s/summary, for the person who will review it, the change's open questions, the consequential ones (behavior, scope, compatibility, data, costly interfaces) first and marked so, the routine ones after. If you wrote no document, commit nothing and write to %s/declined, for the person who filed issue #%s, a few plain lines on why no proposal could be drafted and what the request would need.", target, num, run, run, num), run+"/followed")
+		stage("working", impl+" commits its proposal from "+r.ref, "tend opens a pull request, or tells the issue why there is none")
+		ask(impl, fmt.Sprintf("Without asking anyone: if you wrote a change, commit everything you wrote on this branch as one commit. Its subject proposes the change in this repository's commit style (see git log %s); its body says what the proposal asks for and why, for someone reading the history later, and ends with the line '%s'. Then write to %s/summary, for the person who will review it, the change's open questions, the consequential ones (behavior, scope, compatibility, data, costly interfaces) first and marked so, the routine ones after. If you wrote no document, commit nothing and write to %s/declined, for the person who filed %s, a few plain lines on why no proposal could be drafted and what the request would need.", target, r.refs, run, run, r.ref), run+"/followed")
 	}
 
 	switch {
 	case commits(target + "..HEAD"):
 		if !clean() {
-			stop("issue #%s: %s left uncommitted files in %s", num, impl, dir)
+			stop("%s: %s left uncommitted files in %s", r.ref, impl, dir)
 		}
 		changed := "\n" + git("diff", "--name-only", target+"...HEAD")
 		if !strings.Contains(changed, "\n"+root+"/changes/") {
-			stop("issue #%s: %s has commits but no change under %s/changes/", num, b, root)
+			stop("%s: %s has commits but no change under %s/changes/", r.ref, b, root)
 		}
-		stage("working", "publishing the proposal from issue #"+num, "a person reviews it")
-		if !pushAs(b) {
-			stop("could not push %s as %s", b, account)
-		}
+		stage("working", "publishing the proposal from "+r.ref, "a person reviews it")
 		var err error
 		pr, err = out("gh", "pr", "list", "--head", b, "--state", "all", "--json", "url", "--jq", ".[0].url // empty")
 		if err != nil {
 			stop("could not look for %s's pull request", b)
 		}
+		// Pushed only to open the pull request: once it exists the branch is
+		// people's, and may be gone after a merge.
 		if pr == "" {
+			if !pushAs(b) {
+				stop("could not push %s as %s", b, account)
+			}
 			pr, err = input(git("log", "-1", "--format=%b")+"\n", "gh", "pr", "create", "--base", target, "--head", b, "--title", git("log", "-1", "--format=%s"), "--body-file", "-")
 			if err != nil {
 				stop("could not open a pull request for %s; run tend propose again, and it looks for one before opening another", b)
 			}
 		}
+		write(run+"/pr", pr+"\n")
 		head = git("rev-parse", "HEAD")
 		posted, _ := out("gh", "api", reviewsAPI(), "--paginate", "--jq", fmt.Sprintf(`.[] | select(.user.login == "%s" and .commit_id == "%s") | .id`, account, head))
 		if posted == "" {
@@ -810,30 +867,30 @@ func draft(slug, num string) {
 			if q == "" {
 				q = "The drafter wrote no summary of open questions; see the proposal."
 			}
-			body := fmt.Sprintf("**Proposal drafted from #%s with no one in the session**\n\n%s\n\nMerging approves the change with any question still open, and its implementation may then choose those answers within Grove's rules. Answer the consequential ones before merging, by revising the proposal on `%s` (`/grove-propose %s`). Once merged, the change waits for a cycle: `/grove-plan`.", num, q, b, strings.Join(ids, " "))
+			body := fmt.Sprintf("**Proposal drafted from %s with no one in the session**\n\n%s\n\nMerging approves the change with any question still open, and its implementation may then choose those answers within Grove's rules. Answer the consequential ones before merging, by revising the proposal on `%s` (`/grove-propose %s`). Once merged, the change waits for a cycle: `/grove-plan`.", r.from, q, b, strings.Join(ids, " "))
 			if postJSON(reviewsAPI(), map[string]any{"commit_id": head, "event": "COMMENT", "body": body}) != nil {
 				stop("could not post the summary on %s", pr)
 			}
 		}
-		stage("done", "proposal from issue #"+num+" at "+pr, "a person answers its open questions, revises or merges it")
-		say("issue #%s: %s", num, pr)
+		if r.link != nil && r.link(pr) != nil {
+			stop("could not say on %s where its proposal is (%s); run tend propose again to finish", r.ref, pr)
+		}
+		write(run+"/linked", pr+"\n")
+		stage("done", "proposal from "+r.ref+" at "+pr, "a person answers its open questions, revises or merges it")
+		say("%s: %s", r.ref, pr)
 	case nonempty(run + "/declined"):
-		// Said on the issue once, found by the attempt's marker, then the label off.
-		said, _ := out("gh", "api", "repos/{owner}/{repo}/issues/"+num+"/comments", "--paginate", "--jq", fmt.Sprintf(`.[] | select(.user.login == "%s" and (.body | contains("%s %s"))) | .id`, account, marker, id))
-		if said == "" {
-			msg := fmt.Sprintf("No proposal could be drafted from this request:\n\n%s\n\nEdit the request and put the `tend` label back to have it tried again.\n\n%s %s -->\n", cat(run+"/declined"), marker, id)
-			if _, err := input(msg, "gh", "issue", "comment", num, "--body-file", "-"); err != nil {
-				stop("could not comment on issue #%s", num)
-			}
+		// Said on the request once, found by the attempt's marker, then the label off.
+		if r.decline(cat(run+"/declined"), id) != nil {
+			stop("could not comment on %s", r.ref)
 		}
-		if _, err := out("gh", "issue", "edit", num, "--remove-label", "tend"); err != nil {
-			stop("could not take the tend label off issue #%s", num)
+		if r.unlabel() != nil {
+			stop("could not take the tend label off %s", r.ref)
 		}
-		stage("done", "no proposal from issue #"+num+"; said why on it", "a person edits the request and labels it again")
+		stage("done", "no proposal from "+r.ref+"; said why on it", "a person edits the request and labels it again")
 		must("", os.Rename(run, run+".declined-"+id)) // a fresh attempt when the label comes back
-		say("issue #%s: no proposal, said why", num)
+		say("%s: no proposal, said why", r.ref)
 	default:
-		stop("issue #%s: %s committed no change and wrote no reason. Look at its pane, then commit the draft or write %s/declined, or delete %s/followed to have it asked again", num, impl, run, run)
+		stop("%s: %s committed no change and wrote no reason. Look at its pane, then commit the draft or write %s/declined, or delete %s/followed to have it asked again", r.ref, impl, run, run)
 	}
 	cd(repo)
 }
@@ -856,19 +913,24 @@ func draft(slug, num string) {
 // worktree is. The build is done when the branch has a commit and the
 // implementer's notes for the reviewer are in the run folder.
 func attempt() {
-	if isIssue(cycle) {
-		kind, n = "issue", strings.TrimPrefix(cycle, "issue-")
+	if isItem(cycle) {
+		kind = "issue"
 		cd(repo)
+		ref := "issue #" + strings.TrimPrefix(cycle, "issue-")
+		if isJira(cycle) {
+			ref = "issue " + cycle
+		}
 		if ok("grove", "changes", "--json") {
-			stop("%s uses Grove, so issue #%s is not built directly: label it tend for tend propose to draft a proposal, then approve and plan it", repo, n)
+			stop("%s uses Grove, so %s is not built directly: label it tend for tend propose to draft a proposal, then approve and plan it", repo, ref)
 		}
-		s, err := out("gh", "issue", "view", n, "--json", "title,body,url,state,labels")
-		if err != nil {
-			stop("could not read issue #%s", n)
+		if isJira(cycle) {
+			item = jiraGet(cycle)
+		} else {
+			item = ghRequest(strings.TrimPrefix(cycle, "issue-"), "title,body,url,state,labels")
 		}
-		issue = parse(s)
+		issue = item.fields
 		if str(get(issue, "state")) != "OPEN" {
-			say("issue #%s is closed; nothing to do", n)
+			say("%s is closed; nothing to do", item.ref)
 			os.Exit(0)
 		}
 		labelled := false
@@ -876,17 +938,18 @@ func attempt() {
 			labelled = labelled || str(get(l, "name")) == "tend-build"
 		}
 		if !labelled {
-			stop("issue #%s is not labelled tend-build, so it is not approved for building", n)
+			stop("%s is not labelled tend-build, so it is not approved for building", item.ref)
 		}
+		var err error
 		if target, err = out("gh", "repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name"); err != nil {
 			stop("gh cannot see %s's repository", repo)
 		}
-		branch = "tend/build-" + n
+		branch = "tend/build-" + item.key
 		id = filepath.Base(issueRun(cycle))
-		worktreeFor(branch, target, "tend: issue "+n)
+		worktreeFor(branch, target, "tend: "+item.ref)
 		cd(dir)
-		say("issue #%s on %s in %s", n, branch, dir)
-		what = "GitHub issue #" + n + ", quoted here: " + quoted("")
+		say("%s on %s in %s", item.ref, branch, dir)
+		what = item.named + ", quoted here: " + quoted("")
 	} else {
 		kind = "grove"
 		cd(repo)
@@ -930,7 +993,7 @@ func attempt() {
 	} else {
 		what += "; reproduce what it describes. The implementer's notes are in " + run + "/implemented"
 		notes = run + "/implemented"
-		trailer = "Closes #" + n
+		trailer = item.closes
 	}
 	// The prototype kept an attempt's verdicts and repair mark in .tend/ in the
 	// checkout. They move to the attempt's folder, never over a file there.
@@ -965,7 +1028,7 @@ func attempt() {
 		if kind == "grove" {
 			ask(impl, "/grove-implement "+cycle, "")
 		} else {
-			ask(impl, fmt.Sprintf("Implement GitHub issue #%s in this repository, asking no one. Its title and description are the agreed scope: %s Build what it asks and no more, with tests where the project has them, and commit on this branch. Then write to %s/implemented, for an independent reviewer, what you built, what you ran to check it, and anything the issue asks that you did not do and why.", n, quoted(""), run), "")
+			ask(impl, fmt.Sprintf("Implement %s in this repository, asking no one. Its title and description are the agreed scope: %s Build what it asks and no more, with tests where the project has them, and commit on this branch. Then write to %s/implemented, for an independent reviewer, what you built, what you ran to check it, and anything the issue asks that you did not do and why.", item.named, quoted(""), run), "")
 		}
 		built()
 	}
@@ -1066,7 +1129,7 @@ func unbuilt() string {
 	}
 	if kind == "issue" {
 		if !commits(target + "..HEAD") {
-			return branch + " has no commit for issue #" + n
+			return branch + " has no commit for " + item.ref
 		}
 		if !nonempty(run + "/implemented") {
 			return impl + " wrote no notes for the reviewer in " + run + "/implemented"
@@ -1235,6 +1298,9 @@ func publish() {
 	}
 	where = pr
 	write(run+"/pr", pr+"\n") // for tend watch to find; GitHub stays the record
+	if item.link != nil && item.link(pr) != nil {
+		stop("could not say on %s where its pull request is (%s); run tend again to finish", item.ref, pr)
+	}
 	say("published %s", pr)
 }
 
