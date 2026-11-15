@@ -183,8 +183,9 @@ implementer() {
 	local p
 	p=$(herdr pane list --workspace "$ws" | jq -r '[.result.panes[] | select(.agent == null)][0].pane_id // empty')
 	[ -n "$p" ] || p=$(split)
-	# Auto mode, so that routine commands ask nobody.
-	start "$impl" claude "$p" --permission-mode auto
+	# Auto mode, so that routine commands ask nobody. It may write in the run
+	# folder, where the commit message goes.
+	start "$impl" claude "$p" --permission-mode auto --add-dir "$run"
 }
 
 # Done is what Git holds, never what the pane's state says.
@@ -265,8 +266,9 @@ fi
 # 5. Publish, when origin is listed in $state/publish with the GitHub account to
 #    publish as, "<origin-url> <account>" a line; otherwise the verdict stays here.
 #    Every write is that account's, never the owner's, so the owner can approve:
-#    the branch pushed, never forced; one pull request, its description written
-#    once, from Grove, and left to people after; a review per reviewed head, as a
+#    the branch pushed, never forced; one pull request, squash-merge ready: its
+#    title and description the commit message the implementer writes, set once
+#    and left to people after; a review per reviewed head, as a
 #    comment since a PR's author may not approve or request changes; and the
 #    tend/review status on that head, so a later commit carries no passing result.
 #    The PR and reviews are looked up on GitHub each run, never remembered, so a
@@ -286,18 +288,18 @@ elif [ -n "$origin" ]; then
 		push -q origin "HEAD:refs/heads/$branch" ||
 		stop "could not push $branch to origin as $account; if it has commits this checkout lacks, look at them, then run tend again"
 	pr=$(gh pr list --head "$branch" --state all --json url --jq '.[0].url // empty') || stop "could not look for $branch's pull request"
+	# The PR is squash-merged: its title and description become the commit's, so
+	# the implementer, who knows what changed and why, writes them for the head.
 	if [ -z "$pr" ]; then
-		body=$(
-			printf 'Grove cycle `%s`: %s\n\n' "$cycle" "$(jq -r --arg c "$cycle" '[.cycles[]? | select(.id == $c) | .title][0] // ""' <<<"$proj")"
-			for id in $(jq -r '.changes[]' <<<"$rec"); do
-				printf -- '- `%s` %s, proposal at `%s`\n' "$id" "$(jq -r --arg i "$id" '[.changes[]? | select(.id == $i) | .title][0] // ""' <<<"$proj")" "$(ls -d "$root/changes/archive/$id"-*/proposal.md 2>/dev/null)"
-			done
-			printf '\nImplemented by tend, attempt `%s`. Its independent reviews are posted on this PR as comments, and the reviewed head carries the `tend/review` status. The implementer notes choices it made where the scope left a question open in each `implementation.md`. Merging is yours.\n\n' "$(jq -r .id <<<"$rec")"
-			echo '```text'
-			grove review 2>&1 | sed '/^diff --git/,$d'
-			echo '```'
-		)
-		pr=$(gh pr create --base "$target" --head "$branch" --title "$(jq -r --arg c "$cycle" '[.cycles[]? | select(.id == $c) | .title][0] // $c' <<<"$proj")" --body-file - <<<"$body") ||
+		msg=$run/message-$head
+		if [ ! -s "$msg" ]; then
+			implementer
+			stage working "$impl writes the commit message for ${head:0:7}" "tend opens the pull request with it"
+			ask "$impl" "Branch $branch is reviewed and will be squash-merged into $target: the pull request's title becomes the commit's subject and its description the commit's body. Write that commit message to $msg and nothing else. A subject of at most 72 characters in this repository's commit style (see git log $target), a blank line, then a body wrapped at 72 columns saying what the change does and why, for someone reading the history later who was not here. Describe the merged result, not how it was reached: no reviews, repairs, agents, tools, attempt IDs or file lists. End with the line 'Grove: $(jq -r '.changes | join(", ")' <<<"$rec")'. Commit nothing and leave the branch as it is."
+			[ -s "$msg" ] || stop "$impl settled without writing $msg; look at its pane, then run tend again"
+			[ "$(git rev-parse HEAD)" = "$head" ] && [ -z "$(git status --porcelain)" ] || stop "$impl changed the branch while writing the commit message"
+		fi
+		pr=$(gh pr create --base "$target" --head "$branch" --title "$(sed -n 1p "$msg")" --body-file - < <(sed 1,2d "$msg")) ||
 			stop "could not open a pull request for $branch; run tend again, and it looks for one before opening another"
 	fi
 	# Every verdict of the attempt on a commit of the branch, oldest first, so a
@@ -308,9 +310,12 @@ elif [ -n "$origin" ]; then
 		h=$(jq -r .head "$f")
 		valid "$f" "$h" && git merge-base --is-ancestor "$h" HEAD 2>/dev/null || continue
 		if ! grep -qx "$h" <<<"$posted"; then
-			jq --arg a "$(jq -r .id <<<"$rec")" '{commit_id: .head, event: "COMMENT", body: (
+			approves=
+			[ "$h" != "$head" ] || approves=$(grove review 2>&1 | sed '/^diff --git/,$d')
+			jq --arg a "$(jq -r .id <<<"$rec")" --arg approves "$approves" '{commit_id: .head, event: "COMMENT", body: (
 				"**Independent review of \(.head[0:7]): \(.conclusion)**\n\n\(.summary)\n\n"
 				+ (if .conclusion == "success" then "" elif .actionable then "The reviewer judged every finding an in-scope fix. tend repairs once, then a person decides.\n\n" else "A finding needs a decision from a person.\n\n" end)
+				+ (if $approves == "" then "" else "<details><summary>What merging approves, from grove review</summary>\n\n```text\n\($approves)\n```\n</details>\n\n" end)
 				+ "Codex reviewed this commit in a session apart from the implementer; tend posted it for attempt `\($a)`.")}' "$f" |
 				gh api "repos/{owner}/{repo}/pulls/${pr##*/}/reviews" --input - >/dev/null || stop "could not post the review of ${h:0:7} on $pr"
 		fi
