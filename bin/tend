@@ -2,12 +2,14 @@
 # One pass of the loop for one Grove cycle:
 #   grove claim -> Claude implements in a Herdr worktree pane -> Codex reviews
 #   the head -> at most one repair -> Codex reviews the new head -> with an
-#   origin listed in TEND_STATE/publish, the branch pushed and one pull request.
+#   origin listed in TEND_STATE/publish, one pull request, and changes a person
+#   requests on it made once.
 #
 #   tend <repo> <cycle-id>
 #   tend status <repo> <cycle-id>
+#   tend watch
 #
-# Run it inside a Herdr pane. Needs herdr, grove, git, jq, perl. TIMEOUT_MS bounds
+# Run it inside a Herdr pane. Needs herdr, grove, git, jq, perl, and gh to publish. TIMEOUT_MS bounds
 # each agent turn (default 30 minutes). Exit 0: reviewed, see the verdict. Exit 3:
 # a person is needed, and a Herdr notification says why. Exit 4: another tend
 # holds this runner.

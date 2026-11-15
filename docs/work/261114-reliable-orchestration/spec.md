@@ -15,9 +15,10 @@ below is historical evidence, not a claim about the checkout you find.
 **Next Tend work: finish slice 2, one real shared-runner workflow.** Slice 1 is
 done on `tend/slice1-claim-verdict` (not merged; merging is the owner's decision).
 Slice 2's publication is live on the private sandbox `mascah/tend-sandbox` as
-`mascah-bot`, PR #2; what remains is the owner, as the teammate, approving and
-merging through that PR (see the session handoff). Then slice 2a, acting on
-requested changes, which the owner agreed comes next. Preserve existing attempts and candidate branches. Do not
+`mascah-bot`; the owner approved PR #2 as the teammate. Slice 2a, acting on
+requested changes with `tend watch`, is written and passes its regressions; its
+live run waits for PR #2 to be merged, which unpauses Grove (see the session
+handoff). Preserve existing attempts and candidate branches. Do not
 start proposal polling or multi-repository scheduling first.
 
 Grove #164's implementation merged as #165 (`0083bba`). Check Grove's own record for
@@ -315,8 +316,8 @@ here describes delivery, not how strongly the architectural direction is agreed.
 | --- | --- | --- | --- |
 | G — Finish Grove #164 | Implementation merged as #165 (`0083bba`); acceptance per Grove's record | Existing Grove implementation and owner coordination | Invocation fix, outstanding behavioral findings and Grove's own acceptance |
 | 1 — Recoverable execution | Done on `tend/slice1-claim-verdict`, live interruptions demonstrated; not merged | Existing Tend prototype | [Recovery](#recoverable-execution), [review](#review-integrity), [Grove integration](#grove-integration-and-repository-configuration) |
-| 2 — One real shared-runner workflow | In progress: publication as `mascah-bot` live on sandbox PR #2; the teammate's approval and merge remain | Slice 1 | [Publication](#shared-review-and-publication) |
-| 2a — Act on requested changes | Not started; agreed next | Slice 2 | [Below](#2a--act-on-requested-changes) |
+| 2 — One real shared-runner workflow | In progress: publication as `mascah-bot` live; the teammate approved PR #2, its merge remains; squash commit message from the implementer not yet live | Slice 1 | [Publication](#shared-review-and-publication) |
+| 2a — Act on requested changes | In progress: written, local regressions pass; not live | Slice 2 | [Below](#2a--act-on-requested-changes) |
 | 3 — Explicit request-to-proposal intake | Not started | Slice 2 and G available | [Intake and handoffs](#request-intake-and-explicit-handoffs) |
 | 4 — Prove portability | Not started | Earlier lifecycle demonstrated | [Portability](#portability) |
 
@@ -642,6 +643,44 @@ separate account, `mascah-bot`, publish rather than the owner. Committed on
 Next action: the owner approves and merges PR #2 as the teammate, or requests
 changes (which Tend will not act on until slice 2a). Record what could and could
 not be judged from the PR alone, mark slice 2 done, then start slice 2a.
+
+2026-11-15 — PR description as the squash commit, and slice 2a. The owner squash-
+merges, so the PR title and description become the commit; they found the
+Grove-index description unhelpful for that (tool state, not what changed and
+why; unclean in history). Committed on `tend/slice1-claim-verdict`: `7964c29`
+(commit message), `150e694` (2a), and the docs commit after; not merged.
+
+- Commit message: before opening the PR, tend asks the implementer's session
+  (now started with `--add-dir <run folder>`) to write `message-<head>` there: a
+  subject in the repository's commit style, a body on what the merged change
+  does and why, no tool, review or attempt talk, ending `Grove: <change IDs>`.
+  It becomes the PR title and description, set once. `grove review`'s summary
+  moved into the bot's review of the head, collapsed.
+- 2a: after publishing, a `CHANGES_REQUESTED` review on the open PR's head is
+  given, with its line comments, to the implementer once (`request-<review id>`
+  written just before, as `repair-asked` is); the new head is reviewed by Codex
+  and published, the implementer's reply (`reply-<head>`) quoted in that review.
+  Asked with no commit and nobody working, it stops for a person. A request on an
+  older head counts as answered. No further automatic repair follows a requested
+  change; a failed Codex review of it is published for a person.
+- `tend watch` (`WATCH_SECONDS`, default 300): for each run folder with `pr` and
+  `attempt` files whose status is not `needs-you`, runs tend when `gh pr view`
+  shows the PR open with a change request on its head. Watch holds no lock; the
+  tend it runs does. Fixed on the way: the publish loop reused `$state`.
+- Checks: `dev/test.sh` passes 124. New: message asked once, PR title and body
+  from it, `--add-dir`; a requested change asked once with its body and line
+  comment, the new head reviewed and published with the reply, not asked again;
+  a stalled request neither repeated nor skipped until its mark is deleted; none
+  on a merged PR; watch idle without a request, running tend on one, skipping an
+  attempt that needs a person. Against `7964c29`, 14 of the new checks fail.
+- Not exercised live: any of this commit's behaviour. Known limits: a requested
+  change does not rewrite the PR description, so a scope-changing request leaves
+  it stale; when the implementer commits nothing (for example a request it judges
+  out of scope) tend stops for the runner's person, and nothing is said on the PR.
+
+Next action: the owner merges PR #2. Then plan a third sandbox cycle, run tend
+on it with `tend watch` in its own pane, and have the owner request changes on
+the bot's PR; record the commit message, the requested change and its reply.
 
 A suitable prompt for a future implementation session is:
 

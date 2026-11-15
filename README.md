@@ -30,6 +30,7 @@ Run it inside a Herdr pane:
 ```sh
 bin/tend <repo> <cycle-id>
 bin/tend status <repo> <cycle-id>
+bin/tend watch
 ```
 
 - Exit 0: the head is reviewed, and the verdict is printed.
@@ -70,14 +71,30 @@ only. Every write is that account's, which also lets you approve its PRs:
 
 - the branch is pushed over HTTPS, never forced; a branch someone else pushed
   to stops for you;
-- one pull request onto the target, its description written once from Grove
-  (the cycle, its changes, `grove review`'s summary) and then left to people;
-- each verdict of the attempt is a comment review on its own commit, and each
-  reviewed commit gets the `tend/review` status, so a later commit has no pass
-  until it is reviewed.
+- one pull request onto the target, ready to squash-merge: its title and
+  description are the commit message the implementer writes for the reviewed
+  head (what the change does and why, for a later reader of the history), set
+  when the PR opens and then left to people;
+- each verdict of the attempt is a comment review on its own commit, the
+  head's with `grove review`'s summary folded in, and each reviewed commit
+  gets the `tend/review` status, so a later commit has no pass until it is
+  reviewed.
 
 The PR and the reviews are looked up on GitHub each run, never remembered, so
 a rerun after any interruption repeats neither. tend never merges.
+
+When a person requests changes (GitHub's "Request changes") on the PR's head,
+the next run gives their review and line comments to the implementer's own
+session once, has the new head reviewed and publishes it, with the
+implementer's reply in the review. `request-<review id>` in the run folder
+records the ask just before it goes; asked with no commit since and nobody
+working, it stops for you, as the repair does. Plain comments are not acted
+on, and the PR description is not rewritten.
+
+`tend watch` runs in a pane of its own and does that without you: every
+`WATCH_SECONDS` (default 300) it runs tend on each attempt whose PR is open
+with a change request on its head. An attempt waiting for you is left alone
+until you have run tend on it.
 
 To cancel, stop tend (Ctrl-C or a kill). The agents keep their work and
 their turns. Stop an agent in its pane if you want it stopped too; running
