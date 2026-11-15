@@ -35,6 +35,9 @@ turn() { # name text
 			done
 			git add -A && git commit -qm build
 			[ -z "${BLOCK_AFTER_BUILD:-}" ] || block=$1 ;;
+		"Implement GitHub issue"*)
+			echo "built" >>a.txt && git commit -qam "Build the issue"
+			[ -n "${NO_NOTES:-}" ] || echo "Built it; ran the tests." >"$(grep -oE '[^ ,]*/implemented' <<<"$2" | head -1)" ;;
 		*"requested changes at commit"*)
 			echo plainer >>a.txt && git commit -qam "As asked"
 			echo "Made it plainer, as asked." >"$(grep -oE '[^ ]*/reply-[0-9]+' <<<"$2")" ;;
@@ -96,7 +99,7 @@ case "$1 $2" in
 	said "$(cat "$s/status-$3" 2>/dev/null || echo idle)" ;;
 "agent prompt")
 	case $3 in
-	impl-*) case $4 in /grove-implement*) fail=${IMPL_FAIL:-} ;; *"requested changes at commit"*) fail=${REQUEST_FAIL:-} ;; *) fail=${REPAIR_FAIL:-} ;; esac ;;
+	impl-*) case $4 in /grove-implement* | "Implement GitHub issue"*) fail=${IMPL_FAIL:-} ;; *"requested changes at commit"*) fail=${REQUEST_FAIL:-} ;; *) fail=${REPAIR_FAIL:-} ;; esac ;;
 	prop-*) case $4 in /grove-propose*) fail=${PROPOSE_FAIL:-} ;; *) fail=${FOLLOW_FAIL:-} ;; esac ;;
 	*) fail=${REV_FAIL:-} ;;
 	esac
@@ -145,9 +148,9 @@ case "$1 $2" in
 	done | jq -s --arg h "$(arg --head "$@")" --arg a "$(arg --author "$@")" --arg st "$(arg --state "$@")" '
 		if $h != "" then map(select(.headRefName == $h)) elif $a != "" then map(select(.author == $a and .state == "OPEN")) elif $st == "all" then . else map(select(.state == "OPEN")) end' |
 		if q=$(arg --jq "$@") && [ -n "$q" ]; then jq -r "$q"; else cat; fi ;;
-"repo view") echo o/r ;;
+"repo view") case "$*" in *defaultBranchRef*) echo main ;; *) echo o/r ;; esac ;;
 "issue list") jq '[.[] | select(.state == "OPEN" and (.labels | index("tend")))]' "$s/issues" | jq -r "$(arg --jq "$@")" ;;
-"issue view") jq --argjson n "$3" '.[] | select(.number == $n) | {title, body, url}' "$s/issues" ;;
+"issue view") jq --argjson n "$3" '.[] | select(.number == $n) | {title, body, url, state, labels: (.labels | map({name: .}))}' "$s/issues" ;;
 "issue comment")
 	[ -f "$s/comments" ] || echo '[]' >"$s/comments"
 	jq --argjson n "$3" --arg by "$by" --rawfile b /dev/stdin '. + [{issue: $n, body: $b, user: {login: $by}}]' "$s/comments" >"$s/c.new" && mv "$s/c.new" "$s/comments" ;;
@@ -229,7 +232,7 @@ scenario() {
 	t=$top/$name
 	mkdir -p "$t/state"
 	export HERDR_STATE=$t/state TEND_STATE=$t/tend
-	unset REVIEW IMPL_FAIL IMPL_SLEEP REPAIR_FAIL REV_FAIL BLOCK_AFTER_BUILD CREATE_LOST REQUEST_FAIL PROPOSE_FAIL FOLLOW_FAIL DECLINE EDIT_FAIL CAP
+	unset NO_NOTES REVIEW IMPL_FAIL IMPL_SLEEP REPAIR_FAIL REV_FAIL BLOCK_AFTER_BUILD CREATE_LOST REQUEST_FAIL PROPOSE_FAIL FOLLOW_FAIL DECLINE EDIT_FAIL CAP
 }
 run() { "$tend" "$t/repo" 261114-k0000 >"$t/out${1:-}" 2>"$t/err${1:-}"; } # [suffix for out and err]
 reviews() { grep -c '^agent prompt rev-' "$HERDR_STATE/log"; }
@@ -545,6 +548,69 @@ issues 1:tend 2:tend
 FOLLOW_FAIL=agent_prompt_stalled WATCH_ONCE=1 "$tend" watch "$t/repo" >/dev/null 2>&1
 WATCH_ONCE=1 "$tend" watch "$t/repo" >/dev/null 2>&1
 check "and leaves a request that needs a person" test "$(follows)" = 2
+
+# A repository without Grove, with origin; a GitHub issue is the work item.
+plain() {
+	git init -q -b main "$t/repo" && (cd "$t/repo" && echo x >a.txt && git add -A && git commit -qm init &&
+		git clone -q --bare . "$t/repo.git" && git remote add origin "$t/repo.git" && git fetch -q origin && git branch -q -u origin/main)
+}
+build() { "$tend" "$t/repo" issue-7 >"$t/out${1:-}" 2>"$t/err${1:-}"; }
+bworktree() { git -C "$t/repo" worktree list --porcelain | awk '/^worktree /{w=substr($0,10)} $0 == "branch refs/heads/tend/build-7" {print w}'; }
+
+scenario issue-build
+plain
+allow
+issues 7:tend-build
+build
+check "an issue labelled tend-build is built, reviewed and published without Grove" test $? = 0 -a "$(jq -r .conclusion "$t/out" 2>/dev/null)" = success
+check "the implementer is given the issue as its scope" grep -q '^agent prompt impl-issue-7-[0-9]* Implement GitHub issue #7 .* Request 7. Make thing 7 better.' "$HERDR_STATE/log"
+check "the reviewer is given the issue and the implementer's notes" grep -q "^agent prompt rev-.*what it must do is GitHub issue #7, quoted here: Request 7.*notes are in $TEND_STATE/runs/issue-7-" "$HERDR_STATE/log"
+check "on branch tend/build-7, pushed" test "$(git -C "$t/repo.git" rev-parse tend/build-7 2>&1)" = "$(git -C "$(bworktree)" rev-parse HEAD)"
+check "the commit message is asked to close the issue" grep -q "^agent prompt impl-issue-7-.*End with the line 'Closes #7'" "$HERDR_STATE/log"
+check "one pull request by the account" test "$(cat "$HERDR_STATE/pr-tend_build-7.by")" = the-bot
+check "its review shows no grove review" test "$(grep -c 'What merging approves' "$HERDR_STATE/reviews")" = 0
+check "status finds the attempt" grep -q '^attempt issue-7-.* of issue-7: tend/build-7' <<<"$("$tend" status "$t/repo" issue-7)"
+check "the overview lists it to review" grep -A1 '^Implementations to review' <<<"$("$tend" status "$t/repo")" | grep -q 'Add the file'
+build 2
+check "a rerun neither builds nor reviews again" test "$(grep -c '^agent prompt impl-issue-7-[0-9]* Implement' "$HERDR_STATE/log") $(reviews)" = "1 1"
+
+scenario issue-ineligible
+plain
+allow
+issues 7:tend
+build
+check "an issue without tend-build stops, not approved" test $? = 3 -a "$(grep -c '^agent prompt' "$HERDR_STATE/log")" = 0
+check "and says so" grep -q 'not labelled tend-build' "$t/err"
+jq 'map(.state = "CLOSED")' "$HERDR_STATE/issues" >"$t/i" && mv "$t/i" "$HERDR_STATE/issues"
+build 2
+check "a closed issue is done: exit 0, nothing run" test $? = 0 -a "$(grep -c '^agent prompt' "$HERDR_STATE/log")" = 0
+
+scenario issue-no-notes
+plain
+allow
+issues 7:tend-build
+NO_NOTES=1 build
+check "a build without notes for the reviewer stops" test $? = 3
+check "and says so" grep -q 'wrote no notes for the reviewer' "$t/err"
+
+scenario issue-survivor
+plain
+allow
+issues 7:tend-build
+IMPL_FAIL=timeout build
+check "an issue build whose prompt timed out stops" test $? = 3
+agent working impl
+build 2
+check "the rerun waits for the implementer on the same branch and passes" test $? = 0 -a "$(jq -r .conclusion "$t/out2")" = success
+check "without prompting it again" test "$(grep -c '^agent prompt impl-issue-7-[0-9]* Implement' "$HERDR_STATE/log")" = 1
+
+scenario issue-repair
+plain
+allow
+issues 7:tend-build
+REVIEW=repairable build
+check "an issue build is repaired once and passes" test $? = 0 -a "$(jq -r .conclusion "$t/out")" = success
+check "the repair is told to update the notes" grep -q "^agent prompt impl-issue-7-.*update $TEND_STATE/runs/issue-7-[0-9]*/implemented where a claim changes" "$HERDR_STATE/log"
 
 scenario publish-diverged
 project "$t/repo" main remote

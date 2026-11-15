@@ -84,22 +84,23 @@ stage() { # kind text next
 # JSON, GitHub and this runner's run folders. Reads only.
 if [ "$mode" = status ] && [ -z "$cycle" ]; then
 	cd "$repo"
-	proj=$(grove changes --json) || { echo "grove changes --json failed in $repo"; exit 1; }
+	proj=$(grove changes --json 2>/dev/null) || proj='{"changes": [], "cycles": []}' # a repository without Grove
 	echo "Approved changes without a cycle (plan one: /grove-plan):"
 	jq -r '.changes[] | select(.state == "approved" and .cycle == null) | "  \(.id) \(.title)\(if .ready then "" else ", not ready" end)"' <<<"$proj"
 	echo "Cycles not done:"
 	jq -r '.cycles[] | select(.done | not) | "  \(.id) \(.title): \(.verdict)"' <<<"$proj"
-	echo "Attempts on this runner, for cycles not done:"
+	echo "Attempts on this runner, for cycles not done and issues:"
 	for d in "$state"/runs/*/; do
 		[ "$(sed -n 1p "$d/attempt" 2>/dev/null)" = "$repo" ] && [ -f "$d/status" ] || continue
-		jq -e --arg c "$(sed -n 2p "$d/attempt")" 'any(.cycles[]; .id == $c and (.done | not))' <<<"$proj" >/dev/null || continue
+		c=$(sed -n 2p "$d/attempt")
+		case $c in issue-[0-9]*) ;; *) jq -e --arg c "$c" 'any(.cycles[]; .id == $c and (.done | not))' <<<"$proj" >/dev/null || continue ;; esac
 		printf '  %s (%s): %s\n' "$(basename "$d")" "$(sed -n 2p "$d/attempt")" "$(head -1 "$d/status" | cut -d' ' -f2-)"
 	done
 	if prs=$(gh pr list --state open --json number,title,headRefName,url,reviewDecision 2>/dev/null); then
 		echo "Proposals to review (answer their questions, revise or merge):"
 		jq -r '.[] | select(.headRefName | startswith("tend/issue-")) | "  #\(.number) \(.title) \(.url)"' <<<"$prs"
 		echo "Implementations to review (review and merge):"
-		jq -r '.[] | select(.headRefName | startswith("grove/")) | "  #\(.number) \(.title) \(.url)\(if .reviewDecision == "CHANGES_REQUESTED" then ", changes requested: tend makes them on its next run" else "" end)"' <<<"$prs"
+		jq -r '.[] | select(.headRefName | startswith("grove/") or startswith("tend/build-")) | "  #\(.number) \(.title) \(.url)\(if .reviewDecision == "CHANGES_REQUESTED" then ", changes requested: tend makes them on its next run" else "" end)"' <<<"$prs"
 		echo "Requests waiting for tend propose:"
 		handled=$(gh pr list --state all --limit 1000 --json headRefName --jq '[.[].headRefName | select(startswith("tend/issue-"))]' 2>/dev/null || echo '[]')
 		gh issue list --label tend --state open --json number,title,url --jq '.[] | "  #\(.number) \(.title) \(.url)"' 2>/dev/null |
@@ -110,10 +111,17 @@ if [ "$mode" = status ] && [ -z "$cycle" ]; then
 	exit 0
 fi
 if [ "$mode" = status ]; then
-	rec=$(cd "$repo" && grove changes --json | jq -c --arg c "$cycle" '[.runs[]? | select(.cycle == $c)][0] // empty')
-	[ -n "$rec" ] || { echo "no attempt at $cycle"; exit 0; }
-	run=$state/runs/$(jq -r .id <<<"$rec")
-	jq -r '"attempt \(.id) of \(.cycle): \(.branch) in \(.checkout)"' <<<"$rec"
+	case $cycle in
+	issue-[0-9]*)
+		run=$state/runs/$cycle-$(printf %s "$repo" | cksum | cut -d' ' -f1)
+		[ -d "$run" ] || { echo "no attempt at $cycle"; exit 0; }
+		echo "attempt $(basename "$run") of $cycle: tend/build-${cycle#issue-}" ;;
+	*)
+		rec=$(cd "$repo" && grove changes --json | jq -c --arg c "$cycle" '[.runs[]? | select(.cycle == $c)][0] // empty')
+		[ -n "$rec" ] || { echo "no attempt at $cycle"; exit 0; }
+		run=$state/runs/$(jq -r .id <<<"$rec")
+		jq -r '"attempt \(.id) of \(.cycle): \(.branch) in \(.checkout)"' <<<"$rec" ;;
+	esac
 	if ! perl -MFcntl=:flock -e 'open(my $f, ">>", $ARGV[0]) or exit 1; flock($f, LOCK_EX | LOCK_NB) or exit 1' "$state/lock" &&
 		grep -qF "cycle $cycle in $repo" "$state/lock"; then
 		echo "tend is on it: $(cat "$state/lock")"
@@ -218,6 +226,20 @@ push_as() { # branch
 		push -q origin "HEAD:refs/heads/$1"
 }
 
+# The worktree holding branch, opened in Herdr, or a new one from base: sets dir
+# and ws. A branch is found wherever its worktree is, so a rerun finds its work.
+worktree_for() { # branch base label
+	dir=$(git -C "$repo" worktree list --porcelain | awk -v b="branch refs/heads/$1" '/^worktree /{w=substr($0,10)} $0 == b {print w}')
+	if [ -n "$dir" ]; then
+		ws=$(herdr worktree list --cwd "$repo" | jq -r --arg p "$dir" '.result.worktrees[] | select(.path == $p) | .open_workspace_id // empty')
+		[ -n "$ws" ] || ws=$(herdr worktree open --cwd "$repo" --path "$dir" --no-focus | jq -r .result.workspace.workspace_id)
+	else
+		local wt
+		wt=$(herdr worktree create --cwd "$repo" --branch "$1" --base "$2" --label "$3" --no-focus)
+		dir=$(jq -r .result.worktree.path <<<"$wt") ws=$(jq -r .result.workspace.workspace_id <<<"$wt")
+	fi
+}
+
 # The project as Grove publishes it: root, target branch and the attempt records,
 # newest first, from origin/grove/runs or, without origin, the local grove/runs.
 project() { grove changes --json || stop "grove changes --json failed in $PWD"; }
@@ -244,20 +266,13 @@ if [ "$mode" = propose ]; then
 	marker="<!-- tend:declined"
 
 	draft() { # issue number
-		local n=$1 b=tend/issue-$1 issue wt id ids
+		local n=$1 b=tend/issue-$1 issue id ids
 		run=$state/intake/${slug//\//_}-$n
 		mkdir -p "$run"
 		[ -s "$run/id" ] || date +%s >"$run/id"
 		id=$(cat "$run/id")
 		issue=$(gh issue view "$n" --json title,body,url) || stop "could not read issue #$n"
-		dir=$(git -C "$repo" worktree list --porcelain | awk -v b="branch refs/heads/$b" '/^worktree /{w=substr($0,10)} $0 == b {print w}')
-		if [ -n "$dir" ]; then
-			ws=$(herdr worktree list --cwd "$repo" | jq -r --arg p "$dir" '.result.worktrees[] | select(.path == $p) | .open_workspace_id // empty')
-			[ -n "$ws" ] || ws=$(herdr worktree open --cwd "$repo" --path "$dir" --no-focus | jq -r .result.workspace.workspace_id)
-		else
-			wt=$(herdr worktree create --cwd "$repo" --branch "$b" --base "$target" --label "tend: issue $n" --no-focus)
-			dir=$(jq -r .result.worktree.path <<<"$wt") ws=$(jq -r .result.workspace.workspace_id <<<"$wt")
-		fi
+		worktree_for "$b" "$target" "tend: issue $n"
 		cd "$dir"
 		impl=prop-$n
 
@@ -319,33 +334,75 @@ if [ "$mode" = propose ]; then
 	exit 0
 fi
 
-# 1. The attempt. The newest record for this cycle, if its checkout still holds
-#    its branch; otherwise a new worktree and a claim made inside it, so the
-#    attempt's branch is the worktree's.
-proj=$(cd "$repo" && project)
-target=$(jq -r .target <<<"$proj")
-rec=$(jq -c --arg c "$cycle" '[.runs[]? | select(.cycle == $c)][0] // empty' <<<"$proj")
-dir=$(jq -r '.checkout // empty' <<<"$rec")
-if [ -n "$dir" ] && [ "$(git -C "$dir" branch --show-current 2>/dev/null)" = "$(jq -r .branch <<<"$rec")" ]; then
-	ws=$(herdr worktree list --cwd "$repo" | jq -r --arg p "$dir" '.result.worktrees[] | select(.path == $p) | .open_workspace_id // empty')
-	[ -n "$ws" ] || ws=$(herdr worktree open --cwd "$repo" --path "$dir" --no-focus | jq -r .result.workspace.workspace_id)
+# 1. The attempt, and what the work item says it must do. Two kinds of work item:
+#
+#    A Grove cycle. The newest record for it, if its checkout still holds its
+#    branch; otherwise a new worktree and a claim made inside it, so the attempt's
+#    branch is the worktree's. Grove holds approval, eligibility and the scope; the
+#    build is done when each change is archived on the branch.
+#
+#    issue-<n>, a GitHub issue of the repository, with or without Grove. It is
+#    approved by the tend-build label, which only people who may label can put on;
+#    it may start while it is open and labelled, and a closed one is done. Its
+#    title and description are the scope. Its branch is tend/build-<n>, found
+#    wherever its worktree is. The build is done when the branch has a commit and
+#    the implementer's notes for the reviewer are in the run folder.
+case $cycle in
+issue-[0-9]*)
+	kind=issue n=${cycle#issue-}
+	cd "$repo"
+	issue=$(gh issue view "$n" --json title,body,url,state,labels) || stop "could not read issue #$n"
+	if [ "$(jq -r .state <<<"$issue")" != OPEN ]; then say "issue #$n is closed; nothing to do"; exit 0; fi
+	jq -e '.labels | map(.name) | index("tend-build")' <<<"$issue" >/dev/null ||
+		stop "issue #$n is not labelled tend-build, so it is not approved for building"
+	target=$(gh repo view --json defaultBranchRef --jq .defaultBranchRef.name) || stop "gh cannot see $repo's repository"
+	branch=tend/build-$n
+	id=issue-$n-$(printf %s "$repo" | cksum | cut -d' ' -f1)
+	worktree_for "$branch" "$target" "tend: issue $n"
 	cd "$dir"
-	say "carrying on attempt $(jq -r .id <<<"$rec") in $dir"
-else
-	wt=$(herdr worktree create --cwd "$repo" --branch "tend-$(date +%H%M%S)" --base "$target" --label "tend: $cycle" --no-focus)
-	dir=$(jq -r .result.worktree.path <<<"$wt")
-	ws=$(jq -r .result.workspace.workspace_id <<<"$wt")
-	cd "$dir"
-	grove claim "$cycle" >/dev/null || stop "grove claim refused $cycle"
-	rec=$(project | jq -c --arg b "$(git branch --show-current)" '[.runs[]? | select(.branch == $b)][0] // empty')
-	[ -n "$rec" ] || stop "claimed $cycle, but Grove shows no record for $(git branch --show-current)"
-	say "claimed $cycle as attempt $(jq -r .id <<<"$rec") in $dir"
-fi
-branch=$(jq -r .branch <<<"$rec")
-impl=impl-$(jq -r .id <<<"$rec")
-root=$(project | jq -r .root) # the attempt's, not the caller's
-run=$state/runs/$(jq -r .id <<<"$rec")
+	say "issue #$n on $branch in $dir"
+	what="GitHub issue #$n, quoted here: $(jq -r '"\(.title). \(.body) (\(.url))"' <<<"$issue" | tr '\n' ' ')"
+	;;
+*)
+	kind=grove
+	proj=$(cd "$repo" && project)
+	target=$(jq -r .target <<<"$proj")
+	rec=$(jq -c --arg c "$cycle" '[.runs[]? | select(.cycle == $c)][0] // empty' <<<"$proj")
+	dir=$(jq -r '.checkout // empty' <<<"$rec")
+	if [ -n "$dir" ] && [ "$(git -C "$dir" branch --show-current 2>/dev/null)" = "$(jq -r .branch <<<"$rec")" ]; then
+		ws=$(herdr worktree list --cwd "$repo" | jq -r --arg p "$dir" '.result.worktrees[] | select(.path == $p) | .open_workspace_id // empty')
+		[ -n "$ws" ] || ws=$(herdr worktree open --cwd "$repo" --path "$dir" --no-focus | jq -r .result.workspace.workspace_id)
+		cd "$dir"
+		say "carrying on attempt $(jq -r .id <<<"$rec") in $dir"
+	else
+		wt=$(herdr worktree create --cwd "$repo" --branch "tend-$(date +%H%M%S)" --base "$target" --label "tend: $cycle" --no-focus)
+		dir=$(jq -r .result.worktree.path <<<"$wt")
+		ws=$(jq -r .result.workspace.workspace_id <<<"$wt")
+		cd "$dir"
+		grove claim "$cycle" >/dev/null || stop "grove claim refused $cycle"
+		rec=$(project | jq -c --arg b "$(git branch --show-current)" '[.runs[]? | select(.branch == $b)][0] // empty')
+		[ -n "$rec" ] || stop "claimed $cycle, but Grove shows no record for $(git branch --show-current)"
+		say "claimed $cycle as attempt $(jq -r .id <<<"$rec") in $dir"
+	fi
+	branch=$(jq -r .branch <<<"$rec")
+	id=$(jq -r .id <<<"$rec")
+	root=$(project | jq -r .root) # the attempt's, not the caller's
+	;;
+esac
+impl=impl-$id
+run=$state/runs/$id
 mkdir -p "$run"
+# What the reviewer is told the change must do, where the implementer's claims
+# are, and the line that ends the squash commit message.
+if [ "$kind" = grove ]; then
+	what="in the change folders that diff moves into $root/changes/archive/ (proposal.md, specs, tasks.md, implementation.md); reproduce each scenario the change spec gives"
+	notes=implementation.md
+	trailer="Grove: $(jq -r '.changes | join(", ")' <<<"$rec")"
+else
+	what="$what; reproduce what it describes. The implementer's notes are in $run/implemented"
+	notes=$run/implemented
+	trailer="Closes #$n"
+fi
 # The prototype kept an attempt's verdicts and repair mark in .tend/ in the
 # checkout. They move to the attempt's folder, never over a file already there.
 if [ -d .tend ]; then
@@ -359,9 +416,14 @@ printf '%s\n%s\n' "$repo" "$cycle" >"$run/attempt" # for tend watch
 # Done is what Git holds, never what the pane's state says.
 unbuilt() { # prints why the branch is not a finished candidate, or nothing
 	[ -z "$(git status --porcelain)" ] || { echo "$branch has uncommitted files"; return; }
-	local id
-	for id in $(jq -r '.changes[]' <<<"$rec"); do
-		ls -d "$root/changes/archive/$id"-* >/dev/null 2>&1 || { echo "change $id is not archived on $branch"; return; }
+	if [ "$kind" = issue ]; then
+		[ -n "$(git rev-list "$target..HEAD")" ] || { echo "$branch has no commit for issue #$n"; return; }
+		[ -s "$run/implemented" ] || echo "$impl wrote no notes for the reviewer in $run/implemented"
+		return
+	fi
+	local c
+	for c in $(jq -r '.changes[]' <<<"$rec"); do
+		ls -d "$root/changes/archive/$c"-* >/dev/null 2>&1 || { echo "change $c is not archived on $branch"; return; }
 	done
 }
 
@@ -392,7 +454,7 @@ review() {
 		start "$rev" codex "$rpane" -s workspace-write -a never --add-dir "$run"
 	fi
 	stage working "$rev reviews ${head:0:7}" "tend waits for its verdict"
-	ask "$rev" "You are the independent reviewer of branch $branch at commit $head. You did not write it and nobody can answer questions. The change is 'git diff $target...HEAD'; what it must do is in the change folders that diff moves into $root/changes/archive/ (proposal.md, specs, tasks.md, implementation.md). Check the code against those requirements, run the project's tests, and reproduce each scenario the change spec gives. Report only material findings: a defect, an unmet requirement, or a claim in implementation.md the code does not support. Edit, stage and commit nothing. Your only output is the file $v, exactly this JSON shape: {\"head\": \"$head\", \"conclusion\": \"success or failure\", \"actionable\": true or false, \"summary\": \"findings with file:line and what you ran\"}. actionable is true only when every finding is an in-scope code fix that needs no decision from the owner."
+	ask "$rev" "You are the independent reviewer of branch $branch at commit $head. You did not write it and nobody can answer questions. The change is 'git diff $target...HEAD'; what it must do is $what. Check the code against those requirements and run the project's tests. Report only material findings: a defect, an unmet requirement, or a claim in $notes the code does not support. Edit, stage and commit nothing. Your only output is the file $v, exactly this JSON shape: {\"head\": \"$head\", \"conclusion\": \"success or failure\", \"actionable\": true or false, \"summary\": \"findings with file:line and what you ran\"}. actionable is true only when every finding is an in-scope code fix that needs no decision from the owner."
 	# The pane said the turn ended; only the file says a review happened.
 	valid "$v" "$head" || stop "$rev settled without a valid verdict for ${head:0:7}; look at pane $rpane"
 	herdr pane close "$rpane" >/dev/null
@@ -404,7 +466,11 @@ review() {
 if [ -n "$(unbuilt)" ]; then
 	implementer
 	stage working "$impl implements $cycle" "tend waits for $impl, then has the head reviewed"
-	ask "$impl" "/grove-implement $cycle"
+	if [ "$kind" = grove ]; then
+		ask "$impl" "/grove-implement $cycle"
+	else
+		ask "$impl" "Implement GitHub issue #$n in this repository, asking no one. Its title and description are the agreed scope: $(jq -r '"\(.title). \(.body) (\(.url))"' <<<"$issue" | tr '\n' ' ') Build what it asks and no more, with tests where the project has them, and commit on this branch. Then write to $run/implemented, for an independent reviewer, what you built, what you ran to check it, and anything the issue asks that you did not do and why."
+	fi
 	why=$(unbuilt)
 	[ -z "$why" ] || stop "$why"
 fi
@@ -422,7 +488,7 @@ if [ "$(jq -r .conclusion "$v")" = failure ] && [ "$(jq -r .actionable "$v")" = 
 			stop "the repair asked of $impl for ${reviewed:0:7} has no commit and $impl is not working on it. Look at its pane, then commit a fix and run tend again, or delete $run/repair-asked to have it asked once more"
 		implementer
 		stage working "$impl repairs ${reviewed:0:7}" "tend waits for $impl, then has the repair reviewed"
-		ask "$impl" "An independent review of commit $reviewed found problems. Its findings: $(jq -r .summary "$v") Fix each one that is in scope, run the tests, update implementation.md where a claim changes, and commit. Ask no one." "$run/repair-asked"
+		ask "$impl" "An independent review of commit $reviewed found problems. Its findings: $(jq -r .summary "$v") Fix each one that is in scope, run the tests, update $notes where a claim changes, and commit. Ask no one." "$run/repair-asked"
 		why=$(unbuilt)
 		[ -z "$why" ] || stop "$why"
 		[ "$(git rev-parse HEAD)" != "$reviewed" ] ||
@@ -461,7 +527,7 @@ publish() {
 		if [ ! -s "$msg" ]; then
 			implementer
 			stage working "$impl writes the commit message for ${head:0:7}" "tend opens the pull request with it"
-			ask "$impl" "Branch $branch is reviewed and will be squash-merged into $target: the pull request's title becomes the commit's subject and its description the commit's body. Write that commit message to $msg and nothing else. A subject of at most 72 characters in this repository's commit style (see git log $target), a blank line, then a body wrapped at 72 columns saying what the change does and why, for someone reading the history later who was not here. Describe the merged result, not how it was reached: no reviews, repairs, agents, tools, attempt IDs or file lists. End with the line 'Grove: $(jq -r '.changes | join(", ")' <<<"$rec")'. Commit nothing and leave the branch as it is."
+			ask "$impl" "Branch $branch is reviewed and will be squash-merged into $target: the pull request's title becomes the commit's subject and its description the commit's body. Write that commit message to $msg and nothing else. A subject of at most 72 characters in this repository's commit style (see git log $target), a blank line, then a body wrapped at 72 columns saying what the change does and why, for someone reading the history later who was not here. Describe the merged result, not how it was reached: no reviews, repairs, agents, tools, attempt IDs or file lists. End with the line '$trailer'. Commit nothing and leave the branch as it is."
 			[ -s "$msg" ] || stop "$impl settled without writing $msg; look at its pane, then run tend again"
 			[ "$(git rev-parse HEAD)" = "$head" ] && [ -z "$(git status --porcelain)" ] || stop "$impl changed the branch while writing the commit message"
 		fi
@@ -482,8 +548,8 @@ publish() {
 			-f description="Independent review of ${h:0:7}: $(jq -r .conclusion "$f")" -f target_url="$pr" >/dev/null ||
 			stop "could not set the tend/review status on ${h:0:7}"
 		approves=
-		[ "$h" != "$head" ] || approves=$(grove review 2>&1 | sed '/^diff --git/,$d')
-		jq --arg a "$(jq -r .id <<<"$rec")" --arg approves "$approves" --arg reply "$(cat "$run/reply-$h" 2>/dev/null)" '{commit_id: .head, event: "COMMENT", body: (
+		[ "$h" != "$head" ] || [ "$kind" != grove ] || approves=$(grove review 2>&1 | sed '/^diff --git/,$d')
+		jq --arg a "$id" --arg approves "$approves" --arg reply "$(cat "$run/reply-$h" 2>/dev/null)" '{commit_id: .head, event: "COMMENT", body: (
 				"**Independent review of \(.head[0:7]): \(.conclusion)**\n\n\(.summary)\n\n"
 				+ (if .conclusion == "success" then "" elif .actionable then "The reviewer judged every finding an in-scope fix. tend repairs once, then a person decides.\n\n" else "A finding needs a decision from a person.\n\n" end)
 				+ (if $reply == "" then "" else "The implementer, on the changes requested:\n\n\($reply | split("\n") | map("> " + .) | join("\n"))\n\n" end)
@@ -511,19 +577,19 @@ requested() { # the newest change request on the open PR's head, as JSON, or not
 while [ -n "$pr" ]; do
 	req=$(requested) || stop "could not read the reviews of $pr"
 	[ -n "$req" ] || break
-	id=$(jq -r .id <<<"$req") who=$(jq -r .user.login <<<"$req")
-	[ ! -e "$run/request-$id" ] || [ "$(agent_status "$impl")" = working ] ||
-		stop "the changes $who requested on $pr (review $id) were asked of $impl, which committed nothing and is not working on them. Look at its pane, then commit and run tend again, or delete $run/request-$id to have them asked once more"
-	comments=$(gh api "repos/{owner}/{repo}/pulls/${pr##*/}/reviews/$id/comments" --paginate --jq '.[] | "\(.path):\(.line // .original_line // "?"): \(.body)"') ||
-		stop "could not read the comments of review $id on $pr"
+	rid=$(jq -r .id <<<"$req") who=$(jq -r .user.login <<<"$req")
+	[ ! -e "$run/request-$rid" ] || [ "$(agent_status "$impl")" = working ] ||
+		stop "the changes $who requested on $pr (review $rid) were asked of $impl, which committed nothing and is not working on them. Look at its pane, then commit and run tend again, or delete $run/request-$rid to have them asked once more"
+	comments=$(gh api "repos/{owner}/{repo}/pulls/${pr##*/}/reviews/$rid/comments" --paginate --jq '.[] | "\(.path):\(.line // .original_line // "?"): \(.body)"') ||
+		stop "could not read the comments of review $rid on $pr"
 	implementer
 	stage working "$impl makes the changes $who requested at ${head:0:7}" "tend waits for $impl, then has the new head reviewed and published"
-	ask "$impl" "$who, reviewing the pull request for $branch, requested changes at commit $head. Their review: $(jq -r .body <<<"$req")${comments:+ Their comments on lines: $comments} Make the changes they ask for that are within the agreed scope, run the tests, update implementation.md where a claim changes, and commit. Then write to $run/reply-$id, for $who, a few plain lines on what you changed and anything you did not and why. Ask no one." "$run/request-$id"
+	ask "$impl" "$who, reviewing the pull request for $branch, requested changes at commit $head. Their review: $(jq -r .body <<<"$req")${comments:+ Their comments on lines: $comments} Make the changes they ask for that are within the agreed scope, run the tests, update $notes where a claim changes, and commit. Then write to $run/reply-$rid, for $who, a few plain lines on what you changed and anything you did not and why. Ask no one." "$run/request-$rid"
 	why=$(unbuilt)
 	[ -z "$why" ] || stop "$why"
 	[ "$(git rev-parse HEAD)" != "$head" ] ||
-		stop "$impl committed nothing for the changes $who requested on $pr. Look at its pane, then commit and run tend again, or delete $run/request-$id to have them asked once more"
-	[ ! -s "$run/reply-$id" ] || mv "$run/reply-$id" "$run/reply-$(git rev-parse HEAD)"
+		stop "$impl committed nothing for the changes $who requested on $pr. Look at its pane, then commit and run tend again, or delete $run/request-$rid to have them asked once more"
+	[ ! -s "$run/reply-$rid" ] || mv "$run/reply-$rid" "$run/reply-$(git rev-parse HEAD)"
 	review
 	publish
 done
