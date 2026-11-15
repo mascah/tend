@@ -4,6 +4,7 @@
 #   the head -> at most one repair -> Codex reviews the new head.
 #
 #   tend <repo> <cycle-id>
+#   tend status <repo> <cycle-id>
 #
 # Run it inside a Herdr pane. Needs herdr, grove, git, jq, perl. TIMEOUT_MS bounds
 # each agent turn (default 30 minutes). Exit 0: reviewed, see the verdict. Exit 3:
@@ -14,14 +15,17 @@
 # runs Grove publishes, built from the archive on the attempt's branch, reviewed
 # from a valid verdict file named after the head. Its files live under TEND_STATE
 # (default ~/.local/state/tend), one folder per attempt, never in the candidate.
-# After exit 3, or a kill, the same line tries to carry on; recovery is still
-# incomplete.
+# After exit 3, or a kill, the same line carries on: an agent still working is
+# waited for, never prompted again, and the one repair is used once asked.
 set -euo pipefail
+mode=run
+[ "${1:-}" != status ] || { mode=status; shift; }
 repo=$(cd "$1" && pwd) cycle=$2
 
 say() { printf 'tend: %s\n' "$*" >&2; }
 stop() {
 	say "$*"
+	stage needs-you "$*" "a person deals with that, then runs tend again"
 	herdr notification show "tend $cycle needs you" --body "$*" --sound request >/dev/null 2>&1 || true
 	exit 3
 }
@@ -35,6 +39,32 @@ stop() {
 state=${TEND_STATE:-${XDG_STATE_HOME:-$HOME/.local/state}/tend}
 mkdir -p "$state/runs"
 state=$(cd "$state" && pwd) # tend changes into the attempt later
+
+# What the attempt is doing, for tend status: when, a kind (working, needs-you or
+# done) and what, then the next action. Written whole or not at all.
+stage() { # kind text next
+	[ -n "${run:-}" ] || return 0
+	printf '%s %s: %s\nnext: %s\n' "$(date +%FT%T%z)" "$1" "$2" "$3" >"$run/status.tmp" && mv "$run/status.tmp" "$run/status"
+}
+
+# tend status: the newest attempt at the cycle, what it last recorded and whether
+# a tend is on it now. Reads only; takes no lock and prompts nobody.
+if [ "$mode" = status ]; then
+	rec=$(cd "$repo" && grove changes --json | jq -c --arg c "$cycle" '[.runs[]? | select(.cycle == $c)][0] // empty')
+	[ -n "$rec" ] || { echo "no attempt at $cycle"; exit 0; }
+	run=$state/runs/$(jq -r .id <<<"$rec")
+	jq -r '"attempt \(.id) of \(.cycle): \(.branch) in \(.checkout)"' <<<"$rec"
+	if ! perl -MFcntl=:flock -e 'open(my $f, ">>", $ARGV[0]) or exit 1; flock($f, LOCK_EX | LOCK_NB) or exit 1' "$state/lock" &&
+		grep -qF "cycle $cycle in $repo" "$state/lock"; then
+		echo "tend is on it: $(cat "$state/lock")"
+	elif grep -q '^[^ ]* working:' "$run/status" 2>/dev/null; then
+		head -1 "$run/status"
+		echo "next: tend stopped before this finished; run it again, and it waits for an agent still working rather than prompting it again"
+		exit 0
+	fi
+	cat "$run/status" 2>/dev/null || echo "nothing recorded yet"
+	exit 0
+fi
 holder=$(perl -MFcntl=:flock -e '
 	my ($file, $tend) = @ARGV;
 	open(my $f, ">>", $file) or die "tend: $file: $!\n";
@@ -70,14 +100,36 @@ start() { # name kind pane [agent args...]
 	herdr agent wait "$name" --until idle --until done --timeout 60000 >/dev/null 2>&1 || stop "$name did not start"
 }
 
-# Prompt an agent and wait for it to settle. Blocked, unknown or timed out is a
-# person's to deal with; the loop answers no dialog but the trust one above.
-ask() { # name text
-	local out st
-	out=$(herdr agent prompt "$1" "$2" --wait --timeout "${TIMEOUT_MS:-1800000}" 2>&1) ||
-		stop "$1: $(jq -r '.error.code // "prompt failed"' <<<"$out" 2>/dev/null)"
-	st=$(jq -r .result.agent.agent_status <<<"$out")
-	case $st in idle | done) ;; *) stop "$1 is $st" ;; esac
+agent_status() { herdr agent get "$1" 2>/dev/null | jq -r '.result.agent.agent_status // empty' || true; }
+
+# Carry on only if a prompt or wait settled the agent idle or done.
+settled() { # name herdr-output
+	local st
+	st=$(jq -r '.result.agent.agent_status // empty' <<<"$2" 2>/dev/null || true)
+	case $st in
+	idle | done) ;;
+	"") stop "$1: $(jq -r '.error.code // "no answer"' <<<"$2" 2>/dev/null || echo "no answer")" ;;
+	*) stop "$1 is $st" ;;
+	esac
+}
+
+# Prompt an agent and wait for it to settle. An agent still working, as after tend
+# was killed, is waited for and not prompted again. Blocked or unknown is a
+# person's; the loop answers no dialog but the trust one above. A timeout or stall
+# does not prove a prompt undelivered, so nothing here sends one twice. MARK, if
+# given, records HEAD just before the prompt is sent.
+ask() { # name text [mark]
+	local st
+	st=$(agent_status "$1")
+	case $st in
+	working)
+		say "$1 is still working on an earlier prompt; waiting for it, not prompting again"
+		settled "$1" "$(herdr agent wait "$1" --timeout "${TIMEOUT_MS:-1800000}" 2>&1)"
+		return ;;
+	blocked | unknown) stop "$1 is $st; look at it, then run tend again" ;;
+	esac
+	[ -z "${3:-}" ] || { git rev-parse HEAD >"$3.tmp" && mv "$3.tmp" "$3"; }
+	settled "$1" "$(herdr agent prompt "$1" "$2" --wait --timeout "${TIMEOUT_MS:-1800000}" 2>&1)"
 }
 
 # The project as Grove publishes it: root, target branch and the attempt records,
@@ -117,6 +169,8 @@ if [ -d .tend ]; then
 	for f in .tend/*; do [ ! -e "$f" ] || [ -e "$run/${f#.tend/}" ] || mv "$f" "$run/"; done
 	if rmdir .tend 2>/dev/null; then say "moved .tend/ to $run"; else stop "left in .tend/, as $run holds the same: $(ls -A .tend)"; fi
 fi
+# The prototype wrote repaired before sending the repair, so it means asked.
+[ ! -e "$run/repaired" ] || [ -e "$run/repair-asked" ] || mv "$run/repaired" "$run/repair-asked"
 
 # A pane of the workspace to split from, and a new one for a new agent.
 split() { herdr pane split "$(herdr pane list --workspace "$ws" | jq -r '.result.panes[0].pane_id')" --direction right --cwd "$dir" --no-focus | jq -r .result.pane.pane_id; }
@@ -161,8 +215,13 @@ review() {
 		say "set aside an invalid verdict for ${head:0:7}"
 	fi
 	rev=rev-${head:0:7}
-	rpane=$(split)
-	start "$rev" codex "$rpane" -s workspace-write -a never --add-dir "$run"
+	# A reviewer left by an earlier run, working or not, is reused, not started again.
+	rpane=$(herdr agent get "$rev" 2>/dev/null | jq -r '.result.agent.pane_id // empty' || true)
+	if [ -z "$rpane" ]; then
+		rpane=$(split)
+		start "$rev" codex "$rpane" -s workspace-write -a never --add-dir "$run"
+	fi
+	stage working "$rev reviews ${head:0:7}" "tend waits for its verdict"
 	ask "$rev" "You are the independent reviewer of branch $branch at commit $head. You did not write it and nobody can answer questions. The change is 'git diff $target...HEAD'; what it must do is in the change folders that diff moves into $root/changes/archive/ (proposal.md, specs, tasks.md, implementation.md). Check the code against those requirements, run the project's tests, and reproduce each scenario the change spec gives. Report only material findings: a defect, an unmet requirement, or a claim in implementation.md the code does not support. Edit, stage and commit nothing. Your only output is the file $v, exactly this JSON shape: {\"head\": \"$head\", \"conclusion\": \"success or failure\", \"actionable\": true or false, \"summary\": \"findings with file:line and what you ran\"}. actionable is true only when every finding is an in-scope code fix that needs no decision from the owner."
 	# The pane said the turn ended; only the file says a review happened.
 	valid "$v" "$head" || stop "$rev settled without a valid verdict for ${head:0:7}; look at pane $rpane"
@@ -174,24 +233,35 @@ review() {
 # 2. Implement, unless the branch already holds a finished candidate.
 if [ -n "$(unbuilt)" ]; then
 	implementer
+	stage working "$impl implements $cycle" "tend waits for $impl, then has the head reviewed"
 	ask "$impl" "/grove-implement $cycle"
 	why=$(unbuilt)
 	[ -z "$why" ] || stop "$why"
 fi
 
-# 3. Review the head. 4. One repair, then review the new head.
+# 3. Review the head. 4. One repair, then review the new head. The repair is used
+#    once asked: repair-asked holds the reviewed head, written just before the
+#    prompt goes. Asked of this head with no commit since, it is either still being
+#    worked on, and waited for, or its outcome is unknown, and that is a person's.
 review
-if [ "$(jq -r .conclusion "$v")" = failure ] && [ "$(jq -r .actionable "$v")" = true ] && [ ! -f "$run/repaired" ]; then
+if [ "$(jq -r .conclusion "$v")" = failure ] && [ "$(jq -r .actionable "$v")" = true ]; then
 	reviewed=$(git rev-parse HEAD)
-	echo "$reviewed" >"$run/repaired"
-	implementer
-	ask "$impl" "An independent review of commit $reviewed found problems. Its findings: $(jq -r .summary "$v") Fix each one that is in scope, run the tests, update implementation.md where a claim changes, and commit. Ask no one."
-	why=$(unbuilt)
-	[ -z "$why" ] || stop "$why"
-	[ "$(git rev-parse HEAD)" != "$reviewed" ] || stop "$impl committed no repair"
-	review
+	asked=$(cat "$run/repair-asked" 2>/dev/null || true)
+	if [ -z "$asked" ] || [ "$asked" = "$reviewed" ]; then
+		[ -z "$asked" ] || [ "$(agent_status "$impl")" = working ] ||
+			stop "the repair asked of $impl for ${reviewed:0:7} has no commit and $impl is not working on it. Look at its pane, then commit a fix and run tend again, or delete $run/repair-asked to have it asked once more"
+		implementer
+		stage working "$impl repairs ${reviewed:0:7}" "tend waits for $impl, then has the repair reviewed"
+		ask "$impl" "An independent review of commit $reviewed found problems. Its findings: $(jq -r .summary "$v") Fix each one that is in scope, run the tests, update implementation.md where a claim changes, and commit. Ask no one." "$run/repair-asked"
+		why=$(unbuilt)
+		[ -z "$why" ] || stop "$why"
+		[ "$(git rev-parse HEAD)" != "$reviewed" ] ||
+			stop "$impl committed no repair to ${reviewed:0:7}. Look at its pane, then commit a fix and run tend again, or delete $run/repair-asked to have it asked once more"
+		review
+	fi
 fi
 
 herdr notification show "tend $cycle: $(jq -r .conclusion "$v")" --body "$branch at $(jq -r .head "$v" | cut -c1-7) is ready for you" --sound done >/dev/null 2>&1 || true
+stage done "$(jq -r .conclusion "$v") for ${branch} at $(jq -r .head "$v" | cut -c1-7), verdict $v" "a person reviews $branch and decides whether to merge it"
 say "done: $branch, verdict $v"
 jq . "$v"

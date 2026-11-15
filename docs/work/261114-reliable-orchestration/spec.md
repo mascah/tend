@@ -14,9 +14,9 @@ below is historical evidence, not a claim about the checkout you find.
 
 **Next Tend work: slice 1, recoverable execution.** Remote claim discovery,
 verdict validation, the configured target branch, runtime files outside the
-candidate and a controller lock are done (see the session handoff). Next, make
-repair delivery and surviving-agent reconciliation explicit, then demonstrate
-real interruptions. Preserve existing attempts and candidate
+candidate, a controller lock, explicit repair delivery, waiting for a surviving
+agent and `tend status` are done with stand-in agents (see the session handoff).
+Next, demonstrate real interruptions with live agents through Herdr. Preserve existing attempts and candidate
 branches. Do not start proposal polling or multi-repository
 scheduling first.
 
@@ -307,7 +307,7 @@ here describes delivery, not how strongly the architectural direction is agreed.
 | Slice | Status | Prerequisites | Acceptance |
 | --- | --- | --- | --- |
 | G — Finish Grove #164 | In progress externally | Existing Grove implementation and owner coordination | Invocation fix, outstanding behavioral findings and Grove's own acceptance |
-| 1 — Recoverable execution | In progress: claim lookup, verdict validation, target branch, run files outside the candidate, controller lock done on `tend/slice1-claim-verdict` (not merged) | Existing Tend prototype | [Recovery](#recoverable-execution), [review](#review-integrity), [Grove integration](#grove-integration-and-repository-configuration) |
+| 1 — Recoverable execution | In progress: lifecycle done with stand-in agents on `tend/slice1-claim-verdict` (not merged); live interruption demonstrations remain | Existing Tend prototype | [Recovery](#recoverable-execution), [review](#review-integrity), [Grove integration](#grove-integration-and-repository-configuration) |
 | 2 — One real shared-runner workflow | Not started | Slice 1 | [Publication](#shared-review-and-publication) |
 | 3 — Explicit request-to-proposal intake | Not started | Slice 2 and G available | [Intake and handoffs](#request-intake-and-explicit-handoffs) |
 | 4 — Prove portability | Not started | Earlier lifecycle demonstrated | [Portability](#portability) |
@@ -468,6 +468,45 @@ visible rather than skipped or retried without bound. Before any prompt, establi
 whether the named agent is still working, and observe or ask a person instead of
 re-prompting. Add a minimal status that shows stage and next action from the run
 folder. Then run the live interruption demonstrations.
+
+2026-11-14 — Slice 1, third unit: repair delivery, surviving agents and status.
+Code written and local regressions passed; committed on `tend/slice1-claim-verdict`
+after `03d7ddf`; not merged.
+
+- Surviving agent: before any prompt, tend reads the agent's Herdr status. If it is
+  `working`, tend waits for it (`agent wait`) and does not prompt it again. If it is
+  `blocked` or `unknown`, tend stops for a person. A reviewer left by an earlier run
+  is reused instead of started again under its live name. No prompt is ever resent
+  after a timeout or stall; Herdr's own guidance says those do not prove non-delivery.
+- Repair: `repair-asked` (the reviewed head, written atomically just before the
+  prompt is sent) consumes the one repair. If that head has no commit since and the
+  implementer is not working, the outcome is unknown: tend stops on every run until a
+  person commits a fix or deletes `repair-asked`. A prompt refused before sending
+  (blocked implementer) does not consume it. A legacy `repaired` is read as asked.
+- Status: tend writes `runs/<attempt>/status` atomically (time, kind
+  `working`/`needs-you`/`done`, what, next action). `tend status <repo> <cycle>`
+  shows it, takes no lock, and says whether a tend is on the attempt now. If none
+  is while the kind is `working`, it says to run tend again.
+- Cancel: stopping tend leaves agents and work intact; resume is running tend again.
+  No separate cancel command; stopping an agent is done in its pane. (README.)
+- Checks: `dev/test.sh` passes all 63 checks. New this unit: a normal repair; a stalled
+  repair prompt neither skipped nor resent, and asked again only after a person
+  deletes the marker; a blocked implementer not consuming the repair; surviving
+  implementer, reviewer and repairer waited for and not re-prompted; status while
+  running, after a stop and after `kill -9`. Against the previous `bin/tend`, 19
+  of the new checks fail, including the reproduced bug where a rerun after an undelivered
+  repair exited 0 with the failed verdict. The stand-in Herdr now refuses prompts
+  to a blocked agent, as Herdr documents.
+- Not exercised: any of this with live Herdr, Claude or Codex; Herdr's real
+  `agent get`/`agent wait` output was checked by shape only, read-only against
+  an idle agent of the owner's.
+
+Next action: slice 1's remaining acceptance is the live demonstrations. With the
+owner's agreement to spend agent usage, run the ledger fixture through Herdr and
+interrupt it during implementation, review and repair. Include `kill -9` of tend
+while an agent keeps working, with a planted defect for the repair. Record what
+each showed and what stays untested. Then slice 1 can be marked done and slice 2
+started.
 
 A suitable prompt for a future implementation session is:
 

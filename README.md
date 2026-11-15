@@ -28,6 +28,7 @@ Run it inside a Herdr pane:
 
 ```sh
 bin/tend <repo> <cycle-id>
+bin/tend status <repo> <cycle-id>
 ```
 
 - Exit 0: the head is reviewed, and the verdict is printed.
@@ -42,10 +43,28 @@ An attempt from before this, with a `.tend/` folder in its checkout, has
 those files moved to its folder on the next run, and a name clash stops for
 you rather than overwriting either.
 
-The same line attempts to carry on after exit 3 or a kill, with or without
-`origin`. Recovery is still incomplete: an interrupted repair can be skipped,
-and a surviving agent is not reconciled before a restart prompts again. See the plan before relying on it. `TIMEOUT_MS` sets the prompt wait timeout
-(default 30 minutes); stopping the underlying agent has not been demonstrated.
+After exit 3, or a kill, the same line carries on, with or without `origin`:
+
+- An agent still working, as after tend was killed mid-turn, is waited for
+  and never prompted again. A blocked or unknown agent stops for you.
+- A timed-out or stalled prompt is not assumed undelivered, so tend never
+  sends it twice.
+- The one repair is used once asked: `repair-asked` records the reviewed head
+  just before the prompt goes. If that head has no commit since and the
+  implementer is not working, the outcome is unknown, and tend stops for you
+  on every run until you commit a fix or delete `repair-asked` to have it asked
+  once more. A repair refused before sending, such as by a blocked
+  implementer, is not used.
+
+`tend status` says which attempt the cycle has, whether a tend is on it now,
+what it last recorded and the next action, including "run it again" when
+tend was killed. It reads only, so it works while tend runs.
+
+To cancel, stop tend (Ctrl-C or a kill). The agents keep their work and
+their turns. Stop an agent in its pane if you want it stopped too; running
+tend again carries on from what Git and the run folder hold.
+`TIMEOUT_MS` sets the prompt wait timeout (default 30 minutes); a timeout
+does not stop the agent.
 
 To try it on a disposable repo, with a checkout of Grove beside this one:
 
@@ -64,7 +83,9 @@ whose agents act at once. It starts no agent and needs no Grove checkout.
 | Is there an attempt? | The newest record for the cycle in `grove changes --json` (from `origin/grove/runs`, or the local `grove/runs` without `origin`), whose `checkout` still holds its `branch`. |
 | Is it built? | Every change of the record is under `changes/archive/` on that branch, and the tree is clean. |
 | Is the head reviewed? | `runs/<attempt>/verdict-<head>.json` names that head and has a `success` or `failure` conclusion, a boolean `actionable` and a `summary`. A cached file that does not is kept as `.rejected-<time>` and the head is reviewed again. |
-| Was the repair used? | `runs/<attempt>/repaired` exists. |
+| Was the repair used? | `runs/<attempt>/repair-asked` exists (a prototype's `repaired` is read as asked). |
+| What is it doing? | `runs/<attempt>/status`: the last stage and next action. |
+| Is an agent still on a turn? | Herdr's status for its name: `working` is waited for. |
 
 A pane's state says a turn ended, never that the work is done.
 
@@ -113,7 +134,8 @@ Not yet shown:
 
 - a defect found in the implementer's own work;
 - a remote: a push, a pull request, a tracker, a second person;
-- an agent killed in the middle of a turn;
+- an agent killed in the middle of a turn, or tend killed while one works,
+  with live agents (shown only with a stand-in for Herdr);
 - whether the Herdr notification reaches a phone;
 - tmux without Herdr, a saved SSH machine, two cycles at once.
 
