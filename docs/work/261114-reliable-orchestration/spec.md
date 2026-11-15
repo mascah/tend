@@ -12,9 +12,8 @@ Read this document and the repository instructions, then inspect the current
 branch, worktrees, diff and relevant implementation before acting. The baseline
 below is historical evidence, not a claim about the checkout you find.
 
-**Next Tend work: slice 3, explicit request-to-proposal intake, once its open
-decisions are settled with the owner** (first tracker, the cap on unmerged
-proposal PRs, mapping requests to repositories; see Deferred scope). Slices 1, 2
+**Next Tend work: slice 3, explicit request-to-proposal intake.** Its open
+decisions are settled (see slice 3 below). Slices 1, 2
 and 2a are done on `tend/slice1-claim-verdict` (not merged; merging is the
 owner's decision), slices 2 and 2a shown live on the private sandbox
 `mascah/tend-sandbox`, publishing as `mascah-bot`, with the owner as the teammate
@@ -363,6 +362,15 @@ driven by GitHub webhooks and the Claude GitHub App, so it would fix the branch
 outside Tend's lock, records, review and repair bound, as another identity.
 
 ### 3 — Explicit request-to-proposal intake
+
+Settled with the owner on 2026-11-15:
+
+- First tracker: GitHub Issues.
+- Cap: at most 5 unmerged proposal PRs per repository. Proposals need a person's
+  revision and approval; a longer queue is not reviewed, only accumulated.
+- Request to repository: an issue's own repository receives its proposal, and a
+  runner takes requests only from repositories it lists for publication. A tracker
+  that spans repositories (Jira, Linear) will need an explicit mapping when added.
 
 Select the first tracker before implementation; GitHub is the practical candidate
 given the current repositories, but the provider is not a prerequisite for slice 1.
