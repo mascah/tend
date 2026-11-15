@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// rex: a session per worktree, labelled after its folder, and an agent per
+// rex: a session per worktree, first named after its folder, and an agent per
 // block, labelled with its name and running it as the block's program, so the
 // name goes when the agent exits. Agent state is what the agent itself reports
 // with the program status protocol (OSC 7501), which Claude Code and Codex
@@ -33,25 +33,43 @@ func (r *rex) worktree(b, base, _ string) string {
 	return d
 }
 
+// The session recorded for the worktree in $state/rex-sessions ("<session-id>
+// <path>" a line) while rex still has it, or a new one named after the
+// folder. Agents in rex may rename their session, so the name finds nothing.
 func (r *rex) open(d string) {
 	r.dir, r.session = d, ""
-	label := filepath.Base(d)
 	s, err := rexCmd("ls", "--json")
 	if err != nil {
 		stop("rex lists no sessions; is its server running?")
 	}
+	live := map[string]bool{}
 	for _, x := range list(get(parse(s), "sessions")) {
-		if str(get(x, "label")) == label && r.session == "" {
-			r.session = str(get(x, "session_id"))
+		live[str(get(x, "session_id"))] = true
+	}
+	for _, line := range strings.Split(cat(state+"/rex-sessions"), "\n") {
+		if id, path, _ := strings.Cut(line, " "); live[id] && sameDir(path, d) {
+			r.session = id
 		}
 	}
-	if r.session == "" {
-		s, err = rexCmd("new", label, "-c", d, "--json")
-		if err != nil {
-			stop("rex could not open a session for %s", d)
-		}
-		r.session = str(get(parse(s), "session_id"))
+	if r.session != "" {
+		return
 	}
+	s, err = rexCmd("new", filepath.Base(d), "-c", d, "--json")
+	if err != nil {
+		stop("rex could not open a session for %s", d)
+	}
+	r.session = str(get(parse(s), "session_id"))
+	f, err := os.OpenFile(state+"/rex-sessions", os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
+	if err == nil {
+		fmt.Fprintf(f, "%s %s\n", r.session, d)
+		f.Close()
+	}
+}
+
+func sameDir(a, b string) bool {
+	x, err1 := os.Stat(a)
+	y, err2 := os.Stat(b)
+	return err1 == nil && err2 == nil && os.SameFile(x, y)
 }
 
 func (r *rex) blocks() []any {

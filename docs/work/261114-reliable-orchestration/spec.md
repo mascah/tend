@@ -12,10 +12,10 @@ Read this document and the repository instructions, then inspect the current
 branch, worktrees, diff and relevant implementation before acting. The baseline
 below is historical evidence, not a claim about the checkout you find.
 
-**Next Tend work: a live attempt under rex, then the remaining terminal.** Agreed
-with the owner on 2026-11-15: the non-Grove work item, the port to Go and the
-terminal interface with Herdr and rex are done on branch `tend/slice4-issue-items`
-(not merged); a live attempt under rex has not run yet; then drawn from Herdr and rex (the
+**Next Tend work: the remaining terminal, then a second tracker.** Agreed with the
+owner on 2026-11-15: the non-Grove work item, the port to Go and the terminal
+interface with Herdr and rex (shown live) are done on branch
+`tend/slice4-issue-items` (not merged); then drawn from Herdr and rex (the
 owner's next multiplexer) or tmux if rex cannot report agent state; then the
 remaining terminal; then a second tracker. Slices 1–3 are merged into `main`. Slices 1, 2
 and 2a are done on `tend/slice1-claim-verdict` (not merged; merging is the
@@ -322,7 +322,7 @@ here describes delivery, not how strongly the architectural direction is agreed.
 | 2 — One real shared-runner workflow | Done on `tend/slice1-claim-verdict`, live on sandbox PRs #1–#3; not merged | Slice 1 | [Publication](#shared-review-and-publication) |
 | 2a — Act on requested changes | Done on `tend/slice1-claim-verdict`, live on sandbox PR #3; not merged | Slice 2 | [Below](#2a--act-on-requested-changes) |
 | 3 — Explicit request-to-proposal intake | Done on `tend/slice3-intake`, live on the sandbox; not merged | Slice 2 and G available | [Intake and handoffs](#request-intake-and-explicit-handoffs) |
-| 4 — Prove portability | In progress: non-Grove work item live, Go port and the rex terminal (regressions only) done on `tend/slice4-issue-items` (not merged); a live rex attempt, terminal interface (Herdr with rex or tmux), the other terminal and a second tracker remain | Earlier lifecycle demonstrated | [Portability](#portability) |
+| 4 — Prove portability | In progress: non-Grove work item live, Go port and the rex terminal (live) done on `tend/slice4-issue-items` (not merged); terminal interface (Herdr with rex or tmux), the other terminal and a second tracker remain | Earlier lifecycle demonstrated | [Portability](#portability) |
 
 ### G — Finish Grove #164 independently
 
@@ -917,12 +917,29 @@ by hand it reported nothing. So tmux is not needed for agent state.
 
 Next action: a live attempt under rex on the sandbox, watched in the Rex app.
 
+2026-11-15 — Live under rex. `TEND_TERMINAL=rex` on the sandbox took planned cycle
+261115-qq9tq (refuse an invalid date on edit) through as attempt 261115-7gphq in
+about 3 min 20 s: Claude built in its rex block, tend read `done` and found the
+change archived, Codex passed `207105a` in a block of its own (15 tests, both
+scenarios reproduced), the reviewer's block was closed (`rex block close` works),
+and Claude wrote the message. PR #9 by `mascah-bot`, "Refuse an invalid date when
+editing a record", ends `Grove: 261115-2az0q`, carries `tend/review: SUCCESS` and
+one COMMENT review. No dialog stopped it and no Enter was lost.
+- Found: Claude renamed the rex session (`grove-implement-edit-date`), as the rex
+  skill tells agents to, so finding a session by name would open a second one on
+  a rerun. tend now records each worktree's session in `TEND_STATE/rex-sessions`
+  and reuses it while rex lists it, matching the folder by identity (`/var` and
+  `/private/var` are one); a regression renames the session before a rerun. A live
+  rerun of the attempt then reused the renamed session, asked nothing and posted
+  no second review.
+
+Next action: the remaining terminal, then a second tracker.
+
 A suitable prompt for a future implementation session is:
 
 > Read `docs/work/261114-reliable-orchestration/spec.md` in Tend and the repository
-> instructions. Revalidate the current handoff and continue slice 4: a live
-> attempt under rex if it has not run, then the remaining terminal or the second
-> tracker, behind `dev/test.sh`. Preserve unrelated work and active Grove
+> instructions. Revalidate the current handoff and continue slice 4: the
+> remaining terminal or the second tracker, behind `dev/test.sh`. Preserve unrelated work and active Grove
 > implementation. Update the delivery status with the revision, checks and next
 > action; do not advance into proposal intake or broader polling.
 

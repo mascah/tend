@@ -882,8 +882,9 @@ check "each agent runs in a block named for it" grep -q ' impl-' "$HERDR_STATE/r
 check "the reviewer's block is closed after its verdict" test "$(grep -c ' rev-' "$HERDR_STATE/rex-blocks")" = 0
 check "prompts go as a paste" grep -q $'^rex send .*\e\[200~/grove-implement' "$HERDR_STATE/rexlog"
 check "nothing was asked of Herdr" test ! -e "$HERDR_STATE/log" -o "$(grep -c '^worktree\|^pane\|^agent get' "$HERDR_STATE/log")" = 0
+sed 's/ .*/ renamed-by-an-agent/' "$HERDR_STATE/rex-sessions" >"$t/rs" && mv "$t/rs" "$HERDR_STATE/rex-sessions"
 rexrun 2
-check "a rerun finds its session and reviews nothing again" test "$(wc -l <"$HERDR_STATE/rex-sessions" | tr -d ' ') $(reviews)" = "1 1"
+check "a rerun finds its session, though an agent renamed it, and reviews nothing again" test "$(wc -l <"$HERDR_STATE/rex-sessions" | tr -d ' ') $(reviews)" = "1 1"
 
 scenario rex-repair
 project "$t/repo"

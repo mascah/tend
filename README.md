@@ -37,8 +37,10 @@ bin/tend propose <repo>
 ```
 
 The agents run in Herdr, or in rex when tend runs in rex (not in Herdr);
-`TEND_TERMINAL=herdr` or `rex` chooses. In rex each worktree gets a session
-named after its folder and each agent a block named after it. Its state is
+`TEND_TERMINAL=herdr` or `rex` chooses. In rex each worktree gets a session,
+first named after its folder and found again by its ID in
+`TEND_STATE/rex-sessions` (agents may rename it), and each agent a block named
+after it. Its state is
 what the agent reports with rex's program status protocol, as Claude Code and
 Codex do, so a dialog the agent does not report shows as unknown and stops
 tend rather than being prompted into. rex worktrees are made by Git under
