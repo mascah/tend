@@ -8,6 +8,7 @@
 #   tend <repo> <cycle-id>
 #   tend status <repo> <cycle-id>
 #   tend watch
+#   tend propose <repo>
 #
 # Run it inside a Herdr pane. Needs herdr, grove, git, jq, perl, and gh to publish. TIMEOUT_MS bounds
 # each agent turn (default 30 minutes). Exit 0: reviewed, see the verdict. Exit 3:
@@ -22,7 +23,7 @@
 # waited for, never prompted again, and the one repair is used once asked.
 set -euo pipefail
 mode=run
-case ${1:-} in status | watch) mode=$1; shift ;; esac
+case ${1:-} in status | watch | propose) mode=$1; shift ;; esac
 
 say() { printf 'tend: %s\n' "$*" >&2; }
 stop() {
@@ -59,7 +60,8 @@ if [ "$mode" = watch ]; then
 		sleep "${WATCH_SECONDS:-300}"
 	done
 fi
-repo=$(cd "$1" && pwd) cycle=$2
+repo=$(cd "$1" && pwd)
+if [ "$mode" = propose ]; then cycle=intake; else cycle=$2; fi
 
 # What the attempt is doing, for tend status: when, a kind (working, needs-you or
 # done) and what, then the next action. Written whole or not at all.
@@ -153,9 +155,132 @@ ask() { # name text [mark]
 	settled "$1" "$(herdr agent prompt "$1" "$2" --wait --timeout "${TIMEOUT_MS:-1800000}" 2>&1)"
 }
 
+# A pane of the workspace to split from, and a new one for a new agent.
+split() { herdr pane split "$(herdr pane list --workspace "$ws" | jq -r '.result.panes[0].pane_id')" --direction right --cwd "$dir" --no-focus | jq -r .result.pane.pane_id; }
+
+# The implementer is a name, not a session: if its pane is gone, a new session
+# takes the name and finds the work in Git.
+implementer() {
+	herdr agent get "$impl" >/dev/null 2>&1 && return
+	local p
+	p=$(herdr pane list --workspace "$ws" | jq -r '[.result.panes[] | select(.agent == null)][0].pane_id // empty')
+	[ -n "$p" ] || p=$(split)
+	# Auto mode, so that routine commands ask nobody. It may write in the run
+	# folder, where the commit message goes.
+	start "$impl" claude "$p" --permission-mode auto --add-dir "$run"
+}
+
+# The account a repository's origin is published as, from $state/publish
+# ("<origin-url> <account>" a line), or nothing when it is not listed.
+account_of() { awk -v o="$(git remote get-url origin 2>/dev/null)" '$1 == o { print $2; exit }' "$state/publish" 2>/dev/null || true; }
+
+# Push HEAD to origin's branch as the account whose token is GH_TOKEN, over HTTPS
+# even when origin is an SSH URL; never forced.
+push_as() { # branch
+	git -c credential.helper= -c 'credential.helper=!gh auth git-credential' -c url.https://github.com/.pushInsteadOf=git@github.com: \
+		push -q origin "HEAD:refs/heads/$1"
+}
+
 # The project as Grove publishes it: root, target branch and the attempt records,
 # newest first, from origin/grove/runs or, without origin, the local grove/runs.
 project() { grove changes --json || stop "grove changes --json failed in $PWD"; }
+
+# tend propose <repo>: one pass of intake from the repository's GitHub issues.
+# Each open issue labelled tend, oldest first, becomes a Grove change drafted by
+# Claude with no one in the session, on branch tend/issue-<n>, opened as a pull
+# request by the publishing account; or, when no change can be drafted from it, a
+# comment on the issue saying why, and the label taken off, so it is not tried
+# again until a person puts it back. The issue's number is its identity: a pull
+# request from its branch, in any state, means it is handled. At most CAP
+# (default 5) proposal pull requests stay open per repository. Each prompt is
+# marked just before it goes, as in an attempt, so none is sent twice or skipped.
+# Polling this is for later; a person runs it, or a scheduler.
+if [ "$mode" = propose ]; then
+	cd "$repo"
+	account=$(account_of)
+	[ -n "$account" ] || stop "$(git remote get-url origin 2>/dev/null || echo "$repo has no origin; it") is not listed in $state/publish, so tend takes no requests from it"
+	GH_TOKEN=$(gh auth token --user "$account") || stop "gh holds no token for $account; sign it in with gh auth login, then switch back"
+	export GH_TOKEN
+	proj=$(project)
+	target=$(jq -r .target <<<"$proj") root=$(jq -r .root <<<"$proj")
+	slug=$(gh repo view --json nameWithOwner --jq .nameWithOwner) || stop "gh cannot see $repo's repository"
+	marker="<!-- tend:declined"
+
+	draft() { # issue number
+		local n=$1 b=tend/issue-$1 issue wt id ids
+		run=$state/intake/${slug//\//_}-$n
+		mkdir -p "$run"
+		[ -s "$run/id" ] || date +%s >"$run/id"
+		id=$(cat "$run/id")
+		issue=$(gh issue view "$n" --json title,body,url) || stop "could not read issue #$n"
+		dir=$(git -C "$repo" worktree list --porcelain | awk -v b="branch refs/heads/$b" '/^worktree /{w=substr($0,10)} $0 == b {print w}')
+		if [ -n "$dir" ]; then
+			ws=$(herdr worktree list --cwd "$repo" | jq -r --arg p "$dir" '.result.worktrees[] | select(.path == $p) | .open_workspace_id // empty')
+			[ -n "$ws" ] || ws=$(herdr worktree open --cwd "$repo" --path "$dir" --no-focus | jq -r .result.workspace.workspace_id)
+		else
+			wt=$(herdr worktree create --cwd "$repo" --branch "$b" --base "$target" --label "tend: issue $n" --no-focus)
+			dir=$(jq -r .result.worktree.path <<<"$wt") ws=$(jq -r .result.workspace.workspace_id <<<"$wt")
+		fi
+		cd "$dir"
+		impl=prop-$n
+
+		# Draft, unless an earlier run already has the outcome: a commit, or a reason.
+		if [ -z "$(git rev-list "$target..HEAD")" ] && [ ! -s "$run/declined" ]; then
+			implementer
+			if [ ! -e "$run/asked" ]; then
+				stage working "$impl drafts a proposal from issue #$n" "tend has it commit the draft, then opens a pull request"
+				ask "$impl" "/grove-propose --unattended $(jq -r '"\(.title). \(.body) (GitHub issue \(.url))"' <<<"$issue" | tr '\n' ' ')" "$run/asked"
+			fi
+			[ "$(agent_status "$impl")" != working ] || settled "$impl" "$(herdr agent wait "$impl" --timeout "${TIMEOUT_MS:-1800000}" 2>&1)"
+			[ ! -e "$run/followed" ] ||
+				stop "issue #$n: $impl was asked to commit its draft or say why there is none, did neither, and is not working. Look at its pane, then commit the draft or write $run/declined, or delete $run/followed to have it asked again"
+			stage working "$impl commits its proposal from issue #$n" "tend opens a pull request, or tells the issue why there is none"
+			ask "$impl" "Without asking anyone: if you wrote a change, commit everything you wrote on this branch as one commit. Its subject proposes the change in this repository's commit style (see git log $target); its body says what the proposal asks for and why, for someone reading the history later, and ends with the line 'Refs #$n'. Then write to $run/summary, for the person who will review it, the change's open questions, the consequential ones (behavior, scope, compatibility, data, costly interfaces) first and marked so, the routine ones after. If you wrote no document, commit nothing and write to $run/declined, for the person who filed issue #$n, a few plain lines on why no proposal could be drafted and what the request would need." "$run/followed"
+		fi
+
+		if [ -n "$(git rev-list "$target..HEAD")" ]; then
+			[ -z "$(git status --porcelain)" ] || stop "issue #$n: $impl left uncommitted files in $dir"
+			git diff --name-only "$target...HEAD" | grep -q "^$root/changes/" || stop "issue #$n: $b has commits but no change under $root/changes/"
+			stage working "publishing the proposal from issue #$n" "a person reviews it"
+			push_as "$b" || stop "could not push $b as $account"
+			pr=$(gh pr list --head "$b" --state all --json url --jq '.[0].url // empty') || stop "could not look for $b's pull request"
+			[ -n "$pr" ] || pr=$(gh pr create --base "$target" --head "$b" --title "$(git log -1 --format=%s)" --body-file - < <(git log -1 --format=%b)) ||
+				stop "could not open a pull request for $b; run tend propose again, and it looks for one before opening another"
+			head=$(git rev-parse HEAD)
+			if [ -z "$(gh api "repos/{owner}/{repo}/pulls/${pr##*/}/reviews" --paginate --jq ".[] | select(.user.login == \"$account\" and .commit_id == \"$head\") | .id")" ]; then
+				ids=$(git diff --name-only --diff-filter=A "$target...HEAD" | sed -n "s|^$root/changes/\([0-9]*-[a-z0-9]*\)-.*|\1|p" | sort -u | tr '\n' ' ')
+				jq -n --arg h "$head" --arg n "$n" --arg q "$(cat "$run/summary" 2>/dev/null)" --arg ids "${ids% }" --arg b "$b" '{commit_id: $h, event: "COMMENT", body: (
+					"**Proposal drafted from #\($n) with no one in the session**\n\n"
+					+ (if $q == "" then "The drafter wrote no summary of open questions; see the proposal.\n\n" else "\($q)\n\n" end)
+					+ "Merging approves the change with any question still open, and its implementation may then choose those answers within Grove'"'"'s rules. Answer the consequential ones before merging, by revising the proposal on `\($b)` (`/grove-propose \($ids)`). Once merged, the change waits for a cycle: `/grove-plan`.")}' |
+					gh api "repos/{owner}/{repo}/pulls/${pr##*/}/reviews" --input - >/dev/null || stop "could not post the summary on $pr"
+			fi
+			stage done "proposal from issue #$n at $pr" "a person answers its open questions, revises or merges it"
+			say "issue #$n: $pr"
+		elif [ -s "$run/declined" ]; then
+			# Said on the issue once, found by the attempt's marker, then the label off.
+			if [ -z "$(gh api "repos/{owner}/{repo}/issues/$n/comments" --paginate --jq ".[] | select(.user.login == \"$account\" and (.body | contains(\"$marker $id\"))) | .id")" ]; then
+				printf 'No proposal could be drafted from this request:\n\n%s\n\nEdit the request and put the `tend` label back to have it tried again.\n\n%s %s -->\n' \
+					"$(cat "$run/declined")" "$marker" "$id" | gh issue comment "$n" --body-file - >/dev/null || stop "could not comment on issue #$n"
+			fi
+			gh issue edit "$n" --remove-label tend >/dev/null || stop "could not take the tend label off issue #$n"
+			stage done "no proposal from issue #$n; said why on it" "a person edits the request and labels it again"
+			mv "$run" "$run.declined-$id" # a fresh attempt when the label comes back
+			say "issue #$n: no proposal, said why"
+		else
+			stop "issue #$n: $impl committed no change and wrote no reason. Look at its pane, then commit the draft or write $run/declined, or delete $run/followed to have it asked again"
+		fi
+		cd "$repo"
+	}
+
+	for n in $(gh issue list --label tend --state open --json number --jq 'sort_by(.number) | .[].number'); do
+		[ -z "$(gh pr list --head "tend/issue-$n" --state all --json url --jq '.[0].url // empty')" ] || continue
+		open=$(gh pr list --author "$account" --state open --json headRefName --jq '[.[] | select(.headRefName | startswith("tend/issue-"))] | length')
+		[ "$open" -lt "${CAP:-5}" ] || { say "$open proposal pull requests are open, the cap; the rest wait"; break; }
+		draft "$n"
+	done
+	exit 0
+fi
 
 # 1. The attempt. The newest record for this cycle, if its checkout still holds
 #    its branch; otherwise a new worktree and a claim made inside it, so the
@@ -193,21 +318,6 @@ fi
 # The prototype wrote repaired before sending the repair, so it means asked.
 [ ! -e "$run/repaired" ] || [ -e "$run/repair-asked" ] || mv "$run/repaired" "$run/repair-asked"
 printf '%s\n%s\n' "$repo" "$cycle" >"$run/attempt" # for tend watch
-
-# A pane of the workspace to split from, and a new one for a new agent.
-split() { herdr pane split "$(herdr pane list --workspace "$ws" | jq -r '.result.panes[0].pane_id')" --direction right --cwd "$dir" --no-focus | jq -r .result.pane.pane_id; }
-
-# The implementer is a name, not a session: if its pane is gone, a new session
-# takes the name and finds the work in Git.
-implementer() {
-	herdr agent get "$impl" >/dev/null 2>&1 && return
-	local p
-	p=$(herdr pane list --workspace "$ws" | jq -r '[.result.panes[] | select(.agent == null)][0].pane_id // empty')
-	[ -n "$p" ] || p=$(split)
-	# Auto mode, so that routine commands ask nobody. It may write in the run
-	# folder, where the commit message goes.
-	start "$impl" claude "$p" --permission-mode auto --add-dir "$run"
-}
 
 # Done is what Git holds, never what the pane's state says.
 unbuilt() { # prints why the branch is not a finished candidate, or nothing
@@ -295,9 +405,8 @@ fi
 #    The PR and reviews are looked up on GitHub each run, never remembered, so a
 #    rerun after any interruption repeats neither. Merging stays a person's.
 where=$branch pr=
-origin=$(git remote get-url origin 2>/dev/null || true)
-account=$(awk -v o="$origin" '$1 == o { print $2; exit }' "$state/publish" 2>/dev/null || true)
-[ -z "$origin" ] || [ -n "$account" ] || say "not publishing: $origin is not listed in $state/publish"
+account=$(account_of)
+[ -n "$account" ] || ! git remote get-url origin >/dev/null 2>&1 || say "not publishing: $(git remote get-url origin) is not listed in $state/publish"
 publish() {
 	[ -n "$account" ] || return 0
 	local f h st approves msg
@@ -305,9 +414,7 @@ publish() {
 	stage working "publishing $branch at ${head:0:7} as $account" "tend pushes it and opens its pull request or reviews the one there"
 	GH_TOKEN=$(gh auth token --user "$account") || stop "gh holds no token for $account; sign it in with gh auth login, then switch back"
 	export GH_TOKEN
-	# Over HTTPS with the account's token, even when origin is an SSH URL.
-	git -c credential.helper= -c 'credential.helper=!gh auth git-credential' -c url.https://github.com/.pushInsteadOf=git@github.com: \
-		push -q origin "HEAD:refs/heads/$branch" ||
+	push_as "$branch" ||
 		stop "could not push $branch to origin as $account; if it has commits this checkout lacks, look at them, then run tend again"
 	pr=$(gh pr list --head "$branch" --state all --json url --jq '.[0].url // empty') || stop "could not look for $branch's pull request"
 	# The PR is squash-merged: its title and description become the commit's, so

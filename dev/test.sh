@@ -41,6 +41,18 @@ turn() { # name text
 		*squash-merged*) printf 'Add the file\n\nThe project needed a file.\n\nGrove: 261015-c0000\n' >"$(grep -oE '[^ ]*/message-[0-9a-f]{40}' <<<"$2")" ;;
 		*) echo fix >>a.txt && git commit -qam repair ;;
 		esac ;;
+	prop-*)
+		case $2 in
+		/grove-propose*)
+			[ -n "${DECLINE:-}" ] || { mkdir -p grove/changes/261115-p0000-a-proposal && echo "# A proposal" >grove/changes/261115-p0000-a-proposal/proposal.md; } ;;
+		*)
+			if [ -n "$(git status --porcelain)" ]; then
+				git add -A && git commit -qm "$(printf 'Propose a thing\n\nBecause it is wanted.\n\nRefs #%s' "${1#prop-}")"
+				echo "1. (consequential) Which thing?" >"$(grep -oE '[^ ,]*/summary' <<<"$2" | head -1)"
+			else
+				echo "It names no outcome." >"$(grep -oE '[^ ,]*/declined' <<<"$2" | head -1)"
+			fi ;;
+		esac ;;
 	rev-*)
 		local v h
 		v=$(grep -oE '[^ ]*verdict-[0-9a-f]{40}\.json' <<<"$2" | head -1)
@@ -85,6 +97,7 @@ case "$1 $2" in
 "agent prompt")
 	case $3 in
 	impl-*) case $4 in /grove-implement*) fail=${IMPL_FAIL:-} ;; *"requested changes at commit"*) fail=${REQUEST_FAIL:-} ;; *) fail=${REPAIR_FAIL:-} ;; esac ;;
+	prop-*) case $4 in /grove-propose*) fail=${PROPOSE_FAIL:-} ;; *) fail=${FOLLOW_FAIL:-} ;; esac ;;
 	*) fail=${REV_FAIL:-} ;;
 	esac
 	if [ "$(cat "$s/status-$3" 2>/dev/null)" = blocked ]; then
@@ -119,7 +132,26 @@ by=${GH_TOKEN:-owner} by=${by#tok-}
 arg() { local flag=$1; shift; while [ $# -gt 1 ]; do [ "$1" != "$flag" ] || { echo "$2"; return; }; shift; done; }
 case "$1 $2" in
 "auth token") echo "tok-$(arg --user "$@")" ;;
-"pr list") b=$(arg --head "$@"); [ ! -f "$s/pr-${b//\//_}" ] || echo "https://example.test/pr/${b//\//_}" ;;
+"pr list")
+	if a=$(arg --author "$@") && [ -n "$a" ]; then
+		for w in "$s"/pr-*.where; do
+			[ -e "$w" ] || continue
+			k=${w%.where}
+			[ ! -e "$k.merged" ] && [ "$(cat "$k.by")" = "$a" ] || continue
+			jq -n --arg b "$(sed -n 1p "$w")" '{headRefName: $b}'
+		done | jq -s . | jq -r "$(arg --jq "$@")"
+	else
+		b=$(arg --head "$@"); [ ! -f "$s/pr-${b//\//_}" ] || echo "https://example.test/pr/${b//\//_}"
+	fi ;;
+"repo view") echo o/r ;;
+"issue list") jq '[.[] | select(.state == "OPEN" and (.labels | index("tend")))]' "$s/issues" | jq -r "$(arg --jq "$@")" ;;
+"issue view") jq --argjson n "$3" '.[] | select(.number == $n) | {title, body, url}' "$s/issues" ;;
+"issue comment")
+	[ -f "$s/comments" ] || echo '[]' >"$s/comments"
+	jq --argjson n "$3" --arg by "$by" --rawfile b /dev/stdin '. + [{issue: $n, body: $b, user: {login: $by}}]' "$s/comments" >"$s/c.new" && mv "$s/c.new" "$s/comments" ;;
+"issue edit")
+	[ -z "${EDIT_FAIL:-}" ] || [ -e "$s/edit-failed" ] || { touch "$s/edit-failed"; exit 1; }
+	jq --argjson n "$3" --arg l "$(arg --remove-label "$@")" 'map(if .number == $n then .labels -= [$l] else . end)' "$s/issues" >"$s/i.new" && mv "$s/i.new" "$s/issues" ;;
 "pr create")
 	b=$(arg --head "$@")
 	cat >"$s/pr-${b//\//_}"
@@ -138,6 +170,10 @@ case "$1 $2" in
 api*)
 	[ -f "$s/reviews" ] || echo '[]' >"$s/reviews"
 	case $2 in
+	*/issues/*/comments)
+		[ -f "$s/comments" ] || echo '[]' >"$s/comments"
+		n=${2%/comments} n=${n##*/}
+		jq --argjson n "$n" '[.[] | select(.issue == $n)]' "$s/comments" | jq -r "$(arg --jq "$@")" ;;
 	*/reviews/*/comments)
 		id=${2%/comments} id=${id##*/}
 		jq --argjson id "$id" '[.[] | select(.id == $id)][0].comments // []' "$s/reviews" | jq -r "$(arg --jq "$@")" ;;
@@ -190,7 +226,7 @@ scenario() {
 	t=$top/$name
 	mkdir -p "$t/state"
 	export HERDR_STATE=$t/state TEND_STATE=$t/tend
-	unset REVIEW IMPL_FAIL IMPL_SLEEP REPAIR_FAIL REV_FAIL BLOCK_AFTER_BUILD CREATE_LOST REQUEST_FAIL
+	unset REVIEW IMPL_FAIL IMPL_SLEEP REPAIR_FAIL REV_FAIL BLOCK_AFTER_BUILD CREATE_LOST REQUEST_FAIL PROPOSE_FAIL FOLLOW_FAIL DECLINE EDIT_FAIL CAP
 }
 run() { "$tend" "$t/repo" 261114-k0000 >"$t/out${1:-}" 2>"$t/err${1:-}"; } # [suffix for out and err]
 reviews() { grep -c '^agent prompt rev-' "$HERDR_STATE/log"; }
@@ -366,6 +402,112 @@ request
 printf 'x needs-you: something\nnext: a person\n' >"$(echo "$TEND_STATE"/runs/*)/status"
 watch
 check "watch leaves an attempt that needs a person" test "$(prompts teammate)" = 1
+
+# Intake: issues in the stand-in's GitHub, and tend propose on the repo.
+issues() { # number:labels... e.g. 1:tend 2:
+	local i n l
+	for i in "$@"; do
+		n=${i%%:*} l=${i#*:}
+		jq -n --argjson n "$n" --arg l "$l" '{number: $n, title: "Request \($n)", body: "Make thing \($n) better.", url: "https://example.test/issues/\($n)", state: "OPEN", labels: ($l | split(",") | map(select(. != "")))}'
+	done | jq -s . >"$HERDR_STATE/issues"
+}
+propose() { "$tend" propose "$t/repo" >"$t/out${1:-}" 2>"$t/err${1:-}"; }
+drafts() { grep -c '^agent prompt prop-[^ ]* /grove-propose' "$HERDR_STATE/log"; }
+follows() { grep -c '^agent prompt prop-[^ ]* Without asking anyone' "$HERDR_STATE/log"; }
+pr_of() { echo "$HERDR_STATE/pr-tend_issue-$1"; }
+labelled() { jq -r --argjson n "$1" '.[] | select(.number == $n) | .labels | index("tend") != null' "$HERDR_STATE/issues"; }
+comments() { jq --argjson n "$1" '[.[]? | select(.issue == $n)] | length' "$HERDR_STATE/comments" 2>/dev/null || echo 0; }
+
+scenario propose
+project "$t/repo" main remote
+allow
+issues 1:tend 2: 3:tend,bug
+propose
+check "tend propose exits 0" test $? = 0
+check "each labelled issue is drafted once" test "$(drafts)" = 2
+check "unattended, from the issue's words" grep -q '^agent prompt prop-1 /grove-propose --unattended Request 1. Make thing 1 better. (GitHub issue https://example.test/issues/1)' "$HERDR_STATE/log"
+check "an unlabelled issue is left alone" test ! -e "$(pr_of 2)"
+check "a pull request per draft, by the account" test "$(cat "$(pr_of 1).by") $(cat "$(pr_of 3).by")" = "the-bot the-bot"
+check "from the issue's branch, onto the target" grep -q '^gh pr create --base main --head tend/issue-1 ' "$HERDR_STATE/log"
+check "titled and described by the drafter's commit" grep -q -- '--title Propose a thing --body-file' "$HERDR_STATE/log"
+check "described by its body, which refers to the issue" grep -qx 'Refs #1' "$(pr_of 1)"
+check "the branch holds the change" test "$(git -C "$t/repo.git" ls-tree -r --name-only tend/issue-1 | grep -c '^grove/changes/261115-p0000')" = 1
+check "a review lists the open questions" grep -q 'Which thing?' "$HERDR_STATE/reviews"
+check "and says what merging with them open means" grep -q 'its implementation may then choose those answers' "$HERDR_STATE/reviews"
+check "naming the change to revise" grep -q '/grove-propose 261115-p0000' "$HERDR_STATE/reviews"
+propose 2
+check "a second pass drafts nothing again" test "$(drafts)" = 2
+check "and opens nothing again" test "$(creates)" = 2
+check "nor reviews again" test "$(jq length "$HERDR_STATE/reviews")" = 2
+
+scenario propose-declined
+project "$t/repo" main remote
+allow
+issues 1:tend
+DECLINE=1 propose
+check "a request that cannot be drafted exits 0" test $? = 0
+check "opens no pull request" test ! -e "$(pr_of 1)"
+check "says why on the issue, as the account" test "$(jq -r '.[0].user.login' "$HERDR_STATE/comments")" = the-bot
+check "in the drafter's words" grep -q 'It names no outcome.' "$HERDR_STATE/comments"
+check "and takes the label off" test "$(labelled 1)" = false
+DECLINE=1 propose 2
+check "so a second pass leaves it" test "$(drafts) $(comments 1)" = "1 1"
+issues 1:tend
+propose 3
+check "labelled again, it is drafted afresh" test "$(drafts)" = 2 -a -e "$(pr_of 1)"
+
+scenario propose-decline-lost
+project "$t/repo" main remote
+allow
+issues 1:tend
+DECLINE=1 EDIT_FAIL=1 propose
+check "a decline whose label removal fails stops" test $? = 3
+DECLINE=1 propose 2
+check "the rerun finishes it" test $? = 0 -a "$(labelled 1)" = false
+check "without commenting twice or drafting again" test "$(comments 1) $(drafts)" = "1 1"
+
+scenario propose-cap
+project "$t/repo" main remote
+allow
+issues 1:tend 2:tend 3:tend
+CAP=2 propose
+check "the cap holds open proposals" test "$(drafts)" = 2 -a ! -e "$(pr_of 3)"
+check "and says so" grep -q 'the cap; the rest wait' "$t/err"
+touch "$(pr_of 1).merged"
+CAP=2 propose 2
+check "a merged proposal frees a place" test -e "$(pr_of 3)"
+
+scenario propose-follow-lost
+project "$t/repo" main remote
+allow
+issues 1:tend
+FOLLOW_FAIL=agent_prompt_stalled propose
+check "a stalled follow-up stops" test $? = 3
+propose 2
+check "the rerun stops too, not asking again" test $? = 3 -a "$(follows)" = 1
+check "and says what to do" grep -q 'delete .*/followed' "$t/err2"
+rm "$TEND_STATE"/intake/*/followed
+propose 3
+check "with the mark deleted, it is asked again and published" test $? = 0 -a "$(follows)" = 2 -a -e "$(pr_of 1)"
+check "the draft was asked for once" test "$(drafts)" = 1
+
+scenario propose-survivor
+project "$t/repo" main remote
+allow
+issues 1:tend
+PROPOSE_FAIL=timeout propose
+check "a drafting prompt that timed out stops" test $? = 3
+agent working prop
+propose 2
+check "the rerun waits for the drafter, then has it commit" test $? = 0 -a -e "$(pr_of 1)"
+check "without asking for the draft again" test "$(drafts)" = 1
+
+scenario propose-unlisted
+project "$t/repo" main remote
+issues 1:tend
+propose
+check "a repository not listed for publication gives no requests" test $? = 3 -a "$(drafts)" = 0
+check "and tend says why" grep -q 'tend takes no requests from it' "$t/err"
 
 scenario publish-diverged
 project "$t/repo" main remote
