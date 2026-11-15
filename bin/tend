@@ -262,50 +262,63 @@ if [ "$(jq -r .conclusion "$v")" = failure ] && [ "$(jq -r .actionable "$v")" = 
 	fi
 fi
 
-# 5. Publish, when the project has origin: push the branch, never forced, and keep
-#    one pull request for it. The PR is looked up on the remote each run, never
-#    remembered, so a rerun after any interruption updates it rather than opening
-#    another. The verdict goes on the reviewed commit as the tend/review status,
-#    so a later commit carries no passing result. Merging stays a person's.
-#    Only an origin listed, one URL a line, in $state/publish is published to.
+# 5. Publish, when origin is listed in $state/publish with the GitHub account to
+#    publish as, "<origin-url> <account>" a line; otherwise the verdict stays here.
+#    Every write is that account's, never the owner's, so the owner can approve:
+#    the branch pushed, never forced; one pull request, its description written
+#    once, from Grove, and left to people after; a review per reviewed head, as a
+#    comment since a PR's author may not approve or request changes; and the
+#    tend/review status on that head, so a later commit carries no passing result.
+#    The PR and reviews are looked up on GitHub each run, never remembered, so a
+#    rerun after any interruption repeats neither. Merging stays a person's.
 where=$branch
 origin=$(git remote get-url origin 2>/dev/null || true)
-if [ -n "$origin" ] && ! grep -qxF "$origin" "$state/publish" 2>/dev/null; then
+account=$(awk -v o="$origin" '$1 == o { print $2; exit }' "$state/publish" 2>/dev/null || true)
+if [ -n "$origin" ] && [ -z "$account" ]; then
 	say "not publishing: $origin is not listed in $state/publish"
 elif [ -n "$origin" ]; then
 	head=$(git rev-parse HEAD)
-	stage working "publishing $branch at ${head:0:7}" "tend pushes it and opens or updates its pull request"
-	git push -q origin "HEAD:refs/heads/$branch" ||
-		stop "could not push $branch to origin; if it has commits this checkout lacks, look at them, then run tend again"
-	body=$(
-		printf 'tend took Grove cycle `%s` through attempt `%s`. Merging is yours.\n\n' "$cycle" "$(jq -r .id <<<"$rec")"
-		printf '## Review of %s: %s\n\n%s\n\n' "${head:0:7}" "$(jq -r .conclusion "$v")" "$(jq -r .summary "$v")"
-		if [ "$(jq -r .conclusion "$v")" = failure ]; then
-			if [ "$(jq -r .actionable "$v")" = true ]; then echo "The one automatic repair is used; what to do next is yours."
-			else echo "The reviewer found something that needs your decision."; fi
-			echo
-		fi
-		earlier=$(for f in $(ls -t "$run"/verdict-*.json); do [ "$f" = "$v" ] || jq -r '"- \(.head[0:7]): \(.conclusion). \(.summary)"' "$f"; done)
-		[ -z "$earlier" ] || printf '## Earlier reviews in this attempt\n\n%s\n\n' "$earlier"
-		echo "## What merging approves"
-		echo
-		echo "The implementer's notes, including choices it made where the scope left a question open, are in each change's archived \`implementation.md\`."
-		echo
-		echo '```text'
-		grove review 2>&1 | sed '/^diff --git/,$d'
-		echo '```'
-	)
+	stage working "publishing $branch at ${head:0:7} as $account" "tend pushes it and opens its pull request or reviews the one there"
+	GH_TOKEN=$(gh auth token --user "$account") || stop "gh holds no token for $account; sign it in with gh auth login, then switch back"
+	export GH_TOKEN
+	# Over HTTPS with the account's token, even when origin is an SSH URL.
+	git -c credential.helper= -c 'credential.helper=!gh auth git-credential' -c url.https://github.com/.pushInsteadOf=git@github.com: \
+		push -q origin "HEAD:refs/heads/$branch" ||
+		stop "could not push $branch to origin as $account; if it has commits this checkout lacks, look at them, then run tend again"
 	pr=$(gh pr list --head "$branch" --state all --json url --jq '.[0].url // empty') || stop "could not look for $branch's pull request"
 	if [ -z "$pr" ]; then
+		body=$(
+			printf 'Grove cycle `%s`: %s\n\n' "$cycle" "$(jq -r --arg c "$cycle" '[.cycles[]? | select(.id == $c) | .title][0] // ""' <<<"$proj")"
+			for id in $(jq -r '.changes[]' <<<"$rec"); do
+				printf -- '- `%s` %s, proposal at `%s`\n' "$id" "$(jq -r --arg i "$id" '[.changes[]? | select(.id == $i) | .title][0] // ""' <<<"$proj")" "$(ls -d "$root/changes/archive/$id"-*/proposal.md 2>/dev/null)"
+			done
+			printf '\nImplemented by tend, attempt `%s`. Its independent reviews are posted on this PR as comments, and the reviewed head carries the `tend/review` status. The implementer notes choices it made where the scope left a question open in each `implementation.md`. Merging is yours.\n\n' "$(jq -r .id <<<"$rec")"
+			echo '```text'
+			grove review 2>&1 | sed '/^diff --git/,$d'
+			echo '```'
+		)
 		pr=$(gh pr create --base "$target" --head "$branch" --title "$(jq -r --arg c "$cycle" '[.cycles[]? | select(.id == $c) | .title][0] // $c' <<<"$proj")" --body-file - <<<"$body") ||
 			stop "could not open a pull request for $branch; run tend again, and it looks for one before opening another"
-	else
-		gh pr edit "$pr" --body-file - <<<"$body" >/dev/null || stop "could not update $pr"
 	fi
-	[ "$(jq -r .conclusion "$v")" = success ] && state=success || state=failure
-	gh api "repos/{owner}/{repo}/statuses/$head" -f state="$state" -f context=tend/review \
-		-f description="Independent review of ${head:0:7}: $(jq -r .conclusion "$v")" -f target_url="$pr" >/dev/null ||
-		stop "could not set the tend/review status on ${head:0:7}"
+	# Every verdict of the attempt on a commit of the branch, oldest first, so a
+	# failure repaired within one run still shows.
+	posted=$(gh api "repos/{owner}/{repo}/pulls/${pr##*/}/reviews" --paginate --jq ".[] | select(.user.login == \"$account\") | .commit_id") ||
+		stop "could not read $pr's reviews"
+	for f in $(ls -tr "$run"/verdict-*.json); do
+		h=$(jq -r .head "$f")
+		valid "$f" "$h" && git merge-base --is-ancestor "$h" HEAD 2>/dev/null || continue
+		if ! grep -qx "$h" <<<"$posted"; then
+			jq --arg a "$(jq -r .id <<<"$rec")" '{commit_id: .head, event: "COMMENT", body: (
+				"**Independent review of \(.head[0:7]): \(.conclusion)**\n\n\(.summary)\n\n"
+				+ (if .conclusion == "success" then "" elif .actionable then "The reviewer judged every finding an in-scope fix. tend repairs once, then a person decides.\n\n" else "A finding needs a decision from a person.\n\n" end)
+				+ "Codex reviewed this commit in a session apart from the implementer; tend posted it for attempt `\($a)`.")}' "$f" |
+				gh api "repos/{owner}/{repo}/pulls/${pr##*/}/reviews" --input - >/dev/null || stop "could not post the review of ${h:0:7} on $pr"
+		fi
+		[ "$(jq -r .conclusion "$f")" = success ] && state=success || state=failure
+		gh api "repos/{owner}/{repo}/statuses/$h" -f state="$state" -f context=tend/review \
+			-f description="Independent review of ${h:0:7}: $(jq -r .conclusion "$f")" -f target_url="$pr" >/dev/null ||
+			stop "could not set the tend/review status on ${h:0:7}"
+	done
 	where=$pr
 	say "published $pr"
 fi

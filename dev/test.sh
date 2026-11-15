@@ -102,24 +102,38 @@ EOS
 chmod +x "$top/bin/herdr"
 cat >"$top/bin/gh" <<'EOS'
 #!/usr/bin/env bash
-# GitHub stand-in: one PR per head branch, its body in pr-<branch>, statuses
-# appended to statuses as "<sha> <state>". CREATE_LOST opens the PR and then
-# fails, as when GitHub acted but tend never heard back.
+# GitHub stand-in. "auth token --user A" gives tok-A, and every write records the
+# account whose token made it. One PR per head branch: pr-<branch> holds its body
+# and pr-<branch>.by its author. Reviews go to reviews (a JSON array, read back
+# through the caller's --jq), statuses to statuses as "<sha> <state> <account>".
+# CREATE_LOST opens the PR and then fails, as when GitHub acted but tend never
+# heard back.
 set -euo pipefail
 s=$HERDR_STATE
 printf 'gh %s\n' "$*" >>"$s/log"
-arg() { while [ $# -gt 1 ]; do [ "$1" != "$flag" ] || { echo "$2"; return; }; shift; done; }
+by=${GH_TOKEN:-owner} by=${by#tok-}
+arg() { local flag=$1; shift; while [ $# -gt 1 ]; do [ "$1" != "$flag" ] || { echo "$2"; return; }; shift; done; }
 case "$1 $2" in
-"pr list") flag=--head b=$(arg "$@"); [ ! -f "$s/pr-${b//\//_}" ] || echo "https://example.test/pr/${b//\//_}" ;;
+"auth token") echo "tok-$(arg --user "$@")" ;;
+"pr list") b=$(arg --head "$@"); [ ! -f "$s/pr-${b//\//_}" ] || echo "https://example.test/pr/${b//\//_}" ;;
 "pr create")
-	flag=--head b=$(arg "$@")
+	b=$(arg --head "$@")
 	cat >"$s/pr-${b//\//_}"
+	echo "$by" >"$s/pr-${b//\//_}.by"
 	[ -z "${CREATE_LOST:-}" ] || exit 1
 	echo "https://example.test/pr/${b//\//_}" ;;
 "pr edit") cat >"$s/pr-${3##*/}" ;;
 api*)
-	sha=${2##*/} flag=-f st=$(printf '%s\n' "$@" | sed -n 's/^state=//p')
-	echo "$sha $st" >>"$s/statuses" ;;
+	[ -f "$s/reviews" ] || echo '[]' >"$s/reviews"
+	case $2 in
+	*/reviews)
+		if [ "${3:-}" = --input ]; then
+			jq --arg by "$by" --slurpfile r /dev/stdin '. + [$r[0] + {user: {login: $by}}]' "$s/reviews" >"$s/reviews.new" && mv "$s/reviews.new" "$s/reviews"
+		else
+			jq -r "$(arg --jq "$@")" "$s/reviews"
+		fi ;;
+	*/statuses/*) echo "${2##*/} $(printf '%s\n' "$@" | sed -n 's/^state=//p') $by" >>"$s/statuses" ;;
+	esac ;;
 esac
 EOS
 chmod +x "$top/bin/gh"
@@ -210,23 +224,31 @@ head() { git -C "$(worktree)" rev-parse HEAD; }
 branch() { git -C "$(worktree)" branch --show-current; }
 pr() { echo "$HERDR_STATE/pr-$(branch | tr / _)"; }
 creates() { grep -c '^gh pr create' "$HERDR_STATE/log"; }
-allow() { mkdir -p "$TEND_STATE" && git -C "$t/repo" remote get-url origin >>"$TEND_STATE/publish"; } # let tend publish to its origin
+allow() { mkdir -p "$TEND_STATE" && echo "$(git -C "$t/repo" remote get-url origin) the-bot" >>"$TEND_STATE/publish"; } # let tend publish to its origin, as the-bot
+
+reviewed() { jq -r --arg h "$1" '[.[] | select(.commit_id == $h)] | length' "$HERDR_STATE/reviews"; } # how many reviews name that head
 
 scenario publish
 project "$t/repo" main remote
 allow
 run
-check "with origin, the run reaches a verdict" passed
+check "with origin listed, the run reaches a verdict" passed
 check "the reviewed head is pushed to origin" test "$(git -C "$t/repo.git" rev-parse "$(branch)" 2>&1)" = "$(head)"
 check "one pull request is opened, onto the target" test "$(grep -c '^gh pr create --base main ' "$HERDR_STATE/log")" = 1
+check "by the listed account, not the owner" test "$(cat "$(pr).by")" = the-bot
 check "titled after the cycle" grep -q '^gh pr create .*--title One ' "$HERDR_STATE/log"
-check "its body names the reviewed head and the result" grep -q "Review of $(head | cut -c1-7): success" "$(pr)"
+check "its description says what the change is" grep -q 'Grove cycle `261114-k0000`: One' "$(pr)"
 check "and what merging approves, from grove review" grep -q 'approves' "$(pr)"
-check "the head carries the tend/review status" grep -qx "$(head) success" "$HERDR_STATE/statuses"
+check "but carries no verdict" test "$(grep -c 'success' "$(pr)")" = 0
+check "the head gets one review, a comment by the account" test "$(jq -r --arg h "$(head)" '[.[] | select(.commit_id == $h and .event == "COMMENT" and .user.login == "the-bot")] | length' "$HERDR_STATE/reviews")" = 1
+check "saying it passed" grep -q 'review of .*: success' "$HERDR_STATE/reviews"
+check "the head carries the tend/review status, set by the account" grep -qx "$(head) success the-bot" "$HERDR_STATE/statuses"
 check "status points at the pull request" grep -q 'a person reviews https://example.test/pr/' <<<"$(status)"
+echo "A person's description." >"$(pr)"
 run 2
 check "a repeated run opens no second pull request" test "$(creates)" = 1
-check "it updates the one there" grep -q '^gh pr edit https://example.test/pr/' "$HERDR_STATE/log"
+check "leaves the description to people" test "$(cat "$(pr)")" = "A person's description."
+check "and posts no second review of the head" test "$(reviewed "$(head)")" = 1
 
 scenario publish-lost
 project "$t/repo" main remote
@@ -237,7 +259,17 @@ check "and says a rerun looks first" said "looks for one before opening another"
 run
 check "the rerun finishes" passed
 check "without opening another" test "$(creates)" = 1
-check "and sets the status the first run did not" grep -qx "$(head) success" "$HERDR_STATE/statuses"
+check "and posts the review the first run did not" test "$(reviewed "$(head)")" = 1
+
+scenario publish-repair
+project "$t/repo" main remote
+allow
+REVIEW=repairable run
+check "a run with a repair passes" passed
+check "the failed head's review is posted on that commit" test "$(jq -r '[.[] | select(.body | test("failure"))] | length' "$HERDR_STATE/reviews")" = 1
+check "and says tend repairs once" grep -q 'tend repairs once' "$HERDR_STATE/reviews"
+check "as is the repaired head's" test "$(reviewed "$(head)")" = 1
+check "each head has its own status" test "$(grep -c ' failure the-bot$' "$HERDR_STATE/statuses") $(grep -c "^$(head) success" "$HERDR_STATE/statuses")" = "1 1"
 
 scenario publish-new-head
 project "$t/repo" main remote
@@ -247,11 +279,10 @@ first=$(head)
 (cd "$(worktree)" && echo more >>a.txt && git commit -qam "A later change")
 REVIEW=decision run 2
 check "a later commit is reviewed and published" test $? = 0
-check "its failure goes on the new head" grep -qx "$(head) failure" "$HERDR_STATE/statuses"
+check "its failure goes on the new head" grep -qx "$(head) failure the-bot" "$HERDR_STATE/statuses"
 check "the old head's pass is not the new head's" test "$(grep -c "^$(head) success" "$HERDR_STATE/statuses")" = 0
-check "the body leads with the new head's failure" grep -q "Review of $(head | cut -c1-7): failure" "$(pr)"
-check "says it needs a decision" grep -q "needs your decision" "$(pr)"
-check "and keeps the earlier pass as history" grep -q "^- $(echo "$first" | cut -c1-7): success" "$(pr)"
+check "its review says it needs a decision" grep -q 'needs a decision' "$HERDR_STATE/reviews"
+check "the earlier head keeps its one review" test "$(reviewed "$first")" = 1
 check "still one pull request" test "$(creates)" = 1
 
 scenario publish-diverged
