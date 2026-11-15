@@ -31,6 +31,7 @@ Run it inside a Herdr pane:
 bin/tend <repo> <cycle-id>
 bin/tend status <repo> <cycle-id>
 bin/tend watch
+bin/tend propose <repo>
 ```
 
 - Exit 0: the head is reviewed, and the verdict is printed.
@@ -95,6 +96,20 @@ on, and the PR description is not rewritten.
 `WATCH_SECONDS` (default 300) it runs tend on each attempt whose PR is open
 with a change request on its head. An attempt waiting for you is left alone
 until you have run tend on it.
+
+`tend propose <repo>` turns requests into proposals, once per run. Each open
+GitHub issue labelled `tend` in a listed repository, oldest first, is drafted
+by Claude with Grove's `/grove-propose --unattended`, on branch
+`tend/issue-<n>`. A draft is committed with a squash-ready message ending
+`Refs #<n>` and opened as a pull request by the publishing account, whose
+review lists the open questions, consequential ones first, and what merging
+with them open means. A request no change can be drafted from gets a comment
+saying why, and its label is taken off; putting it back tries again. A pull
+request from the issue's branch, in any state, means the issue is handled;
+at most `CAP` (default 5) proposal pull requests stay open. Labelling an issue
+hands its text to an agent running in auto mode, so only people who may label
+(triage access) can send requests. Approving the proposal (merging it) and
+planning its cycle stay with people.
 
 To cancel, stop tend (Ctrl-C or a kill). The agents keep their work and
 their turns. Stop an agent in its pane if you want it stopped too; running

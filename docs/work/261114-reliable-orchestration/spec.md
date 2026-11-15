@@ -12,8 +12,9 @@ Read this document and the repository instructions, then inspect the current
 branch, worktrees, diff and relevant implementation before acting. The baseline
 below is historical evidence, not a claim about the checkout you find.
 
-**Next Tend work: slice 3, explicit request-to-proposal intake.** Its open
-decisions are settled (see slice 3 below). Slices 1, 2
+**Next Tend work: slice 3's remaining handoff visibility.** `tend propose`
+(intake from labelled GitHub issues) is done and live on the sandbox, on branch
+`tend/slice3-intake`; see the session handoff for what remains. Slices 1, 2
 and 2a are done on `tend/slice1-claim-verdict` (not merged; merging is the
 owner's decision), slices 2 and 2a shown live on the private sandbox
 `mascah/tend-sandbox`, publishing as `mascah-bot`, with the owner as the teammate
@@ -317,7 +318,7 @@ here describes delivery, not how strongly the architectural direction is agreed.
 | 1 — Recoverable execution | Done on `tend/slice1-claim-verdict`, live interruptions demonstrated; not merged | Existing Tend prototype | [Recovery](#recoverable-execution), [review](#review-integrity), [Grove integration](#grove-integration-and-repository-configuration) |
 | 2 — One real shared-runner workflow | Done on `tend/slice1-claim-verdict`, live on sandbox PRs #1–#3; not merged | Slice 1 | [Publication](#shared-review-and-publication) |
 | 2a — Act on requested changes | Done on `tend/slice1-claim-verdict`, live on sandbox PR #3; not merged | Slice 2 | [Below](#2a--act-on-requested-changes) |
-| 3 — Explicit request-to-proposal intake | Not started; open decisions first | Slice 2 and G available | [Intake and handoffs](#request-intake-and-explicit-handoffs) |
+| 3 — Explicit request-to-proposal intake | In progress: `tend propose` live on `tend/slice3-intake` (not merged); handoff visibility and polling remain | Slice 2 and G available | [Intake and handoffs](#request-intake-and-explicit-handoffs) |
 | 4 — Prove portability | Not started | Earlier lifecycle demonstrated | [Portability](#portability) |
 
 ### G — Finish Grove #164 independently
@@ -723,11 +724,60 @@ invalid date on `add`) replaced it, after checking the gap was real.
 Next action: settle slice 3's open decisions with the owner before implementing
 it. Merging `tend/slice1-claim-verdict` is the owner's decision.
 
+2026-11-15 — Slice 3, first unit: `tend propose <repo>`. `tend/slice1-claim-verdict`
+was fast-forwarded into `main` and pushed (`34e5c49`) at the owner's word, keeping
+the per-unit commits this handoff cites; sandbox PR #3 was squash-merged
+(`7e43590`) after setting the sandbox's squash default to the PR title and
+description. Code written, local regressions passed, live; committed as `6182dca`
+on `tend/slice3-intake` plus the docs commit after; not merged.
+
+- Intake: open issues labelled `tend` in a listed repository, oldest first. The
+  issue number is the identity: branch `tend/issue-<n>`; a PR from it in any state
+  means handled. Cap: `CAP`, default 5, open proposal PRs by the account. Claude
+  drafts with `/grove-propose --unattended <title. body (url)>` (Grove's quoted
+  argument form works at `0083bba`); a second prompt has it commit the draft with a
+  squash-ready message ending `Refs #<n>` and write a summary of open questions,
+  consequential first, or write why there is none. Both prompts are marked before
+  they go (`asked`, `followed` under `TEND_STATE/intake/<owner>_<repo>-<n>/`); a
+  drafter still working is waited for. Drafted: pushed and opened by the account,
+  its review the summary plus Grove's consequence (merging approves with questions
+  open; implementation may then choose) and how to revise or plan. Declined: a
+  comment carrying the attempt's marker (so a rerun does not repeat it), then the
+  label removed and the run folder set aside, so a relabel starts afresh.
+- Checks: `dev/test.sh` passes 162; 36 of the new ones fail against `34e5c49`. New:
+  drafting from labelled issues only, PR by the account from the issue's branch,
+  title and body from the drafter's commit, the change on the branch, the review's
+  questions and consequence, no repeat on a second pass; a declined request
+  commented once and unlabelled, relabelling drafting afresh; a decline whose label
+  removal failed finished without a second comment; the cap, and a merged proposal
+  freeing a place; a stalled follow-up neither resent nor skipped until its mark is
+  deleted; a drafter that outlived tend waited for; an unlisted repository refused.
+- Live on the sandbox: issue #4 (`edit --date` should refuse an invalid date) became
+  PR #6 by `mascah-bot`, title "Propose refusing an invalid date when editing a
+  record", body a commit message ending `Grove: 261115-2az0q` / `Refs #4`; its review
+  listed three consequential and two routine questions with recommendations. The
+  drafter noticed the issue's example was already refused for another reason and
+  used another record. Issue #5 ("Make the ledger nicer") got a comment saying why
+  no proposal could be drafted, with concrete suggestions, and lost its label. A
+  second pass changed nothing.
+- Not done: tend does not fetch the target before branching (nor does an attempt);
+  a declined request's worktree is left; a closed, unmerged proposal is never
+  redrafted; comments on a proposal PR are not acted on (revision stays manual,
+  as the plan says). Slice 3 also asks that a person can see which proposals need
+  answers or revision, which approved changes need a cycle, and which
+  implementations need review: not yet built beyond the PRs themselves. Polling
+  intake comes after that.
+
+Next action: a read-only overview of those handoffs for a repository (open
+proposal PRs and their questions, approved changes without a cycle, cycles ready
+to claim, execution PRs awaiting review), from Grove's JSON and GitHub; then let
+`tend watch` run intake. PR #6 is the owner's to review, revise or merge.
+
 A suitable prompt for a future implementation session is:
 
 > Read `docs/work/261114-reliable-orchestration/spec.md` in Tend and the repository
-> instructions. Revalidate the current handoff, settle slice 3's open decisions
-> with the owner, then implement its first unit within its acceptance. Preserve unrelated work and active Grove
+> instructions. Revalidate the current handoff and implement the next unfinished
+> unit of slice 3 within its acceptance. Preserve unrelated work and active Grove
 > implementation. Update the delivery status with the revision, checks and next
 > action; do not advance into proposal intake or broader polling.
 
