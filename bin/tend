@@ -10,9 +10,9 @@
 # person is needed, and a Herdr notification says why.
 #
 # It keeps no state of its own. Where it is comes from Git each time: the attempt
-# from grove/runs, built from the archive on the attempt's branch, reviewed from
-# the verdict file named after the head. So after exit 3, or a kill, run the same
-# line again and it carries on.
+# from the runs Grove publishes, built from the archive on the attempt's branch,
+# reviewed from a valid verdict file named after the head. After exit 3, or a
+# kill, the same line tries to carry on; recovery is still incomplete.
 set -euo pipefail
 repo=$(cd "$1" && pwd) cycle=$2
 
@@ -56,10 +56,16 @@ ask() { # name text
 	case $st in idle | done) ;; *) stop "$1 is $st" ;; esac
 }
 
-# 1. The attempt. The newest record on grove/runs for this cycle, if its checkout
-#    still holds its branch; otherwise a new worktree and a claim made inside it,
-#    so the attempt's branch is the worktree's.
-rec=$(git -C "$repo" log --format=%B grove/runs 2>/dev/null | jq -c --arg c "$cycle" 'select(.cycle == $c)' | head -1 || true)
+# The project as Grove publishes it: root, target branch and the attempt records,
+# newest first, from origin/grove/runs or, without origin, the local grove/runs.
+project() { grove changes --json || stop "grove changes --json failed in $PWD"; }
+
+# 1. The attempt. The newest record for this cycle, if its checkout still holds
+#    its branch; otherwise a new worktree and a claim made inside it, so the
+#    attempt's branch is the worktree's.
+proj=$(cd "$repo" && project)
+target=$(jq -r .target <<<"$proj")
+rec=$(jq -c --arg c "$cycle" '[.runs[]? | select(.cycle == $c)][0] // empty' <<<"$proj")
 dir=$(jq -r '.checkout // empty' <<<"$rec")
 if [ -n "$dir" ] && [ "$(git -C "$dir" branch --show-current 2>/dev/null)" = "$(jq -r .branch <<<"$rec")" ]; then
 	ws=$(herdr worktree list --cwd "$repo" | jq -r --arg p "$dir" '.result.worktrees[] | select(.path == $p) | .open_workspace_id // empty')
@@ -67,17 +73,18 @@ if [ -n "$dir" ] && [ "$(git -C "$dir" branch --show-current 2>/dev/null)" = "$(
 	cd "$dir"
 	say "carrying on attempt $(jq -r .id <<<"$rec") in $dir"
 else
-	wt=$(herdr worktree create --cwd "$repo" --branch "tend-$(date +%H%M%S)" --base main --label "tend: $cycle" --no-focus)
+	wt=$(herdr worktree create --cwd "$repo" --branch "tend-$(date +%H%M%S)" --base "$target" --label "tend: $cycle" --no-focus)
 	dir=$(jq -r .result.worktree.path <<<"$wt")
 	ws=$(jq -r .result.workspace.workspace_id <<<"$wt")
 	cd "$dir"
 	grove claim "$cycle" >/dev/null || stop "grove claim refused $cycle"
-	rec=$(git log -1 --format=%B grove/runs | jq -c .)
+	rec=$(project | jq -c --arg b "$(git branch --show-current)" '[.runs[]? | select(.branch == $b)][0] // empty')
+	[ -n "$rec" ] || stop "claimed $cycle, but Grove shows no record for $(git branch --show-current)"
 	say "claimed $cycle as attempt $(jq -r .id <<<"$rec") in $dir"
 fi
 branch=$(jq -r .branch <<<"$rec")
 impl=impl-$(jq -r .id <<<"$rec")
-root=$(grove changes --json | jq -r .root)
+root=$(jq -r .root <<<"$proj")
 mkdir -p .tend
 
 # A pane of the workspace to split from, and a new one for a new agent.
@@ -103,19 +110,31 @@ unbuilt() { # prints why the branch is not a finished candidate, or nothing
 	done
 }
 
+# A verdict counts only when complete and naming the head it was written for; a
+# file's name is not enough.
+valid() { # file head
+	jq -e --arg h "$2" '.head == $h and (.conclusion | IN("success", "failure"))
+		and (.actionable | type == "boolean") and (.summary | type == "string")' "$1" >/dev/null 2>&1
+}
+
 # A fresh reviewer for each head, in another harness. Its only output is the
-# verdict file named after the head; its pane is closed after it.
+# verdict file named after the head; its pane is closed after it. A cached file
+# that is not a valid verdict is set aside, kept, and the head reviewed again.
 review() {
 	local head rev rpane
 	head=$(git rev-parse HEAD)
 	v=.tend/verdict-$head.json
-	[ -f "$v" ] && return
+	if [ -f "$v" ]; then
+		valid "$v" "$head" && return
+		mv "$v" "$v.rejected-$(date +%s)"
+		say "set aside an invalid verdict for ${head:0:7}"
+	fi
 	rev=rev-${head:0:7}
 	rpane=$(split)
 	start "$rev" codex "$rpane" -s workspace-write -a never
-	ask "$rev" "You are the independent reviewer of branch $branch at commit $head. You did not write it and nobody can answer questions. The change is 'git diff main...HEAD'; what it must do is in the change folders that diff moves into $root/changes/archive/ (proposal.md, specs, tasks.md, implementation.md). Check the code against those requirements, run the project's tests, and reproduce each scenario the change spec gives. Report only material findings: a defect, an unmet requirement, or a claim in implementation.md the code does not support. Edit, stage and commit nothing. Your only output is the file $v, exactly this JSON shape: {\"head\": \"$head\", \"conclusion\": \"success or failure\", \"actionable\": true or false, \"summary\": \"findings with file:line and what you ran\"}. actionable is true only when every finding is an in-scope code fix that needs no decision from the owner."
+	ask "$rev" "You are the independent reviewer of branch $branch at commit $head. You did not write it and nobody can answer questions. The change is 'git diff $target...HEAD'; what it must do is in the change folders that diff moves into $root/changes/archive/ (proposal.md, specs, tasks.md, implementation.md). Check the code against those requirements, run the project's tests, and reproduce each scenario the change spec gives. Report only material findings: a defect, an unmet requirement, or a claim in implementation.md the code does not support. Edit, stage and commit nothing. Your only output is the file $v, exactly this JSON shape: {\"head\": \"$head\", \"conclusion\": \"success or failure\", \"actionable\": true or false, \"summary\": \"findings with file:line and what you ran\"}. actionable is true only when every finding is an in-scope code fix that needs no decision from the owner."
 	# The pane said the turn ended; only the file says a review happened.
-	[ "$(jq -r .head "$v" 2>/dev/null)" = "$head" ] || stop "$rev settled without a verdict for ${head:0:7}; look at pane $rpane"
+	valid "$v" "$head" || stop "$rev settled without a valid verdict for ${head:0:7}; look at pane $rpane"
 	herdr pane close "$rpane" >/dev/null
 	[ "$(git rev-parse HEAD)" = "$head" ] && [ -z "$(git status --porcelain)" ] || stop "$rev changed the checkout"
 	say "review of ${head:0:7}: $(jq -r .conclusion "$v")"

@@ -14,7 +14,12 @@ grove claim
 ```
 
 Grove holds what is agreed. Herdr runs the agents where you can watch and
-take over. tend is the script between them, and keeps no state of its own.
+take over. tend is currently a prototype script between them. It reconstructs
+progress from Git, local `.tend/` files and Herdr; restart recovery is incomplete.
+
+The agreed [execution plan](docs/work/261114-reliable-orchestration/spec.md)
+records the intended boundaries, review findings, delivery order and session
+handoff. Start there when continuing development across sessions.
 
 ## Run it
 
@@ -28,8 +33,11 @@ bin/tend <repo> <cycle-id>
 - Exit 0: the head is reviewed, and the verdict is printed.
 - Exit 3: a person is needed. A Herdr notification says why.
 
-After exit 3, or a kill, run the same line again and it carries on.
-`TIMEOUT_MS` bounds each agent turn (default 30 minutes).
+The same line attempts to carry on after exit 3 or a kill, with or without
+`origin`. Recovery is still incomplete: an interrupted repair can be skipped,
+there is no controller lock, and a surviving agent is not reconciled before a
+restart prompts again. See the plan before relying on it. `TIMEOUT_MS` sets the prompt wait timeout
+(default 30 minutes); stopping the underlying agent has not been demonstrated.
 
 To try it on a disposable repo, with a checkout of Grove beside this one:
 
@@ -38,13 +46,16 @@ dev/fixture.sh ~/tmp/ledger
 bin/tend ~/tmp/ledger 261114-pr0t0
 ```
 
-## Where it is comes from Git
+`dev/test.sh` runs the regressions: real Git and Grove, a stand-in for Herdr
+whose agents act at once. It starts no agent and needs no Grove checkout.
+
+## Where the prototype reads progress
 
 | Question | Read from |
 | --- | --- |
-| Is there an attempt? | The newest record on `grove/runs` for the cycle, whose `checkout` still holds its `branch`. |
+| Is there an attempt? | The newest record for the cycle in `grove changes --json` (from `origin/grove/runs`, or the local `grove/runs` without `origin`), whose `checkout` still holds its `branch`. |
 | Is it built? | Every change of the record is under `changes/archive/` on that branch, and the tree is clean. |
-| Is the head reviewed? | `.tend/verdict-<head>.json` names that head. |
+| Is the head reviewed? | `.tend/verdict-<head>.json` names that head and has a `success` or `failure` conclusion, a boolean `actionable` and a `summary`. A cached file that does not is kept as `.rejected-<time>` and the head is reviewed again. |
 | Was the repair used? | `.tend/repaired` exists. |
 
 A pane's state says a turn ended, never that the work is done.
@@ -54,7 +65,8 @@ A pane's state says a turn ended, never that the work is done.
 Three things, through Grove's command line, and it never reads Grove's
 Markdown:
 
-- `grove changes --json`, for the document root;
+- `grove changes --json`, for the document root, the target branch and the
+  attempt records;
 - `grove claim <cycle-id>`, to take the cycle and record the attempt;
 - `/grove-implement <cycle-id>`, as the implementer's prompt.
 
@@ -96,10 +108,6 @@ Not yet shown:
 
 ## Next
 
-1. A repo with a remote: push the branch, open the pull request, post the
-   verdict on it.
-2. Proposing: requests from a configured command, each drafted with
-   `/grove-propose --unattended` into its own pull request, with a cap on
-   how many wait unmerged. Needs
-   [grove#164](https://github.com/mascah/grove/pull/164).
-3. A tick over the repos you register.
+Follow the [delivery slices and session handoff](docs/work/261114-reliable-orchestration/spec.md#delivery).
+Recoverable execution comes first. Publication, proposal intake and portability
+follow its demonstrated lifecycle; broader polling is deferred.
