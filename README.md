@@ -15,7 +15,7 @@ grove claim
 
 Grove holds what is agreed. Herdr runs the agents where you can watch and
 take over. tend is currently a prototype script between them. It reconstructs
-progress from Git, local `.tend/` files and Herdr; restart recovery is incomplete.
+progress from Git, its own run files and Herdr; restart recovery is incomplete.
 
 The agreed [execution plan](docs/work/261114-reliable-orchestration/spec.md)
 records the intended boundaries, review findings, delivery order and session
@@ -23,7 +23,7 @@ handoff. Start there when continuing development across sessions.
 
 ## Run it
 
-Needs `herdr`, `grove`, `git`, `jq`, and Claude Code and Codex signed in.
+Needs `herdr`, `grove`, `git`, `jq`, `perl`, and Claude Code and Codex signed in.
 Run it inside a Herdr pane:
 
 ```sh
@@ -32,11 +32,19 @@ bin/tend <repo> <cycle-id>
 
 - Exit 0: the head is reviewed, and the verdict is printed.
 - Exit 3: a person is needed. A Herdr notification says why.
+- Exit 4: another tend is running on this machine, and nothing was done.
+  One tend runs at a time; the lock goes when it exits or is killed.
+
+Its own files live under `TEND_STATE` (default `~/.local/state/tend`): the
+lock, and a folder per attempt under `runs/` holding its verdicts and repair
+mark. They never enter the candidate, so a repository needs no Git excludes.
+An attempt from before this, with a `.tend/` folder in its checkout, has
+those files moved to its folder on the next run, and a name clash stops for
+you rather than overwriting either.
 
 The same line attempts to carry on after exit 3 or a kill, with or without
 `origin`. Recovery is still incomplete: an interrupted repair can be skipped,
-there is no controller lock, and a surviving agent is not reconciled before a
-restart prompts again. See the plan before relying on it. `TIMEOUT_MS` sets the prompt wait timeout
+and a surviving agent is not reconciled before a restart prompts again. See the plan before relying on it. `TIMEOUT_MS` sets the prompt wait timeout
 (default 30 minutes); stopping the underlying agent has not been demonstrated.
 
 To try it on a disposable repo, with a checkout of Grove beside this one:
@@ -55,8 +63,8 @@ whose agents act at once. It starts no agent and needs no Grove checkout.
 | --- | --- |
 | Is there an attempt? | The newest record for the cycle in `grove changes --json` (from `origin/grove/runs`, or the local `grove/runs` without `origin`), whose `checkout` still holds its `branch`. |
 | Is it built? | Every change of the record is under `changes/archive/` on that branch, and the tree is clean. |
-| Is the head reviewed? | `.tend/verdict-<head>.json` names that head and has a `success` or `failure` conclusion, a boolean `actionable` and a `summary`. A cached file that does not is kept as `.rejected-<time>` and the head is reviewed again. |
-| Was the repair used? | `.tend/repaired` exists. |
+| Is the head reviewed? | `runs/<attempt>/verdict-<head>.json` names that head and has a `success` or `failure` conclusion, a boolean `actionable` and a `summary`. A cached file that does not is kept as `.rejected-<time>` and the head is reviewed again. |
+| Was the repair used? | `runs/<attempt>/repaired` exists. |
 
 A pane's state says a turn ended, never that the work is done.
 
@@ -78,6 +86,9 @@ Grove does not know tend exists, and is useful without it.
   nobody. Codex starts with `-s workspace-write -a never`.
 - It answers one kind of dialog itself: whether to trust the folder, which
   Claude Code asks for each new worktree and Codex once for a repository.
+- The reviewer may write in the attempt's run folder besides its checkout
+  (`--add-dir`), where its verdict goes. The repair prompt carries the
+  findings themselves, so the implementer reads nothing outside its worktree.
   It answers for whatever repo you pass it. Any other dialog stops the loop
   and notifies you.
 - Each attempt gets a Herdr worktree workspace. `herdr worktree create`

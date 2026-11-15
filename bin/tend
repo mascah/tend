@@ -5,14 +5,17 @@
 #
 #   tend <repo> <cycle-id>
 #
-# Run it inside a Herdr pane. Needs herdr, grove, git, jq. TIMEOUT_MS bounds each
-# agent turn (default 30 minutes). Exit 0: reviewed, see the verdict. Exit 3: a
-# person is needed, and a Herdr notification says why.
+# Run it inside a Herdr pane. Needs herdr, grove, git, jq, perl. TIMEOUT_MS bounds
+# each agent turn (default 30 minutes). Exit 0: reviewed, see the verdict. Exit 3:
+# a person is needed, and a Herdr notification says why. Exit 4: another tend
+# holds this runner.
 #
-# It keeps no state of its own. Where it is comes from Git each time: the attempt
-# from the runs Grove publishes, built from the archive on the attempt's branch,
-# reviewed from a valid verdict file named after the head. After exit 3, or a
-# kill, the same line tries to carry on; recovery is still incomplete.
+# Where it is comes from Git and its own run files each time: the attempt from the
+# runs Grove publishes, built from the archive on the attempt's branch, reviewed
+# from a valid verdict file named after the head. Its files live under TEND_STATE
+# (default ~/.local/state/tend), one folder per attempt, never in the candidate.
+# After exit 3, or a kill, the same line tries to carry on; recovery is still
+# incomplete.
 set -euo pipefail
 repo=$(cd "$1" && pwd) cycle=$2
 
@@ -22,6 +25,26 @@ stop() {
 	herdr notification show "tend $cycle needs you" --body "$*" --sound request >/dev/null 2>&1 || true
 	exit 3
 }
+
+# One controller on this runner. A watcher holds the lock on a file no other
+# process has open, and drops it when tend exits or within a moment of a kill,
+# whatever children (an agent's wait, a shell) outlive it. A lock just dropped by
+# a killed tend is waited for briefly.
+# ponytail: one lock for the runner, so one attempt at a time; lock per attempt
+# when capacity grows.
+state=${TEND_STATE:-${XDG_STATE_HOME:-$HOME/.local/state}/tend}
+mkdir -p "$state/runs"
+holder=$(perl -MFcntl=:flock -e '
+	my ($file, $tend) = @ARGV;
+	open(my $f, ">>", $file) or die "tend: $file: $!\n";
+	for (1 .. 10) { last if flock($f, LOCK_EX | LOCK_NB); select(undef, undef, undef, 0.2) }
+	flock($f, LOCK_EX | LOCK_NB) or exit 1;
+	if (my $pid = fork) { print "$pid\n"; exit 0 }
+	close STDIN; close STDOUT; close STDERR;
+	select(undef, undef, undef, 0.2) while kill 0, $tend' "$state/lock" $$) ||
+	{ [ $? = 1 ] || stop "could not take the lock in $state"; say "another tend holds this runner: $(cat "$state/lock")"; exit 4; }
+trap 'kill "$holder" 2>/dev/null' EXIT
+printf 'pid %s, cycle %s in %s\n' $$ "$cycle" "$repo" >"$state/lock"
 
 # Start an agent in a pane. A pane just split is not yet at its prompt, so a busy
 # pane is retried. A folder the harness has never seen gets its trust dialog,
@@ -85,7 +108,14 @@ fi
 branch=$(jq -r .branch <<<"$rec")
 impl=impl-$(jq -r .id <<<"$rec")
 root=$(jq -r .root <<<"$proj")
-mkdir -p .tend
+run=$state/runs/$(jq -r .id <<<"$rec")
+mkdir -p "$run"
+# The prototype kept an attempt's verdicts and repair mark in .tend/ in the
+# checkout. They move to the attempt's folder, never over a file already there.
+if [ -d .tend ]; then
+	for f in .tend/*; do [ ! -e "$f" ] || [ -e "$run/${f#.tend/}" ] || mv "$f" "$run/"; done
+	if rmdir .tend 2>/dev/null; then say "moved .tend/ to $run"; else stop "left in .tend/, as $run holds the same: $(ls -A .tend)"; fi
+fi
 
 # A pane of the workspace to split from, and a new one for a new agent.
 split() { herdr pane split "$(herdr pane list --workspace "$ws" | jq -r '.result.panes[0].pane_id')" --direction right --cwd "$dir" --no-focus | jq -r .result.pane.pane_id; }
@@ -123,7 +153,7 @@ valid() { # file head
 review() {
 	local head rev rpane
 	head=$(git rev-parse HEAD)
-	v=.tend/verdict-$head.json
+	v=$run/verdict-$head.json
 	if [ -f "$v" ]; then
 		valid "$v" "$head" && return
 		mv "$v" "$v.rejected-$(date +%s)"
@@ -131,7 +161,7 @@ review() {
 	fi
 	rev=rev-${head:0:7}
 	rpane=$(split)
-	start "$rev" codex "$rpane" -s workspace-write -a never
+	start "$rev" codex "$rpane" -s workspace-write -a never --add-dir "$run"
 	ask "$rev" "You are the independent reviewer of branch $branch at commit $head. You did not write it and nobody can answer questions. The change is 'git diff $target...HEAD'; what it must do is in the change folders that diff moves into $root/changes/archive/ (proposal.md, specs, tasks.md, implementation.md). Check the code against those requirements, run the project's tests, and reproduce each scenario the change spec gives. Report only material findings: a defect, an unmet requirement, or a claim in implementation.md the code does not support. Edit, stage and commit nothing. Your only output is the file $v, exactly this JSON shape: {\"head\": \"$head\", \"conclusion\": \"success or failure\", \"actionable\": true or false, \"summary\": \"findings with file:line and what you ran\"}. actionable is true only when every finding is an in-scope code fix that needs no decision from the owner."
 	# The pane said the turn ended; only the file says a review happened.
 	valid "$v" "$head" || stop "$rev settled without a valid verdict for ${head:0:7}; look at pane $rpane"
@@ -150,11 +180,11 @@ fi
 
 # 3. Review the head. 4. One repair, then review the new head.
 review
-if [ "$(jq -r .conclusion "$v")" = failure ] && [ "$(jq -r .actionable "$v")" = true ] && [ ! -f .tend/repaired ]; then
+if [ "$(jq -r .conclusion "$v")" = failure ] && [ "$(jq -r .actionable "$v")" = true ] && [ ! -f "$run/repaired" ]; then
 	reviewed=$(git rev-parse HEAD)
-	echo "$reviewed" >.tend/repaired
+	echo "$reviewed" >"$run/repaired"
 	implementer
-	ask "$impl" "An independent review of commit $reviewed found problems. Its findings are the summary in $v. Fix each one that is in scope, run the tests, update implementation.md where a claim changes, and commit. Ask no one."
+	ask "$impl" "An independent review of commit $reviewed found problems. Its findings: $(jq -r .summary "$v") Fix each one that is in scope, run the tests, update implementation.md where a claim changes, and commit. Ask no one."
 	why=$(unbuilt)
 	[ -z "$why" ] || stop "$why"
 	[ "$(git rev-parse HEAD)" != "$reviewed" ] || stop "$impl committed no repair"
@@ -162,5 +192,5 @@ if [ "$(jq -r .conclusion "$v")" = failure ] && [ "$(jq -r .actionable "$v")" = 
 fi
 
 herdr notification show "tend $cycle: $(jq -r .conclusion "$v")" --body "$branch at $(jq -r .head "$v" | cut -c1-7) is ready for you" --sound done >/dev/null 2>&1 || true
-say "done: $branch, verdict $dir/$v"
+say "done: $branch, verdict $v"
 jq . "$v"

@@ -39,6 +39,6 @@ changes: [261015-c0000]
 planned: $(git rev-parse HEAD)
 EOC
 g add -A && g commit -q -m "Plan a cycle of one"
-# Shared by every worktree: keep tend's own files out of git status.
-printf '.claude/settings.local.json\n.tend/\n' >> .git/info/exclude
+# Shared by every worktree: keep Claude Code's local settings out of git status.
+printf '.claude/settings.local.json\n' >> .git/info/exclude
 grove check

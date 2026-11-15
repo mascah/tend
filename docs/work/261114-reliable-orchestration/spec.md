@@ -13,9 +13,10 @@ branch, worktrees, diff and relevant implementation before acting. The baseline
 below is historical evidence, not a claim about the checkout you find.
 
 **Next Tend work: slice 1, recoverable execution.** Remote claim discovery,
-verdict validation and the configured target branch are done (see the session
-handoff). Next, implement the smallest durable lifecycle that handles
-interruption and controller ownership. Preserve existing attempts and candidate
+verdict validation, the configured target branch, runtime files outside the
+candidate and a controller lock are done (see the session handoff). Next, make
+repair delivery and surviving-agent reconciliation explicit, then demonstrate
+real interruptions. Preserve existing attempts and candidate
 branches. Do not start proposal polling or multi-repository
 scheduling first.
 
@@ -306,7 +307,7 @@ here describes delivery, not how strongly the architectural direction is agreed.
 | Slice | Status | Prerequisites | Acceptance |
 | --- | --- | --- | --- |
 | G — Finish Grove #164 | In progress externally | Existing Grove implementation and owner coordination | Invocation fix, outstanding behavioral findings and Grove's own acceptance |
-| 1 — Recoverable execution | In progress: claim lookup, verdict validation, target branch done on `tend/slice1-claim-verdict` (not merged) | Existing Tend prototype | [Recovery](#recoverable-execution), [review](#review-integrity), [Grove integration](#grove-integration-and-repository-configuration) |
+| 1 — Recoverable execution | In progress: claim lookup, verdict validation, target branch, run files outside the candidate, controller lock done on `tend/slice1-claim-verdict` (not merged) | Existing Tend prototype | [Recovery](#recoverable-execution), [review](#review-integrity), [Grove integration](#grove-integration-and-repository-configuration) |
 | 2 — One real shared-runner workflow | Not started | Slice 1 | [Publication](#shared-review-and-publication) |
 | 3 — Explicit request-to-proposal intake | Not started | Slice 2 and G available | [Intake and handoffs](#request-intake-and-explicit-handoffs) |
 | 4 — Prove portability | Not started | Earlier lifecycle demonstrated | [Portability](#portability) |
@@ -426,6 +427,43 @@ controller lock, reconciling legacy `.tend/` verdicts and `repaired` without
 discarding them. Then use that record to make repair delivery and surviving-agent
 reconciliation explicit, with the interruption demonstrations. Merging the branch
 is the owner's decision.
+
+2026-11-14 — Slice 1, second unit: runtime files outside the candidate and a
+controller lock. Code written and local regressions passed; committed on
+`tend/slice1-claim-verdict` as the commit after `62bdeb5`; not merged.
+
+- Run files: `TEND_STATE` (default `~/.local/state/tend`) holds `lock` and
+  `runs/<attempt>/` with verdicts, `.rejected-*` and `repaired`. Not under `.git`:
+  Codex's `workspace-write` sandbox refuses writes inside `.git` and outside the
+  workspace (probed with `codex sandbox`, no model), so the reviewer starts with
+  `--add-dir <run folder>`. The repair prompt now carries the findings text
+  rather than a path, so the implementer reads nothing outside its worktree.
+- Legacy `.tend/`: on carrying on an attempt, its files move to the run folder.
+  A name already present there is not overwritten; tend stops for a person. A
+  prior verdict is reused and a consumed repair stays consumed.
+  The fixture no longer excludes `.tend/`, and the tests use no Git excludes.
+- Lock: one tend per runner (`ponytail:` note: per-attempt locks when capacity
+  grows). A forked perl watcher holds a `flock` on a descriptor nothing else has
+  and exits when tend's pid is gone, so children such as a `herdr agent prompt
+  --wait` cannot keep it after a kill. (A descriptor held by tend itself was
+  tried and failed: command-substitution subshells inherit it.) A refused run
+  exits 4 and touches nothing; holder pid, cycle and repo are in the lock file.
+- Checks: `dev/test.sh` passes all 31 checks. New this unit: a clean candidate with no excludes,
+  the verdict outside the candidate, `--add-dir`, legacy reuse, a refused second
+  tend that leaves the implementer prompted once, and takeover after `kill -9` of
+  the holder. Before the change, 18 checks failed. The unreadable-lock path was checked by hand.
+- Not exercised: live Codex writing through `--add-dir` (only the sandbox
+  policy was probed), live Herdr/Claude, a legacy name clash, Linux.
+- Remaining slice 1: repair still marked before delivery; after takeover, the
+  new controller re-prompts an agent that may still be running (the lock test
+  shows this: the stub implementer was prompted again); status/cancel; live
+  interruption demonstrations during implementation, review and repair.
+
+Next action: record repair delivery so an undelivered or uncertain repair is
+visible rather than skipped or retried without bound. Before any prompt, establish
+whether the named agent is still working, and observe or ask a person instead of
+re-prompting. Add a minimal status that shows stage and next action from the run
+folder. Then run the live interruption demonstrations.
 
 A suitable prompt for a future implementation session is:
 

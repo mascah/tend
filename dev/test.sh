@@ -14,7 +14,8 @@ mkdir "$top/bin"
 cat >"$top/bin/herdr" <<'EOS'
 #!/usr/bin/env bash
 # Herdr stand-in. The implementer archives every change and commits; the
-# reviewer writes the verdict its prompt names, shaped by $REVIEW.
+# reviewer writes the verdict its prompt names, shaped by $REVIEW. IMPL_FAIL
+# fails the implementer's prompt; IMPL_SLEEP holds it that long.
 set -euo pipefail
 s=$HERDR_STATE
 printf '%s\n' "$*" >>"$s/log"
@@ -38,13 +39,14 @@ case "$1 $2" in
 	case $3 in
 	impl-*)
 		[ -z "${IMPL_FAIL:-}" ] || { echo '{"error":{"code":"stub_failure"}}'; exit 1; }
+		[ -z "${IMPL_SLEEP:-}" ] || { echo $$ >"$s/sleeper"; exec sleep "$IMPL_SLEEP"; }
 		for d in grove/changes/*/; do
 			[ "$d" = grove/changes/archive/ ] || grove archive "$(basename "$d" | cut -d- -f1-2)" >/dev/null 2>&1
 		done
 		git add -A && git commit -qm build ;;
 	rev-*)
-		v=$(grep -o '\.tend/verdict-[0-9a-f]*\.json' <<<"$4" | head -1)
-		h=${v#.tend/verdict-} h=${h%.json}
+		v=$(grep -oE '[^ ]*verdict-[0-9a-f]{40}\.json' <<<"$4" | head -1)
+		h=${v##*verdict-} h=${h%.json}
 		case ${REVIEW:-success} in
 		success) jq -n --arg h "$h" '{head: $h, conclusion: "success", actionable: false, summary: "ok"}' ;;
 		noconclusion) jq -n --arg h "$h" '{head: $h, actionable: false, summary: "ok"}' ;;
@@ -81,8 +83,6 @@ project() { # dir [target] [remote]
 	git add -A && git commit -qm propose
 	printf 'title: "One"\ncreated: 2026-11-14T02:00:00Z\nchanges: [261015-c0000]\nplanned: %s\n' "$(git rev-parse HEAD)" >grove/cycles/261114-k0000-one.yaml
 	git add -A && git commit -qm plan
-	# ponytail: tend still writes .tend/ into the candidate; slice 1 moves it out.
-	printf '.tend/\n' >>.git/info/exclude
 	if [ "${3:-}" = remote ]; then
 		git clone -q --bare . "$d.git" && git remote add origin "$d.git" && git fetch -q origin && git branch -q -u "origin/$target"
 	fi
@@ -94,13 +94,14 @@ scenario() {
 	name=$1
 	t=$top/$name
 	mkdir -p "$t/state"
-	export HERDR_STATE=$t/state
-	unset REVIEW IMPL_FAIL
+	export HERDR_STATE=$t/state TEND_STATE=$t/tend
+	unset REVIEW IMPL_FAIL IMPL_SLEEP
 }
-run() { "$tend" "$t/repo" 261114-k0000 >"$t/out" 2>"$t/err"; }
+run() { "$tend" "$t/repo" 261114-k0000 >"$t/out${1:-}" 2>"$t/err${1:-}"; } # [suffix for out and err]
 reviews() { grep -c '^agent prompt rev-' "$HERDR_STATE/log"; }
 records() { (cd "$t/repo" && grove changes --json | jq '[.runs[]? | select(.cycle == "261114-k0000")] | length'); }
-verdict() { ls "$t"/state/wt-*/.tend/verdict-*.json; }
+verdict() { ls "$TEND_STATE"/runs/*/verdict-*.json; }
+worktree() { echo "$t"/state/wt-*; }
 said() { grep -q "$1" "$t/err"; }
 
 scenario remote-claim
@@ -108,6 +109,9 @@ project "$t/repo" main remote
 run
 check "claims with origin and reaches a verdict" test $? = 0
 check "the verdict says success" test "$(jq -r .conclusion "$t/out" 2>/dev/null)" = success
+check "with no Git excludes, the candidate stays clean" test -z "$(git -C "$(worktree)" status --porcelain 2>&1)"
+check "the verdict is kept outside the candidate" test -f "$(verdict)"
+check "the reviewer may write only there besides its checkout" grep -q -- "--add-dir $TEND_STATE/runs/" "$HERDR_STATE/log"
 
 scenario remote-resume
 project "$t/repo" main remote
@@ -136,7 +140,7 @@ jq '.head = "0000000000000000000000000000000000000000"' "$v" >"$t/v" && mv "$t/v
 run
 check "rerun exits 0" test $? = 0
 check "a cached verdict naming another head is reviewed again" test "$(reviews)" = 2
-check "the new verdict names the head" test "$(jq -r .head "$v")" = "$(git -C "$(dirname "$v")/.." rev-parse HEAD)"
+check "the new verdict names the head" test "$(jq -r .head "$v")" = "$(git -C "$(worktree)" rev-parse HEAD)"
 
 scenario cached-incomplete
 project "$t/repo"
@@ -159,5 +163,34 @@ run
 check "a project targeting trunk reaches a verdict" test $? = 0
 check "the worktree is based on trunk" grep -q -- '--base trunk' "$HERDR_STATE/log"
 check "the reviewer is shown the diff from trunk" grep -q 'git diff trunk...HEAD' "$HERDR_STATE/log"
+
+scenario legacy
+project "$t/repo"
+run
+# Put the attempt back as the prototype left it: its files in .tend/ in the checkout.
+run_dir=$(dirname "$(verdict)")
+touch "$run_dir/repaired"
+mkdir "$(worktree)/.tend" && mv "$run_dir"/* "$(worktree)/.tend/"
+run
+check "an attempt with a legacy .tend/ carries on" test $? = 0
+check "its verdict is reused, not discarded" test "$(reviews)" = 1
+check "its consumed repair stays consumed" test -f "$run_dir/repaired"
+check "and .tend/ leaves the candidate" test ! -e "$(worktree)/.tend"
+
+scenario lock
+project "$t/repo"
+IMPL_SLEEP=30 "$tend" "$t/repo" 261114-k0000 >"$t/out1" 2>"$t/err1" & # not run: $! must be tend
+first=$!
+for _ in $(seq 100); do grep -q '^agent prompt impl-' "$HERDR_STATE/log" 2>/dev/null && break; sleep 0.1; done
+run 2
+check "a second tend while one runs is refused" test $? = 4
+check "and names the holder" grep -q "pid $first" "$t/err2"
+check "the implementer was prompted once" test "$(grep -c '^agent prompt impl-' "$HERDR_STATE/log")" = 1
+kill -9 "$first"
+wait "$first" 2>/dev/null
+run 3
+check "after the holder is killed, tend takes over" test $? = 0
+check "carrying on its attempt" grep -q "carrying on attempt" "$t/err3"
+kill "$(cat "$HERDR_STATE/sleeper")" 2>/dev/null
 
 [ "$fails" = 0 ] && echo "all passed" || { echo "$fails failed"; exit 1; }
