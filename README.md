@@ -15,7 +15,7 @@ grove claim
 ```
 
 Grove holds what is agreed. Herdr runs the agents where you can watch and
-take over. tend is currently a prototype script between them. It reconstructs
+take over. tend is a small Go program between them. It reconstructs
 progress from Git, its own run files and Herdr on every run.
 
 The agreed [execution plan](docs/work/261114-reliable-orchestration/spec.md)
@@ -24,8 +24,9 @@ handoff. Start there when continuing development across sessions.
 
 ## Run it
 
-Needs `herdr`, `grove`, `git`, `jq`, `perl`, and Claude Code and Codex signed in.
-Run it inside a Herdr pane:
+Build it with Go 1.26 (`go build -o bin/tend .`). It needs `herdr`, `grove`,
+`git` and `gh` on PATH, and Claude Code and Codex signed in. Run it inside a
+Herdr pane:
 
 ```sh
 bin/tend <repo> <cycle-id>
@@ -142,8 +143,9 @@ dev/fixture.sh ~/tmp/ledger
 bin/tend ~/tmp/ledger 261114-pr0t0
 ```
 
-`dev/test.sh` runs the regressions: real Git and Grove, a stand-in for Herdr
-whose agents act at once. It starts no agent and needs no Grove checkout.
+`dev/test.sh` builds tend and runs the regressions: real Git and Grove, a
+stand-in for Herdr whose agents act at once. It starts no agent and needs no
+Grove checkout.
 
 ## Where the prototype reads progress
 

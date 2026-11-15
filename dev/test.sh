@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
-# Regressions for bin/tend: real Git and Grove, a stand-in for Herdr whose agents
-# act at once in tend's working directory. No live agent runs.
+# Regressions for tend, built from this checkout: real Git and Grove, a stand-in
+# for Herdr whose agents act at once in tend's working directory. No live agent
+# runs. TEND names another build to check instead.
 #
 #   dev/test.sh
 set -uo pipefail
-tend=$(cd "$(dirname "$0")/.." && pwd)/bin/tend
 top=$(mktemp -d)
 [ -n "${KEEP:-}" ] && echo "kept $top" || trap 'rm -rf "$top"' EXIT
+tend=${TEND:-$top/tend}
+[ -n "${TEND:-}" ] || (cd "$(dirname "$0")/.." && go build -o "$tend" .) || exit 1
 export GIT_AUTHOR_NAME=Test GIT_AUTHOR_EMAIL=test@example.com GIT_COMMITTER_NAME=Test GIT_COMMITTER_EMAIL=test@example.com
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 
@@ -569,6 +571,7 @@ check "on branch tend/build-7, pushed" test "$(git -C "$t/repo.git" rev-parse te
 check "the commit message is asked to close the issue" grep -q "^agent prompt impl-issue-7-.*End with the line 'Closes #7'" "$HERDR_STATE/log"
 check "one pull request by the account" test "$(cat "$HERDR_STATE/pr-tend_build-7.by")" = the-bot
 check "its review shows no grove review" test "$(grep -c 'What merging approves' "$HERDR_STATE/reviews")" = 0
+check "its attempt is named by cksum of the repository's path, as before" test -d "$TEND_STATE/runs/issue-7-$(printf %s "$t/repo" | cksum | cut -d' ' -f1)"
 check "status finds the attempt" grep -q '^attempt issue-7-.* of issue-7: tend/build-7' <<<"$("$tend" status "$t/repo" issue-7)"
 check "the overview lists it to review" grep -A1 '^Implementations to review' <<<"$("$tend" status "$t/repo")" | grep -q 'Add the file'
 build 2
