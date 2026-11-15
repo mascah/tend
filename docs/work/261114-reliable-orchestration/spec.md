@@ -452,6 +452,10 @@ controller lock. Code written and local regressions passed; committed on
   the verdict outside the candidate, `--add-dir`, legacy reuse, a refused second
   tend that leaves the implementer prompted once, and takeover after `kill -9` of
   the holder. Before the change, 18 checks failed. The unreadable-lock path was checked by hand.
+- Codex review of the branch (2 rounds, `NO_OPEN_ISSUES`): fixed a relative
+  `TEND_STATE` that put verdicts in the candidate, and a regression that read
+  Grove's root from the caller's checkout instead of the attempt's. Both have
+  regressions; `dev/test.sh` now passes all 35 checks.
 - Not exercised: live Codex writing through `--add-dir` (only the sandbox
   policy was probed), live Herdr/Claude, a legacy name clash, Linux.
 - Remaining slice 1: repair still marked before delivery; after takeover, the

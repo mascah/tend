@@ -164,6 +164,20 @@ check "a project targeting trunk reaches a verdict" test $? = 0
 check "the worktree is based on trunk" grep -q -- '--base trunk' "$HERDR_STATE/log"
 check "the reviewer is shown the diff from trunk" grep -q 'git diff trunk...HEAD' "$HERDR_STATE/log"
 
+scenario relative-state
+project "$t/repo"
+(cd "$t" && TEND_STATE=rel "$tend" "$t/repo" 261114-k0000 >"$t/out" 2>"$t/err")
+check "a relative TEND_STATE reaches a verdict" test $? = 0
+check "its files stay outside the candidate" test -z "$(git -C "$(worktree)" status --porcelain 2>&1)"
+
+scenario root-moved
+project "$t/repo"
+run
+(cd "$t/repo" && git mv grove agreed && sed 's/^root: .*/root: agreed/' grove.yaml >g && mv g grove.yaml && git commit -qam "Move the documents")
+run
+check "after the target moves its documents, the attempt carries on" test $? = 0
+check "its finished candidate is not implemented again" test "$(grep -c '^agent prompt impl-' "$HERDR_STATE/log")" = 1
+
 scenario legacy
 project "$t/repo"
 run

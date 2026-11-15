@@ -34,6 +34,7 @@ stop() {
 # when capacity grows.
 state=${TEND_STATE:-${XDG_STATE_HOME:-$HOME/.local/state}/tend}
 mkdir -p "$state/runs"
+state=$(cd "$state" && pwd) # tend changes into the attempt later
 holder=$(perl -MFcntl=:flock -e '
 	my ($file, $tend) = @ARGV;
 	open(my $f, ">>", $file) or die "tend: $file: $!\n";
@@ -107,7 +108,7 @@ else
 fi
 branch=$(jq -r .branch <<<"$rec")
 impl=impl-$(jq -r .id <<<"$rec")
-root=$(jq -r .root <<<"$proj")
+root=$(project | jq -r .root) # the attempt's, not the caller's
 run=$state/runs/$(jq -r .id <<<"$rec")
 mkdir -p "$run"
 # The prototype kept an attempt's verdicts and repair mark in .tend/ in the
