@@ -1,0 +1,147 @@
+#!/usr/bin/env bash
+# One pass of the loop for one Grove cycle:
+#   grove claim -> Claude implements in a Herdr worktree pane -> Codex reviews
+#   the head -> at most one repair -> Codex reviews the new head.
+#
+#   tend <repo> <cycle-id>
+#
+# Run it inside a Herdr pane. Needs herdr, grove, git, jq. TIMEOUT_MS bounds each
+# agent turn (default 30 minutes). Exit 0: reviewed, see the verdict. Exit 3: a
+# person is needed, and a Herdr notification says why.
+#
+# It keeps no state of its own. Where it is comes from Git each time: the attempt
+# from grove/runs, built from the archive on the attempt's branch, reviewed from
+# the verdict file named after the head. So after exit 3, or a kill, run the same
+# line again and it carries on.
+set -euo pipefail
+repo=$(cd "$1" && pwd) cycle=$2
+
+say() { printf 'tend: %s\n' "$*" >&2; }
+stop() {
+	say "$*"
+	herdr notification show "tend $cycle needs you" --body "$*" --sound request >/dev/null 2>&1 || true
+	exit 3
+}
+
+# Start an agent in a pane. A pane just split is not yet at its prompt, so a busy
+# pane is retried. A folder the harness has never seen gets its trust dialog,
+# Claude's per worktree and Codex's per repository, and that one is answered here.
+# ponytail: trusts whatever repo the caller passed; the real tool should answer
+# only for repos the owner registered.
+start() { # name kind pane [agent args...]
+	local name=$1 kind=$2 pane=$3 out i screen
+	shift 3
+	for i in 1 2 3 4 5 6 7 8 9 10; do
+		out=$(herdr agent start "$name" --kind "$kind" --pane "$pane" --timeout 60000 -- "$@" 2>&1) && return
+		[ "$(jq -r .error.code <<<"$out" 2>/dev/null)" = agent_pane_busy ] || break
+		sleep 1
+	done
+	screen=$(herdr agent read "$name" --source visible --lines 40 2>/dev/null || true)
+	case $screen in
+	*"Yes, I trust this folder"*) herdr agent send-keys "$name" down enter >/dev/null ;;
+	*"Trust and continue"*) herdr agent send-keys "$name" enter >/dev/null ;;
+	*) stop "$name did not start: $(jq -r '.error.code // "unknown"' <<<"$out" 2>/dev/null)" ;;
+	esac
+	# Codex comes out of its dialog as done, not idle.
+	herdr agent wait "$name" --until idle --until done --timeout 60000 >/dev/null 2>&1 || stop "$name did not start"
+}
+
+# Prompt an agent and wait for it to settle. Blocked, unknown or timed out is a
+# person's to deal with; the loop answers no dialog but the trust one above.
+ask() { # name text
+	local out st
+	out=$(herdr agent prompt "$1" "$2" --wait --timeout "${TIMEOUT_MS:-1800000}" 2>&1) ||
+		stop "$1: $(jq -r '.error.code // "prompt failed"' <<<"$out" 2>/dev/null)"
+	st=$(jq -r .result.agent.agent_status <<<"$out")
+	case $st in idle | done) ;; *) stop "$1 is $st" ;; esac
+}
+
+# 1. The attempt. The newest record on grove/runs for this cycle, if its checkout
+#    still holds its branch; otherwise a new worktree and a claim made inside it,
+#    so the attempt's branch is the worktree's.
+rec=$(git -C "$repo" log --format=%B grove/runs 2>/dev/null | jq -c --arg c "$cycle" 'select(.cycle == $c)' | head -1 || true)
+dir=$(jq -r '.checkout // empty' <<<"$rec")
+if [ -n "$dir" ] && [ "$(git -C "$dir" branch --show-current 2>/dev/null)" = "$(jq -r .branch <<<"$rec")" ]; then
+	ws=$(herdr worktree list --cwd "$repo" | jq -r --arg p "$dir" '.result.worktrees[] | select(.path == $p) | .open_workspace_id // empty')
+	[ -n "$ws" ] || ws=$(herdr worktree open --cwd "$repo" --path "$dir" --no-focus | jq -r .result.workspace.workspace_id)
+	cd "$dir"
+	say "carrying on attempt $(jq -r .id <<<"$rec") in $dir"
+else
+	wt=$(herdr worktree create --cwd "$repo" --branch "tend-$(date +%H%M%S)" --base main --label "tend: $cycle" --no-focus)
+	dir=$(jq -r .result.worktree.path <<<"$wt")
+	ws=$(jq -r .result.workspace.workspace_id <<<"$wt")
+	cd "$dir"
+	grove claim "$cycle" >/dev/null || stop "grove claim refused $cycle"
+	rec=$(git log -1 --format=%B grove/runs | jq -c .)
+	say "claimed $cycle as attempt $(jq -r .id <<<"$rec") in $dir"
+fi
+branch=$(jq -r .branch <<<"$rec")
+impl=impl-$(jq -r .id <<<"$rec")
+root=$(grove changes --json | jq -r .root)
+mkdir -p .tend
+
+# A pane of the workspace to split from, and a new one for a new agent.
+split() { herdr pane split "$(herdr pane list --workspace "$ws" | jq -r '.result.panes[0].pane_id')" --direction right --cwd "$dir" --no-focus | jq -r .result.pane.pane_id; }
+
+# The implementer is a name, not a session: if its pane is gone, a new session
+# takes the name and finds the work in Git.
+implementer() {
+	herdr agent get "$impl" >/dev/null 2>&1 && return
+	local p
+	p=$(herdr pane list --workspace "$ws" | jq -r '[.result.panes[] | select(.agent == null)][0].pane_id // empty')
+	[ -n "$p" ] || p=$(split)
+	# Auto mode, so that routine commands ask nobody.
+	start "$impl" claude "$p" --permission-mode auto
+}
+
+# Done is what Git holds, never what the pane's state says.
+unbuilt() { # prints why the branch is not a finished candidate, or nothing
+	[ -z "$(git status --porcelain)" ] || { echo "$branch has uncommitted files"; return; }
+	local id
+	for id in $(jq -r '.changes[]' <<<"$rec"); do
+		ls -d "$root/changes/archive/$id"-* >/dev/null 2>&1 || { echo "change $id is not archived on $branch"; return; }
+	done
+}
+
+# A fresh reviewer for each head, in another harness. Its only output is the
+# verdict file named after the head; its pane is closed after it.
+review() {
+	local head rev rpane
+	head=$(git rev-parse HEAD)
+	v=.tend/verdict-$head.json
+	[ -f "$v" ] && return
+	rev=rev-${head:0:7}
+	rpane=$(split)
+	start "$rev" codex "$rpane" -s workspace-write -a never
+	ask "$rev" "You are the independent reviewer of branch $branch at commit $head. You did not write it and nobody can answer questions. The change is 'git diff main...HEAD'; what it must do is in the change folders that diff moves into $root/changes/archive/ (proposal.md, specs, tasks.md, implementation.md). Check the code against those requirements, run the project's tests, and reproduce each scenario the change spec gives. Report only material findings: a defect, an unmet requirement, or a claim in implementation.md the code does not support. Edit, stage and commit nothing. Your only output is the file $v, exactly this JSON shape: {\"head\": \"$head\", \"conclusion\": \"success or failure\", \"actionable\": true or false, \"summary\": \"findings with file:line and what you ran\"}. actionable is true only when every finding is an in-scope code fix that needs no decision from the owner."
+	# The pane said the turn ended; only the file says a review happened.
+	[ "$(jq -r .head "$v" 2>/dev/null)" = "$head" ] || stop "$rev settled without a verdict for ${head:0:7}; look at pane $rpane"
+	herdr pane close "$rpane" >/dev/null
+	[ "$(git rev-parse HEAD)" = "$head" ] && [ -z "$(git status --porcelain)" ] || stop "$rev changed the checkout"
+	say "review of ${head:0:7}: $(jq -r .conclusion "$v")"
+}
+
+# 2. Implement, unless the branch already holds a finished candidate.
+if [ -n "$(unbuilt)" ]; then
+	implementer
+	ask "$impl" "/grove-implement $cycle"
+	why=$(unbuilt)
+	[ -z "$why" ] || stop "$why"
+fi
+
+# 3. Review the head. 4. One repair, then review the new head.
+review
+if [ "$(jq -r .conclusion "$v")" = failure ] && [ "$(jq -r .actionable "$v")" = true ] && [ ! -f .tend/repaired ]; then
+	reviewed=$(git rev-parse HEAD)
+	echo "$reviewed" >.tend/repaired
+	implementer
+	ask "$impl" "An independent review of commit $reviewed found problems. Its findings are the summary in $v. Fix each one that is in scope, run the tests, update implementation.md where a claim changes, and commit. Ask no one."
+	why=$(unbuilt)
+	[ -z "$why" ] || stop "$why"
+	[ "$(git rev-parse HEAD)" != "$reviewed" ] || stop "$impl committed no repair"
+	review
+fi
+
+herdr notification show "tend $cycle: $(jq -r .conclusion "$v")" --body "$branch at $(jq -r .head "$v" | cut -c1-7) is ready for you" --sound done >/dev/null 2>&1 || true
+say "done: $branch, verdict $dir/$v"
+jq . "$v"
