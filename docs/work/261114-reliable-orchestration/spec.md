@@ -12,9 +12,9 @@ Read this document and the repository instructions, then inspect the current
 branch, worktrees, diff and relevant implementation before acting. The baseline
 below is historical evidence, not a claim about the checkout you find.
 
-**Next Tend work: slice 3's remaining handoff visibility.** `tend propose`
-(intake from labelled GitHub issues) is done and live on the sandbox, on branch
-`tend/slice3-intake`; see the session handoff for what remains. Slices 1, 2
+**Next Tend work: slice 4, prove portability, once its order is agreed with the
+owner.** Slice 3 is done on branch `tend/slice3-intake` (not merged): intake from
+labelled GitHub issues, the handoff overview and polling, live on the sandbox. Slices 1, 2
 and 2a are done on `tend/slice1-claim-verdict` (not merged; merging is the
 owner's decision), slices 2 and 2a shown live on the private sandbox
 `mascah/tend-sandbox`, publishing as `mascah-bot`, with the owner as the teammate
@@ -318,7 +318,7 @@ here describes delivery, not how strongly the architectural direction is agreed.
 | 1 — Recoverable execution | Done on `tend/slice1-claim-verdict`, live interruptions demonstrated; not merged | Existing Tend prototype | [Recovery](#recoverable-execution), [review](#review-integrity), [Grove integration](#grove-integration-and-repository-configuration) |
 | 2 — One real shared-runner workflow | Done on `tend/slice1-claim-verdict`, live on sandbox PRs #1–#3; not merged | Slice 1 | [Publication](#shared-review-and-publication) |
 | 2a — Act on requested changes | Done on `tend/slice1-claim-verdict`, live on sandbox PR #3; not merged | Slice 2 | [Below](#2a--act-on-requested-changes) |
-| 3 — Explicit request-to-proposal intake | In progress: `tend propose` live on `tend/slice3-intake` (not merged); handoff visibility and polling remain | Slice 2 and G available | [Intake and handoffs](#request-intake-and-explicit-handoffs) |
+| 3 — Explicit request-to-proposal intake | Done on `tend/slice3-intake`, live on the sandbox; not merged | Slice 2 and G available | [Intake and handoffs](#request-intake-and-explicit-handoffs) |
 | 4 — Prove portability | Not started | Earlier lifecycle demonstrated | [Portability](#portability) |
 
 ### G — Finish Grove #164 independently
@@ -773,13 +773,44 @@ proposal PRs and their questions, approved changes without a cycle, cycles ready
 to claim, execution PRs awaiting review), from Grove's JSON and GitHub; then let
 `tend watch` run intake. PR #6 is the owner's to review, revise or merge.
 
+2026-11-15 — Slice 3, second unit: the handoff overview and polling intake. The
+owner merged proposal PR #6, approving change `261115-2az0q`. Committed as
+`a5536bc` on `tend/slice3-intake` plus the docs commit after; not merged.
+
+- `tend status <repo>` (no cycle; reads only): approved changes without a cycle,
+  cycles not done with Grove's verdict, this runner's attempts for those cycles,
+  open proposal PRs (`tend/issue-*`) and implementation PRs (`grove/*`, marked
+  when changes are requested), and labelled issues no PR, in any state, came from.
+- `tend watch [<repo>...]` also runs `tend propose` for each repository given,
+  except one with an intake run folder waiting for a person.
+- Checks: `dev/test.sh` passes 170. New: each overview section, a request drafted
+  or merged left out, an attempt for a done cycle left out (Grove judges done from
+  `origin`'s target); watch running intake and leaving a request that needs a
+  person. The `gh` stand-in's `pr list` now builds every PR and narrows by head,
+  author or state.
+- Live: the sandbox overview showed exactly the approved `261115-2az0q` waiting for
+  a cycle. Its first version listed issue #4 as waiting (only open PRs were
+  checked) and a finished attempt; both fixed, with checks. A live watch pass ran
+  intake with nothing to do.
+- Slice 3's acceptance, as shown: labelled requests from one tracker, stable
+  issue identity, links (`Refs #n`), no repeats, the cap, a visible outcome for an
+  undraftable request, no edits to teammates' prose (a comment and a label only),
+  Grove's unattended propose, the handoffs visible (proposal questions on its PR
+  and in the overview, planning, review), and the consequence of merging with
+  open questions, consequential and routine apart. Polling came last.
+- Not done: see the first unit's list (no fetch before branching, leftover
+  worktrees, closed proposals, manual revision). Cycle planning stays manual.
+
+Next action: agree slice 4's order with the owner: a non-Grove work item, tmux
+without Herdr, or a second tracker. Merging `tend/slice3-intake` is the owner's.
+
 A suitable prompt for a future implementation session is:
 
 > Read `docs/work/261114-reliable-orchestration/spec.md` in Tend and the repository
 > instructions. Revalidate the current handoff and implement the next unfinished
-> unit of slice 3 within its acceptance. Preserve unrelated work and active Grove
+> unit of slice 4 within its acceptance, in the order agreed with the owner. Preserve unrelated work and active Grove
 > implementation. Update the delivery status with the revision, checks and next
 > action; do not advance into proposal intake or broader polling.
 
-When slice 1 is complete, update this example and the starting pointer above to
+When a slice is complete, update this example and the starting pointer above to
 the next eligible slice so that stale handoff text does not restart finished work.

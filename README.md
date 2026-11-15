@@ -29,8 +29,8 @@ Run it inside a Herdr pane:
 
 ```sh
 bin/tend <repo> <cycle-id>
-bin/tend status <repo> <cycle-id>
-bin/tend watch
+bin/tend status <repo> [<cycle-id>]
+bin/tend watch [<repo>...]
 bin/tend propose <repo>
 ```
 
@@ -94,8 +94,14 @@ on, and the PR description is not rewritten.
 
 `tend watch` runs in a pane of its own and does that without you: every
 `WATCH_SECONDS` (default 300) it runs tend on each attempt whose PR is open
-with a change request on its head. An attempt waiting for you is left alone
-until you have run tend on it.
+with a change request on its head, and `tend propose` on each repository it
+was given. An attempt or request waiting for you is left alone until you have
+run tend on it.
+
+`tend status <repo>`, without a cycle, says what waits for whom: approved
+changes without a cycle (plan one), cycles not done with Grove's verdict,
+this runner's attempts for them, proposals and implementations to review
+(and which have changes requested), and labelled requests not yet drafted.
 
 `tend propose <repo>` turns requests into proposals, once per run. Each open
 GitHub issue labelled `tend` in a listed repository, oldest first, is drafted
