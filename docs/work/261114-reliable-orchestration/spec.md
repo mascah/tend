@@ -12,11 +12,11 @@ Read this document and the repository instructions, then inspect the current
 branch, worktrees, diff and relevant implementation before acting. The baseline
 below is historical evidence, not a claim about the checkout you find.
 
-**Next Tend work: slice 2, one real shared-runner workflow.** Slice 1 is done on
-`tend/slice1-claim-verdict` (not merged; merging is the owner's decision), including
-live interruptions through Herdr with Claude and Codex (see the session handoff).
-Slice 2 needs its remote repository and publication authority settled with the owner
-before anything is pushed. Preserve existing attempts and candidate branches. Do not
+**Next Tend work: finish slice 2, one real shared-runner workflow.** Slice 1 is
+done on `tend/slice1-claim-verdict` (not merged; merging is the owner's decision).
+Slice 2's publication is live on the private sandbox `mascah/tend-sandbox`, PR #1;
+what remains is the owner, as the teammate, reviewing and acting through that PR
+(see the session handoff). Tend publishes only to origins the runner lists. Preserve existing attempts and candidate branches. Do not
 start proposal polling or multi-repository scheduling first.
 
 Grove #164's implementation merged as #165 (`0083bba`). Check Grove's own record for
@@ -307,7 +307,7 @@ here describes delivery, not how strongly the architectural direction is agreed.
 | --- | --- | --- | --- |
 | G — Finish Grove #164 | Implementation merged as #165 (`0083bba`); acceptance per Grove's record | Existing Grove implementation and owner coordination | Invocation fix, outstanding behavioral findings and Grove's own acceptance |
 | 1 — Recoverable execution | Done on `tend/slice1-claim-verdict`, live interruptions demonstrated; not merged | Existing Tend prototype | [Recovery](#recoverable-execution), [review](#review-integrity), [Grove integration](#grove-integration-and-repository-configuration) |
-| 2 — One real shared-runner workflow | Not started | Slice 1 | [Publication](#shared-review-and-publication) |
+| 2 — One real shared-runner workflow | In progress: publication live on a sandbox PR; the second person's review remains | Slice 1 | [Publication](#shared-review-and-publication) |
 | 3 — Explicit request-to-proposal intake | Not started | Slice 2 and G available | [Intake and handoffs](#request-intake-and-explicit-handoffs) |
 | 4 — Prove portability | Not started | Earlier lifecycle demonstrated | [Portability](#portability) |
 
@@ -544,6 +544,47 @@ blocked agent, an agent killed mid-implementation or mid-review, Linux, tmux.
 
 Next action: slice 2. Settle with the owner the remote repository and publication
 authority, then add one PR publication with deduplication across interruptions.
+
+2026-11-15 — Slice 2, publication. The owner chose a small private throwaway
+repository and authorized pushing branches, opening and updating PRs and
+commenting/statuses there, never merging; the owner plays the teammate. Code
+written and local regressions passed; exercised live; uncommitted at the time of
+writing, then committed on `tend/slice1-claim-verdict`; not merged.
+
+- Publication (end of `bin/tend`): only when `origin`'s URL is a line of
+  `TEND_STATE/publish` (a side review pointed out that without this, any repository
+  with a remote would be published to). Push `HEAD:refs/heads/<branch>`, never
+  forced; a rejected push stops for a person. One PR per branch, looked up on GitHub
+  each run (`gh pr list --head`, all states), so there is no local acknowledgment to
+  lose; created onto Grove's target with the cycle's title from `grove changes
+  --json`, else its body edited. The verdict goes on the reviewed head as the
+  `tend/review` commit status, so a later commit has no passing result. The body
+  holds the verdict, earlier verdicts of the attempt, a note pointing to each
+  `implementation.md` for open-question choices, and `grove review`'s summary.
+- Checks: `dev/test.sh` passes 92 (a `gh` stand-in added). New: an unlisted origin
+  gets no push or PR; push, one PR onto the target, title, body, status; a repeated
+  run edits, not creates; a PR created but not acknowledged (stand-in fails after
+  creating) is found by the rerun; a later commit's failure goes on the new head with
+  the earlier pass kept as history; a diverged remote branch is not overwritten.
+  Against the previous `bin/tend` 22 of them fail.
+- Live (`mascah/tend-sandbox`, private, from `dev/fixture.sh`; same versions as
+  slice 1's runs): attempt `261115-n5xeb` implemented and passed at `c0c26aa`. A
+  wrapper around the real `gh` paused after `gh pr create` succeeded; tend was
+  killed there, with PR #1 open and no status. The rerun found PR #1, opened none,
+  and set the status. Then a planted defect (`8991d29`, message and test reworded)
+  failed review, was repaired (`3d107aa`) and passed; PR #1 was updated to lead with
+  that pass and list both earlier reviews. Statuses: `c0c26aa` and `3d107aa`
+  success; `8991d29` none, since tend publishes at the end of a run.
+- Not exercised: the second person's review and merge through the PR; a remote
+  branch someone else pushed to (stand-in only); `gh` failures other than a lost
+  create; a failed final verdict on GitHub (stand-in only).
+- Noticed: `git push -q` still prints GitHub's "create a pull request" hint to
+  tend's stderr. A failed head mid-run never gets a status (only the final head is
+  published); the PR body is where earlier failures show.
+
+Next action: the owner reviews PR #1 in `mascah/tend-sandbox` as the teammate and
+merges or requests changes through it. Record what they could and could not
+judge from the PR alone, then mark slice 2 done or add what was missing.
 
 A suitable prompt for a future implementation session is:
 

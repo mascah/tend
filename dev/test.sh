@@ -44,6 +44,7 @@ turn() { # name text
 		case ${REVIEW:-success} in
 		success) jq -n --arg h "$h" '{head: $h, conclusion: "success", actionable: false, summary: "ok"}' ;;
 		noconclusion) jq -n --arg h "$h" '{head: $h, actionable: false, summary: "ok"}' ;;
+		decision) jq -n --arg h "$h" '{head: $h, conclusion: "failure", actionable: false, summary: "a.txt:1 needs an owner decision."}' ;;
 		repairable) # fails the first head it sees, passes the rest
 			if [ -e "$s/failed-once" ]; then
 				jq -n --arg h "$h" '{head: $h, conclusion: "success", actionable: false, summary: "ok"}'
@@ -99,6 +100,29 @@ case "$1 $2" in
 esac
 EOS
 chmod +x "$top/bin/herdr"
+cat >"$top/bin/gh" <<'EOS'
+#!/usr/bin/env bash
+# GitHub stand-in: one PR per head branch, its body in pr-<branch>, statuses
+# appended to statuses as "<sha> <state>". CREATE_LOST opens the PR and then
+# fails, as when GitHub acted but tend never heard back.
+set -euo pipefail
+s=$HERDR_STATE
+printf 'gh %s\n' "$*" >>"$s/log"
+arg() { while [ $# -gt 1 ]; do [ "$1" != "$flag" ] || { echo "$2"; return; }; shift; done; }
+case "$1 $2" in
+"pr list") flag=--head b=$(arg "$@"); [ ! -f "$s/pr-${b//\//_}" ] || echo "https://example.test/pr/${b//\//_}" ;;
+"pr create")
+	flag=--head b=$(arg "$@")
+	cat >"$s/pr-${b//\//_}"
+	[ -z "${CREATE_LOST:-}" ] || exit 1
+	echo "https://example.test/pr/${b//\//_}" ;;
+"pr edit") cat >"$s/pr-${3##*/}" ;;
+api*)
+	sha=${2##*/} flag=-f st=$(printf '%s\n' "$@" | sed -n 's/^state=//p')
+	echo "$sha $st" >>"$s/statuses" ;;
+esac
+EOS
+chmod +x "$top/bin/gh"
 export PATH="$top/bin:$PATH"
 
 fails=0
@@ -137,7 +161,7 @@ scenario() {
 	t=$top/$name
 	mkdir -p "$t/state"
 	export HERDR_STATE=$t/state TEND_STATE=$t/tend
-	unset REVIEW IMPL_FAIL IMPL_SLEEP REPAIR_FAIL REV_FAIL BLOCK_AFTER_BUILD
+	unset REVIEW IMPL_FAIL IMPL_SLEEP REPAIR_FAIL REV_FAIL BLOCK_AFTER_BUILD CREATE_LOST
 }
 run() { "$tend" "$t/repo" 261114-k0000 >"$t/out${1:-}" 2>"$t/err${1:-}"; } # [suffix for out and err]
 reviews() { grep -c '^agent prompt rev-' "$HERDR_STATE/log"; }
@@ -169,6 +193,9 @@ run
 check "the rerun exits 0" test $? = 0
 check "the rerun carries on the same attempt" said "carrying on attempt $id"
 check "one record for the cycle" test "$(records)" = 1
+check "an origin not listed for publication gets no push or pull request" test "$(grep -c '^gh ' "$HERDR_STATE/log")" = 0
+check "and tend says why" said "is not listed in"
+check "and its candidate branch is not pushed" test -z "$(git -C "$t/repo.git" branch --list 'grove/2*')"
 
 scenario local-resume
 project "$t/repo"
@@ -177,6 +204,66 @@ check "without origin, a failure after the claim stops" test $? = 3
 run
 check "the rerun carries on and exits 0" test $? = 0
 check "one record for the cycle" test "$(records)" = 1
+check "without origin, nothing is published" test "$(grep -c '^gh ' "$HERDR_STATE/log")" = 0
+
+head() { git -C "$(worktree)" rev-parse HEAD; }
+branch() { git -C "$(worktree)" branch --show-current; }
+pr() { echo "$HERDR_STATE/pr-$(branch | tr / _)"; }
+creates() { grep -c '^gh pr create' "$HERDR_STATE/log"; }
+allow() { mkdir -p "$TEND_STATE" && git -C "$t/repo" remote get-url origin >>"$TEND_STATE/publish"; } # let tend publish to its origin
+
+scenario publish
+project "$t/repo" main remote
+allow
+run
+check "with origin, the run reaches a verdict" passed
+check "the reviewed head is pushed to origin" test "$(git -C "$t/repo.git" rev-parse "$(branch)" 2>&1)" = "$(head)"
+check "one pull request is opened, onto the target" test "$(grep -c '^gh pr create --base main ' "$HERDR_STATE/log")" = 1
+check "titled after the cycle" grep -q '^gh pr create .*--title One ' "$HERDR_STATE/log"
+check "its body names the reviewed head and the result" grep -q "Review of $(head | cut -c1-7): success" "$(pr)"
+check "and what merging approves, from grove review" grep -q 'approves' "$(pr)"
+check "the head carries the tend/review status" grep -qx "$(head) success" "$HERDR_STATE/statuses"
+check "status points at the pull request" grep -q 'a person reviews https://example.test/pr/' <<<"$(status)"
+run 2
+check "a repeated run opens no second pull request" test "$(creates)" = 1
+check "it updates the one there" grep -q '^gh pr edit https://example.test/pr/' "$HERDR_STATE/log"
+
+scenario publish-lost
+project "$t/repo" main remote
+allow
+CREATE_LOST=1 run
+check "a pull request opened on GitHub but not acknowledged stops" test $? = 3
+check "and says a rerun looks first" said "looks for one before opening another"
+run
+check "the rerun finishes" passed
+check "without opening another" test "$(creates)" = 1
+check "and sets the status the first run did not" grep -qx "$(head) success" "$HERDR_STATE/statuses"
+
+scenario publish-new-head
+project "$t/repo" main remote
+allow
+run
+first=$(head)
+(cd "$(worktree)" && echo more >>a.txt && git commit -qam "A later change")
+REVIEW=decision run 2
+check "a later commit is reviewed and published" test $? = 0
+check "its failure goes on the new head" grep -qx "$(head) failure" "$HERDR_STATE/statuses"
+check "the old head's pass is not the new head's" test "$(grep -c "^$(head) success" "$HERDR_STATE/statuses")" = 0
+check "the body leads with the new head's failure" grep -q "Review of $(head | cut -c1-7): failure" "$(pr)"
+check "says it needs a decision" grep -q "needs your decision" "$(pr)"
+check "and keeps the earlier pass as history" grep -q "^- $(echo "$first" | cut -c1-7): success" "$(pr)"
+check "still one pull request" test "$(creates)" = 1
+
+scenario publish-diverged
+project "$t/repo" main remote
+allow
+run
+git clone -q "$t/repo.git" "$t/other" && (cd "$t/other" && git checkout -q "$(branch)" && echo theirs >>a.txt && git commit -qam theirs && git push -q origin HEAD)
+(cd "$(worktree)" && echo ours >>a.txt && git commit -qam ours)
+run 2
+check "a branch someone else pushed to is not overwritten" test $? = 3
+check "and tend says why" grep -q "could not push" "$t/err2"
+check "their commit is still on origin" test "$(git -C "$t/repo.git" log -1 --format=%s "$(branch)")" = theirs
 
 scenario cached-wrong-head
 project "$t/repo"

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # One pass of the loop for one Grove cycle:
 #   grove claim -> Claude implements in a Herdr worktree pane -> Codex reviews
-#   the head -> at most one repair -> Codex reviews the new head.
+#   the head -> at most one repair -> Codex reviews the new head -> with an
+#   origin listed in TEND_STATE/publish, the branch pushed and one pull request.
 #
 #   tend <repo> <cycle-id>
 #   tend status <repo> <cycle-id>
@@ -261,7 +262,55 @@ if [ "$(jq -r .conclusion "$v")" = failure ] && [ "$(jq -r .actionable "$v")" = 
 	fi
 fi
 
-herdr notification show "tend $cycle: $(jq -r .conclusion "$v")" --body "$branch at $(jq -r .head "$v" | cut -c1-7) is ready for you" --sound done >/dev/null 2>&1 || true
-stage done "$(jq -r .conclusion "$v") for ${branch} at $(jq -r .head "$v" | cut -c1-7), verdict $v" "a person reviews $branch and decides whether to merge it"
+# 5. Publish, when the project has origin: push the branch, never forced, and keep
+#    one pull request for it. The PR is looked up on the remote each run, never
+#    remembered, so a rerun after any interruption updates it rather than opening
+#    another. The verdict goes on the reviewed commit as the tend/review status,
+#    so a later commit carries no passing result. Merging stays a person's.
+#    Only an origin listed, one URL a line, in $state/publish is published to.
+where=$branch
+origin=$(git remote get-url origin 2>/dev/null || true)
+if [ -n "$origin" ] && ! grep -qxF "$origin" "$state/publish" 2>/dev/null; then
+	say "not publishing: $origin is not listed in $state/publish"
+elif [ -n "$origin" ]; then
+	head=$(git rev-parse HEAD)
+	stage working "publishing $branch at ${head:0:7}" "tend pushes it and opens or updates its pull request"
+	git push -q origin "HEAD:refs/heads/$branch" ||
+		stop "could not push $branch to origin; if it has commits this checkout lacks, look at them, then run tend again"
+	body=$(
+		printf 'tend took Grove cycle `%s` through attempt `%s`. Merging is yours.\n\n' "$cycle" "$(jq -r .id <<<"$rec")"
+		printf '## Review of %s: %s\n\n%s\n\n' "${head:0:7}" "$(jq -r .conclusion "$v")" "$(jq -r .summary "$v")"
+		if [ "$(jq -r .conclusion "$v")" = failure ]; then
+			if [ "$(jq -r .actionable "$v")" = true ]; then echo "The one automatic repair is used; what to do next is yours."
+			else echo "The reviewer found something that needs your decision."; fi
+			echo
+		fi
+		earlier=$(for f in $(ls -t "$run"/verdict-*.json); do [ "$f" = "$v" ] || jq -r '"- \(.head[0:7]): \(.conclusion). \(.summary)"' "$f"; done)
+		[ -z "$earlier" ] || printf '## Earlier reviews in this attempt\n\n%s\n\n' "$earlier"
+		echo "## What merging approves"
+		echo
+		echo "The implementer's notes, including choices it made where the scope left a question open, are in each change's archived \`implementation.md\`."
+		echo
+		echo '```text'
+		grove review 2>&1 | sed '/^diff --git/,$d'
+		echo '```'
+	)
+	pr=$(gh pr list --head "$branch" --state all --json url --jq '.[0].url // empty') || stop "could not look for $branch's pull request"
+	if [ -z "$pr" ]; then
+		pr=$(gh pr create --base "$target" --head "$branch" --title "$(jq -r --arg c "$cycle" '[.cycles[]? | select(.id == $c) | .title][0] // $c' <<<"$proj")" --body-file - <<<"$body") ||
+			stop "could not open a pull request for $branch; run tend again, and it looks for one before opening another"
+	else
+		gh pr edit "$pr" --body-file - <<<"$body" >/dev/null || stop "could not update $pr"
+	fi
+	[ "$(jq -r .conclusion "$v")" = success ] && state=success || state=failure
+	gh api "repos/{owner}/{repo}/statuses/$head" -f state="$state" -f context=tend/review \
+		-f description="Independent review of ${head:0:7}: $(jq -r .conclusion "$v")" -f target_url="$pr" >/dev/null ||
+		stop "could not set the tend/review status on ${head:0:7}"
+	where=$pr
+	say "published $pr"
+fi
+
+herdr notification show "tend $cycle: $(jq -r .conclusion "$v")" --body "$where at $(jq -r .head "$v" | cut -c1-7) is ready for you" --sound done >/dev/null 2>&1 || true
+stage done "$(jq -r .conclusion "$v") for ${branch} at $(jq -r .head "$v" | cut -c1-7), verdict $v" "a person reviews $where and decides whether to merge it"
 say "done: $branch, verdict $v"
 jq . "$v"
