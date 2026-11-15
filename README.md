@@ -29,6 +29,7 @@ Run it inside a Herdr pane:
 
 ```sh
 bin/tend <repo> <cycle-id>
+bin/tend <repo> issue-<n>
 bin/tend status <repo> [<cycle-id>]
 bin/tend watch [<repo>...]
 bin/tend propose <repo>
@@ -102,6 +103,16 @@ run tend on it.
 changes without a cycle (plan one), cycles not done with Grove's verdict,
 this runner's attempts for them, proposals and implementations to review
 (and which have changes requested), and labelled requests not yet drafted.
+
+`tend <repo> issue-<n>` builds a GitHub issue instead of a Grove cycle, in a
+repository with or without Grove. The `tend-build` label approves it (only
+people with triage access can label); an open, labelled issue may start, and a
+closed one is done. Its title and description are the scope. It is built on
+`tend/build-<n>`, done when the branch has a commit and the implementer's notes
+for the reviewer are in the run folder; the reviewer checks the diff against
+the issue and those notes. Everything after is the same: one repair, the
+lock, recovery, publication (the commit message ends `Closes #<n>`), requested
+changes and watch. Grove's spec is not consulted or updated.
 
 `tend propose <repo>` turns requests into proposals, once per run. Each open
 GitHub issue labelled `tend` in a listed repository, oldest first, is drafted

@@ -12,9 +12,10 @@ Read this document and the repository instructions, then inspect the current
 branch, worktrees, diff and relevant implementation before acting. The baseline
 below is historical evidence, not a claim about the checkout you find.
 
-**Next Tend work: slice 4, prove portability, once its order is agreed with the
-owner.** Slice 3 is done on branch `tend/slice3-intake` (not merged): intake from
-labelled GitHub issues, the handoff overview and polling, live on the sandbox. Slices 1, 2
+**Next Tend work: slice 4, prove portability: tmux without Herdr next.** The
+owner agreed the order: a non-Grove work item (done on branch
+`tend/slice4-issue-items`, not merged), then tmux, then a second tracker. Slices
+1–3 are merged into `main`. Slices 1, 2
 and 2a are done on `tend/slice1-claim-verdict` (not merged; merging is the
 owner's decision), slices 2 and 2a shown live on the private sandbox
 `mascah/tend-sandbox`, publishing as `mascah-bot`, with the owner as the teammate
@@ -319,7 +320,7 @@ here describes delivery, not how strongly the architectural direction is agreed.
 | 2 — One real shared-runner workflow | Done on `tend/slice1-claim-verdict`, live on sandbox PRs #1–#3; not merged | Slice 1 | [Publication](#shared-review-and-publication) |
 | 2a — Act on requested changes | Done on `tend/slice1-claim-verdict`, live on sandbox PR #3; not merged | Slice 2 | [Below](#2a--act-on-requested-changes) |
 | 3 — Explicit request-to-proposal intake | Done on `tend/slice3-intake`, live on the sandbox; not merged | Slice 2 and G available | [Intake and handoffs](#request-intake-and-explicit-handoffs) |
-| 4 — Prove portability | Not started | Earlier lifecycle demonstrated | [Portability](#portability) |
+| 4 — Prove portability | In progress: non-Grove work item live on `tend/slice4-issue-items` (not merged); tmux and a second tracker remain | Earlier lifecycle demonstrated | [Portability](#portability) |
 
 ### G — Finish Grove #164 independently
 
@@ -803,6 +804,43 @@ owner merged proposal PR #6, approving change `261115-2az0q`. Committed as
 
 Next action: agree slice 4's order with the owner: a non-Grove work item, tmux
 without Herdr, or a second tracker. Merging `tend/slice3-intake` is the owner's.
+
+2026-11-15 — Slice 4, first unit: a GitHub issue as a work item. The owner had
+`tend/slice3-intake` fast-forwarded into `main` and pushed (`9fe3d93`), asked for
+the cycle of `261115-2az0q` to be planned (cycle `261115-qq9tq`, committed to the
+sandbox's `main`; `grove claim` would claim it; not built), and agreed slice 4's
+order. Committed as `7e3d8f6` on `tend/slice4-issue-items` plus the docs commit
+after; not merged.
+
+- `tend <repo> issue-<n>`: approval is the `tend-build` label (triage access to
+  put on); eligible while open and labelled; closed is done (exit 0). Scope: the
+  issue's title and body. Branch `tend/build-<n>`, found by its worktree; attempt
+  id `issue-<n>-<cksum of the repo path>`. Built when the branch has a commit and
+  the implementer wrote `implemented` (notes for the reviewer) in the run folder.
+  The reviewer is given the issue and the notes instead of change folders; repair
+  and requested-change prompts point at the notes; the commit message ends
+  `Closes #<n>`; no `grove review`. Lock, surviving agents, the one repair,
+  publication, requested changes, status and watch are shared. The second caller
+  moved only this into per-kind code: the attempt, the completion check and the
+  prompts' scope (`what`, `notes`, `trailer`).
+- Checks: `dev/test.sh` passes 189, in a repository without Grove: build, review
+  and publish; scope given to implementer and reviewer; `Closes #7`; no grove
+  review; status and overview; no rerun repeats; an unlabelled issue refused and a
+  closed one done; missing notes stopping; a surviving implementer waited for; a
+  repair pointing at the notes. Fixed on the way: the requested-change loop reused
+  `$id`, which now names the attempt.
+- Live: sandbox issue #7 (`list` ends with a count) became PR #8 by `mascah-bot`,
+  "End ledger list with a count of records", body ending `Closes #7`; Codex passed
+  `72b84aa` against the issue and notes (14 tests, 0/1/6-record runs). The sandbox
+  has Grove, so this did not prove a repository without it; the regressions do.
+  The implementer's notes observed that a direct build leaves Grove's maintained
+  spec silent on the new behavior.
+- Open for the owner: whether `issue-<n>` builds should be refused in a repository
+  that has Grove (the spec would otherwise drift), and whether a live run in a
+  repository without Grove is wanted (a second throwaway repository).
+
+Next action: tmux without Herdr. Herdr supplies agent state (working, idle,
+blocked); tmux does not, so tend must establish it itself.
 
 A suitable prompt for a future implementation session is:
 
