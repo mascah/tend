@@ -6,8 +6,8 @@
 #   requests on it made once.
 #
 #   tend <repo> <cycle-id>
-#   tend status <repo> <cycle-id>
-#   tend watch
+#   tend status <repo> [<cycle-id>]
+#   tend watch [<repo>...]
 #   tend propose <repo>
 #
 # Run it inside a Herdr pane. Needs herdr, grove, git, jq, perl, and gh to publish. TIMEOUT_MS bounds
@@ -44,10 +44,17 @@ mkdir -p "$state/runs"
 state=$(cd "$state" && pwd) # tend changes into the attempt later
 
 # tend watch: every WATCH_SECONDS (default 300), each attempt whose pull request
-# is open with a change request on its head is run again. An attempt waiting for
-# a person (needs-you) is left alone until a person has run tend on it.
+# is open with a change request on its head is run again, and tend propose runs
+# for each repository named. An attempt or request waiting for a person
+# (needs-you) is left alone until a person has run tend on it.
 if [ "$mode" = watch ]; then
 	while :; do
+		for r in "$@"; do
+			r=$(cd "$r" && pwd) || continue
+			s=$(cd "$r" && gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null) || continue
+			! grep -qs '^[^ ]* needs-you:' "$state/intake/${s//\//_}"-*/status || continue
+			"$0" propose "$r" || true
+		done
 		for d in "$state"/runs/*/; do
 			[ -f "$d/pr" ] && [ -f "$d/attempt" ] || continue
 			! grep -q '^[^ ]* needs-you:' "$d/status" 2>/dev/null || continue
@@ -61,7 +68,8 @@ if [ "$mode" = watch ]; then
 	done
 fi
 repo=$(cd "$1" && pwd)
-if [ "$mode" = propose ]; then cycle=intake; else cycle=$2; fi
+if [ "$mode" = propose ]; then cycle=intake; else cycle=${2:-}; fi
+[ -n "$cycle" ] || [ "$mode" = status ] || { echo "usage: tend <repo> <cycle-id>" >&2; exit 2; }
 
 # What the attempt is doing, for tend status: when, a kind (working, needs-you or
 # done) and what, then the next action. Written whole or not at all.
@@ -72,6 +80,35 @@ stage() { # kind text next
 
 # tend status: the newest attempt at the cycle, what it last recorded and whether
 # a tend is on it now. Reads only; takes no lock and prompts nobody.
+# tend status <repo>: what waits for whom in the repository, read from Grove's
+# JSON, GitHub and this runner's run folders. Reads only.
+if [ "$mode" = status ] && [ -z "$cycle" ]; then
+	cd "$repo"
+	proj=$(grove changes --json) || { echo "grove changes --json failed in $repo"; exit 1; }
+	echo "Approved changes without a cycle (plan one: /grove-plan):"
+	jq -r '.changes[] | select(.state == "approved" and .cycle == null) | "  \(.id) \(.title)\(if .ready then "" else ", not ready" end)"' <<<"$proj"
+	echo "Cycles not done:"
+	jq -r '.cycles[] | select(.done | not) | "  \(.id) \(.title): \(.verdict)"' <<<"$proj"
+	echo "Attempts on this runner, for cycles not done:"
+	for d in "$state"/runs/*/; do
+		[ "$(sed -n 1p "$d/attempt" 2>/dev/null)" = "$repo" ] && [ -f "$d/status" ] || continue
+		jq -e --arg c "$(sed -n 2p "$d/attempt")" 'any(.cycles[]; .id == $c and (.done | not))' <<<"$proj" >/dev/null || continue
+		printf '  %s (%s): %s\n' "$(basename "$d")" "$(sed -n 2p "$d/attempt")" "$(head -1 "$d/status" | cut -d' ' -f2-)"
+	done
+	if prs=$(gh pr list --state open --json number,title,headRefName,url,reviewDecision 2>/dev/null); then
+		echo "Proposals to review (answer their questions, revise or merge):"
+		jq -r '.[] | select(.headRefName | startswith("tend/issue-")) | "  #\(.number) \(.title) \(.url)"' <<<"$prs"
+		echo "Implementations to review (review and merge):"
+		jq -r '.[] | select(.headRefName | startswith("grove/")) | "  #\(.number) \(.title) \(.url)\(if .reviewDecision == "CHANGES_REQUESTED" then ", changes requested: tend makes them on its next run" else "" end)"' <<<"$prs"
+		echo "Requests waiting for tend propose:"
+		handled=$(gh pr list --state all --limit 1000 --json headRefName --jq '[.[].headRefName | select(startswith("tend/issue-"))]' 2>/dev/null || echo '[]')
+		gh issue list --label tend --state open --json number,title,url --jq '.[] | "  #\(.number) \(.title) \(.url)"' 2>/dev/null |
+			while IFS= read -r line; do n=${line#  #}; n=${n%% *}; jq -e --arg b "tend/issue-$n" 'index($b) != null' <<<"$handled" >/dev/null || echo "$line"; done
+	else
+		echo "GitHub: not readable with gh here"
+	fi
+	exit 0
+fi
 if [ "$mode" = status ]; then
 	rec=$(cd "$repo" && grove changes --json | jq -c --arg c "$cycle" '[.runs[]? | select(.cycle == $c)][0] // empty')
 	[ -n "$rec" ] || { echo "no attempt at $cycle"; exit 0; }

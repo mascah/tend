@@ -133,16 +133,18 @@ arg() { local flag=$1; shift; while [ $# -gt 1 ]; do [ "$1" != "$flag" ] || { ec
 case "$1 $2" in
 "auth token") echo "tok-$(arg --user "$@")" ;;
 "pr list")
-	if a=$(arg --author "$@") && [ -n "$a" ]; then
-		for w in "$s"/pr-*.where; do
-			[ -e "$w" ] || continue
-			k=${w%.where}
-			[ ! -e "$k.merged" ] && [ "$(cat "$k.by")" = "$a" ] || continue
-			jq -n --arg b "$(sed -n 1p "$w")" '{headRefName: $b}'
-		done | jq -s . | jq -r "$(arg --jq "$@")"
-	else
-		b=$(arg --head "$@"); [ ! -f "$s/pr-${b//\//_}" ] || echo "https://example.test/pr/${b//\//_}"
-	fi ;;
+	# Every PR, then narrowed as the caller asks: by head branch in any state, by
+	# author while open, or every open one.
+	for w in "$s"/pr-*.where; do
+		[ -e "$w" ] || continue
+		k=${w%.where}
+		[ -e "$k.merged" ] && st=MERGED || st=OPEN
+		rd=$(jq -r --arg h "$(git -C "$(sed -n 2p "$w")" rev-parse "$(sed -n 1p "$w")" 2>/dev/null)" 'if any(.[]?; .state == "CHANGES_REQUESTED" and .commit_id == $h) then "CHANGES_REQUESTED" else "" end' "$s/reviews" 2>/dev/null || true)
+		jq -n --arg b "$(sed -n 1p "$w")" --arg by "$(cat "$k.by")" --arg st "$st" --arg t "$(cat "$k.title" 2>/dev/null)" --arg u "https://example.test/pr/${k##*/pr-}" --arg rd "$rd" \
+			'{headRefName: $b, author: $by, state: $st, title: $t, url: $u, number: 1, reviewDecision: $rd}'
+	done | jq -s --arg h "$(arg --head "$@")" --arg a "$(arg --author "$@")" --arg st "$(arg --state "$@")" '
+		if $h != "" then map(select(.headRefName == $h)) elif $a != "" then map(select(.author == $a and .state == "OPEN")) elif $st == "all" then . else map(select(.state == "OPEN")) end' |
+		if q=$(arg --jq "$@") && [ -n "$q" ]; then jq -r "$q"; else cat; fi ;;
 "repo view") echo o/r ;;
 "issue list") jq '[.[] | select(.state == "OPEN" and (.labels | index("tend")))]' "$s/issues" | jq -r "$(arg --jq "$@")" ;;
 "issue view") jq --argjson n "$3" '.[] | select(.number == $n) | {title, body, url}' "$s/issues" ;;
@@ -157,6 +159,7 @@ case "$1 $2" in
 	cat >"$s/pr-${b//\//_}"
 	echo "$by" >"$s/pr-${b//\//_}.by"
 	printf '%s\n%s\n' "$b" "$(git remote get-url origin)" >"$s/pr-${b//\//_}.where"
+	arg --title "$@" >"$s/pr-${b//\//_}.title"
 	[ -z "${CREATE_LOST:-}" ] || exit 1
 	echo "https://example.test/pr/${b//\//_}" ;;
 "pr edit") cat >"$s/pr-${3##*/}" ;;
@@ -236,7 +239,7 @@ passed() { [ $? = 0 ] && [ "$(jq -r .conclusion "$t/out" 2>/dev/null)" = success
 status() { "$tend" status "$t/repo" 261114-k0000; }
 records() { (cd "$t/repo" && grove changes --json | jq '[.runs[]? | select(.cycle == "261114-k0000")] | length'); }
 verdict() { ls "$TEND_STATE"/runs/*/verdict-*.json; }
-worktree() { echo "$t"/state/wt-*; }
+worktree() { echo "$t"/state/wt-tend-[0-9]*; }
 said() { grep -q "$1" "$t/err"; }
 
 scenario remote-claim
@@ -508,6 +511,40 @@ issues 1:tend
 propose
 check "a repository not listed for publication gives no requests" test $? = 3 -a "$(drafts)" = 0
 check "and tend says why" grep -q 'tend takes no requests from it' "$t/err"
+
+scenario overview
+project "$t/repo" main remote
+allow
+(cd "$t/repo" && c=grove/changes/261016-c0001-another && mkdir -p "$c" && printf 'title: Another\ncreated: 2026-10-16T09:00:00Z\nschema: default\nbase: %s\n' "$(git rev-parse HEAD)" >"$c/.grove.yaml" && printf '# Another\n\n## Why\n\nBecause.\n' >"$c/proposal.md" && printf '# Tasks\n\n- [ ] T-01 Do it\n' >"$c/tasks.md" && git add -A && git commit -qm another && git push -q origin main)
+issues 1:tend 2:tend
+CAP=1 propose
+run
+request
+"$tend" status "$t/repo" >"$t/overview" 2>&1
+check "the overview names an approved change without a cycle" grep -q '^  261016-c0001 Another' "$t/overview"
+check "a cycle not done, with Grove's verdict" grep -q '^  261114-k0000 One: claimed by attempt' "$t/overview"
+check "the attempt on this runner and its stage" grep -qE '^  [0-9]{6}-[a-z0-9]{5} \(261114-k0000\): done: success' "$t/overview"
+check "the proposal to review" grep -A1 '^Proposals to review' "$t/overview" | grep -q 'Propose a thing'
+check "the implementation to review, with the change requested" grep -A1 '^Implementations to review' "$t/overview" | grep -q 'Add the file .*changes requested'
+check "and the request still waiting for intake" grep -A1 '^Requests waiting' "$t/overview" | grep -q '#2 Request 2'
+check "but not the one already drafted" test "$(grep -c '#1 Request 1' "$t/overview")" = 0
+touch "$(pr_of 1).merged"
+"$tend" status "$t/repo" >"$t/overview2" 2>&1
+check "nor once its proposal is merged" test "$(grep -c '#1 Request 1' "$t/overview2")" = 0
+(cd "$t/repo" && mkdir -p grove/changes/archive && git mv grove/changes/261015-c0000-a-change grove/changes/archive/261015-c0000-a-change && git commit -qm landed && git push -q origin main)
+"$tend" status "$t/repo" >"$t/overview3" 2>&1
+check "an attempt whose cycle is done is left out" test "$(grep -c '(261114-k0000)' "$t/overview3")" = 0
+
+scenario watch-intake
+project "$t/repo" main remote
+allow
+issues 1:tend
+WATCH_ONCE=1 "$tend" watch "$t/repo" >/dev/null 2>"$t/watch"
+check "watch runs intake for a repository it is given" test -e "$(pr_of 1)"
+issues 1:tend 2:tend
+FOLLOW_FAIL=agent_prompt_stalled WATCH_ONCE=1 "$tend" watch "$t/repo" >/dev/null 2>&1
+WATCH_ONCE=1 "$tend" watch "$t/repo" >/dev/null 2>&1
+check "and leaves a request that needs a person" test "$(follows)" = 2
 
 scenario publish-diverged
 project "$t/repo" main remote
