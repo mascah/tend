@@ -548,8 +548,8 @@ authority, then add one PR publication with deduplication across interruptions.
 2026-11-15 — Slice 2, publication. The owner chose a small private throwaway
 repository and authorized pushing branches, opening and updating PRs and
 commenting/statuses there, never merging; the owner plays the teammate. Code
-written and local regressions passed; exercised live; uncommitted at the time of
-writing, then committed on `tend/slice1-claim-verdict`; not merged.
+written and local regressions passed; exercised live; committed on `tend/slice1-claim-verdict` as `5e43af9`;
+not merged.
 
 - Publication (end of `bin/tend`): only when `origin`'s URL is a line of
   `TEND_STATE/publish` (a side review pointed out that without this, any repository
