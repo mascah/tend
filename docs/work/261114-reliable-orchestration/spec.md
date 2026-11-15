@@ -12,10 +12,12 @@ Read this document and the repository instructions, then inspect the current
 branch, worktrees, diff and relevant implementation before acting. The baseline
 below is historical evidence, not a claim about the checkout you find.
 
-**Next Tend work: slice 4, prove portability: tmux without Herdr next.** The
-owner agreed the order: a non-Grove work item (done on branch
-`tend/slice4-issue-items`, not merged), then tmux, then a second tracker. Slices
-1–3 are merged into `main`. Slices 1, 2
+**Next Tend work: port Tend to Go behind the existing regression suite, then
+slice 4's terminal interface.** Agreed with the owner on 2026-11-15: the non-Grove
+work item is done (branch `tend/slice4-issue-items`, not merged); then a port to Go
+with unchanged behavior; then the terminal interface drawn from Herdr and rex (the
+owner's next multiplexer) or tmux if rex cannot report agent state; then the
+remaining terminal; then a second tracker. Slices 1–3 are merged into `main`. Slices 1, 2
 and 2a are done on `tend/slice1-claim-verdict` (not merged; merging is the
 owner's decision), slices 2 and 2a shown live on the private sandbox
 `mascah/tend-sandbox`, publishing as `mascah-bot`, with the owner as the teammate
@@ -320,7 +322,7 @@ here describes delivery, not how strongly the architectural direction is agreed.
 | 2 — One real shared-runner workflow | Done on `tend/slice1-claim-verdict`, live on sandbox PRs #1–#3; not merged | Slice 1 | [Publication](#shared-review-and-publication) |
 | 2a — Act on requested changes | Done on `tend/slice1-claim-verdict`, live on sandbox PR #3; not merged | Slice 2 | [Below](#2a--act-on-requested-changes) |
 | 3 — Explicit request-to-proposal intake | Done on `tend/slice3-intake`, live on the sandbox; not merged | Slice 2 and G available | [Intake and handoffs](#request-intake-and-explicit-handoffs) |
-| 4 — Prove portability | In progress: non-Grove work item live on `tend/slice4-issue-items` (not merged); tmux and a second tracker remain | Earlier lifecycle demonstrated | [Portability](#portability) |
+| 4 — Prove portability | In progress: non-Grove work item live on `tend/slice4-issue-items` (not merged); Go port, terminal interface (Herdr with rex or tmux), the other terminal and a second tracker remain | Earlier lifecycle demonstrated | [Portability](#portability) |
 
 ### G — Finish Grove #164 independently
 
@@ -400,9 +402,14 @@ intake distinguishes new requests, existing proposals, rejected suggestions and
 diagnostics that need correction rather than new product scope. A cap alone does
 not prevent repeated or unwanted work.
 
-Routine implementation choices remain open: language, state encoding/location,
-exact status/resume commands and integration module layout. Choose the smallest
-solution that meets the scenarios; Bash remains an option. Before slice 3, settle
+Language, settled 2026-11-15: Go. Bash carried slices 1–3 but showed its limits
+(global variables silently overwritten, fragile quoting and JSON handling, adapters
+becoming case statements), and several terminals (Herdr, rex, tmux) and trackers
+are coming. Go gives one static binary for a runner, plain subprocess and JSON
+work, and small interfaces for adapters. `dev/test.sh` drives Tend only through
+its command line with stand-ins on `PATH`, so it is the acceptance suite for the
+port: the Go binary must pass it unchanged before it replaces the script. Other
+routine choices (state encoding, command spelling, module layout) remain open. Before slice 3, settle
 the first tracker, cap and mapping of requests to repositories. Before enabling
 automatic publication on a runner, establish its configured repositories and
 publication authority. These later decisions do not block slice 1.
@@ -842,11 +849,19 @@ after; not merged.
 Next action: tmux without Herdr. Herdr supplies agent state (working, idle,
 blocked); tmux does not, so tend must establish it itself.
 
+2026-11-15 — Owner decisions after the first slice 4 unit. Tend and Grove are meant
+to be used together: in a repository with Grove, `issue-<n>` builds are now refused
+with a pointer to the `tend` label (a proposal first), so maintained specs keep up;
+direct builds are for repositories without Grove (regression added; 191 checks).
+No live run in a Grove-free repository is wanted. Order from here: port to Go
+behind `dev/test.sh`, then the terminal interface from Herdr and rex (or tmux), then
+the other terminal, then a second tracker.
+
 A suitable prompt for a future implementation session is:
 
 > Read `docs/work/261114-reliable-orchestration/spec.md` in Tend and the repository
-> instructions. Revalidate the current handoff and implement the next unfinished
-> unit of slice 4 within its acceptance, in the order agreed with the owner. Preserve unrelated work and active Grove
+> instructions. Revalidate the current handoff and continue the Go port behind
+> `dev/test.sh`, or the next unit of slice 4 once the port has replaced the script. Preserve unrelated work and active Grove
 > implementation. Update the delivery status with the revision, checks and next
 > action; do not advance into proposal intake or broader polling.
 

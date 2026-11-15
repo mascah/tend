@@ -585,6 +585,14 @@ jq 'map(.state = "CLOSED")' "$HERDR_STATE/issues" >"$t/i" && mv "$t/i" "$HERDR_S
 build 2
 check "a closed issue is done: exit 0, nothing run" test $? = 0 -a "$(grep -c '^agent prompt' "$HERDR_STATE/log")" = 0
 
+scenario issue-in-grove
+project "$t/repo" main remote
+allow
+issues 7:tend-build
+build
+check "an issue in a repository with Grove is not built directly" test $? = 3 -a "$(grep -c '^agent prompt' "$HERDR_STATE/log")" = 0
+check "and tend points to a proposal" grep -q 'label it tend for tend propose' "$t/err"
+
 scenario issue-no-notes
 plain
 allow

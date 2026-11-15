@@ -341,7 +341,9 @@ fi
 #    branch is the worktree's. Grove holds approval, eligibility and the scope; the
 #    build is done when each change is archived on the branch.
 #
-#    issue-<n>, a GitHub issue of the repository, with or without Grove. It is
+#    issue-<n>, a GitHub issue of a repository without Grove: where Grove holds
+#    the scope, a request goes through a proposal (tend propose) instead, so the
+#    maintained specs keep up with what is built. It is
 #    approved by the tend-build label, which only people who may label can put on;
 #    it may start while it is open and labelled, and a closed one is done. Its
 #    title and description are the scope. Its branch is tend/build-<n>, found
@@ -351,6 +353,8 @@ case $cycle in
 issue-[0-9]*)
 	kind=issue n=${cycle#issue-}
 	cd "$repo"
+	! grove changes --json >/dev/null 2>&1 ||
+		stop "$repo uses Grove, so issue #$n is not built directly: label it tend for tend propose to draft a proposal, then approve and plan it"
 	issue=$(gh issue view "$n" --json title,body,url,state,labels) || stop "could not read issue #$n"
 	if [ "$(jq -r .state <<<"$issue")" != OPEN ]; then say "issue #$n is closed; nothing to do"; exit 0; fi
 	jq -e '.labels | map(.name) | index("tend-build")' <<<"$issue" >/dev/null ||
