@@ -20,8 +20,7 @@
 # waited for, never prompted again, and the one repair is used once asked.
 set -euo pipefail
 mode=run
-[ "${1:-}" != status ] || { mode=status; shift; }
-repo=$(cd "$1" && pwd) cycle=$2
+case ${1:-} in status | watch) mode=$1; shift ;; esac
 
 say() { printf 'tend: %s\n' "$*" >&2; }
 stop() {
@@ -40,6 +39,25 @@ stop() {
 state=${TEND_STATE:-${XDG_STATE_HOME:-$HOME/.local/state}/tend}
 mkdir -p "$state/runs"
 state=$(cd "$state" && pwd) # tend changes into the attempt later
+
+# tend watch: every WATCH_SECONDS (default 300), each attempt whose pull request
+# is open with a change request on its head is run again. An attempt waiting for
+# a person (needs-you) is left alone until a person has run tend on it.
+if [ "$mode" = watch ]; then
+	while :; do
+		for d in "$state"/runs/*/; do
+			[ -f "$d/pr" ] && [ -f "$d/attempt" ] || continue
+			! grep -q '^[^ ]* needs-you:' "$d/status" 2>/dev/null || continue
+			[ "$(gh pr view "$(cat "$d/pr")" --json state,headRefOid,reviews --jq '.state == "OPEN" and (.headRefOid as $h | any(.reviews[]; .state == "CHANGES_REQUESTED" and .commit.oid == $h))' 2>/dev/null)" = true ] || continue
+			{ read -r r; read -r c; } <"$d/attempt"
+			say "changes requested on $(cat "$d/pr"); running tend on $c"
+			"$0" "$r" "$c" || true
+		done
+		[ -z "${WATCH_ONCE:-}" ] || exit 0
+		sleep "${WATCH_SECONDS:-300}"
+	done
+fi
+repo=$(cd "$1" && pwd) cycle=$2
 
 # What the attempt is doing, for tend status: when, a kind (working, needs-you or
 # done) and what, then the next action. Written whole or not at all.
@@ -172,6 +190,7 @@ if [ -d .tend ]; then
 fi
 # The prototype wrote repaired before sending the repair, so it means asked.
 [ ! -e "$run/repaired" ] || [ -e "$run/repair-asked" ] || mv "$run/repaired" "$run/repair-asked"
+printf '%s\n%s\n' "$repo" "$cycle" >"$run/attempt" # for tend watch
 
 # A pane of the workspace to split from, and a new one for a new agent.
 split() { herdr pane split "$(herdr pane list --workspace "$ws" | jq -r '.result.panes[0].pane_id')" --direction right --cwd "$dir" --no-focus | jq -r .result.pane.pane_id; }
@@ -273,12 +292,13 @@ fi
 #    tend/review status on that head, so a later commit carries no passing result.
 #    The PR and reviews are looked up on GitHub each run, never remembered, so a
 #    rerun after any interruption repeats neither. Merging stays a person's.
-where=$branch
+where=$branch pr=
 origin=$(git remote get-url origin 2>/dev/null || true)
 account=$(awk -v o="$origin" '$1 == o { print $2; exit }' "$state/publish" 2>/dev/null || true)
-if [ -n "$origin" ] && [ -z "$account" ]; then
-	say "not publishing: $origin is not listed in $state/publish"
-elif [ -n "$origin" ]; then
+[ -z "$origin" ] || [ -n "$account" ] || say "not publishing: $origin is not listed in $state/publish"
+publish() {
+	[ -n "$account" ] || return 0
+	local f h st approves msg
 	head=$(git rev-parse HEAD)
 	stage working "publishing $branch at ${head:0:7} as $account" "tend pushes it and opens its pull request or reviews the one there"
 	GH_TOKEN=$(gh auth token --user "$account") || stop "gh holds no token for $account; sign it in with gh auth login, then switch back"
@@ -309,24 +329,58 @@ elif [ -n "$origin" ]; then
 	for f in $(ls -tr "$run"/verdict-*.json); do
 		h=$(jq -r .head "$f")
 		valid "$f" "$h" && git merge-base --is-ancestor "$h" HEAD 2>/dev/null || continue
-		if ! grep -qx "$h" <<<"$posted"; then
-			approves=
-			[ "$h" != "$head" ] || approves=$(grove review 2>&1 | sed '/^diff --git/,$d')
-			jq --arg a "$(jq -r .id <<<"$rec")" --arg approves "$approves" '{commit_id: .head, event: "COMMENT", body: (
-				"**Independent review of \(.head[0:7]): \(.conclusion)**\n\n\(.summary)\n\n"
-				+ (if .conclusion == "success" then "" elif .actionable then "The reviewer judged every finding an in-scope fix. tend repairs once, then a person decides.\n\n" else "A finding needs a decision from a person.\n\n" end)
-				+ (if $approves == "" then "" else "<details><summary>What merging approves, from grove review</summary>\n\n```text\n\($approves)\n```\n</details>\n\n" end)
-				+ "Codex reviewed this commit in a session apart from the implementer; tend posted it for attempt `\($a)`.")}' "$f" |
-				gh api "repos/{owner}/{repo}/pulls/${pr##*/}/reviews" --input - >/dev/null || stop "could not post the review of ${h:0:7} on $pr"
-		fi
-		[ "$(jq -r .conclusion "$f")" = success ] && state=success || state=failure
-		gh api "repos/{owner}/{repo}/statuses/$h" -f state="$state" -f context=tend/review \
+		grep -qx "$h" <<<"$posted" && continue
+		# The status first: a rerun after it, before the review, sets it again.
+		[ "$(jq -r .conclusion "$f")" = success ] && st=success || st=failure
+		gh api "repos/{owner}/{repo}/statuses/$h" -f state="$st" -f context=tend/review \
 			-f description="Independent review of ${h:0:7}: $(jq -r .conclusion "$f")" -f target_url="$pr" >/dev/null ||
 			stop "could not set the tend/review status on ${h:0:7}"
+		approves=
+		[ "$h" != "$head" ] || approves=$(grove review 2>&1 | sed '/^diff --git/,$d')
+		jq --arg a "$(jq -r .id <<<"$rec")" --arg approves "$approves" --arg reply "$(cat "$run/reply-$h" 2>/dev/null)" '{commit_id: .head, event: "COMMENT", body: (
+				"**Independent review of \(.head[0:7]): \(.conclusion)**\n\n\(.summary)\n\n"
+				+ (if .conclusion == "success" then "" elif .actionable then "The reviewer judged every finding an in-scope fix. tend repairs once, then a person decides.\n\n" else "A finding needs a decision from a person.\n\n" end)
+				+ (if $reply == "" then "" else "The implementer, on the changes requested:\n\n\($reply | split("\n") | map("> " + .) | join("\n"))\n\n" end)
+				+ (if $approves == "" then "" else "<details><summary>What merging approves, from grove review</summary>\n\n```text\n\($approves)\n```\n</details>\n\n" end)
+				+ "Codex reviewed this commit in a session apart from the implementer; tend posted it for attempt `\($a)`.")}' "$f" |
+			gh api "repos/{owner}/{repo}/pulls/${pr##*/}/reviews" --input - >/dev/null || stop "could not post the review of ${h:0:7} on $pr"
 	done
 	where=$pr
+	echo "$pr" >"$run/pr" # for tend watch to find; GitHub stays the record
 	say "published $pr"
-fi
+}
+publish
+
+# 6. Changes a person requested on the pull request, at its head. Each request is
+#    asked of the implementer once: request-<review id> is written just before the
+#    prompt goes. Asked with no commit since, it is still being worked on, and
+#    waited for, or its outcome is unknown, and that is a person's. The new head is
+#    reviewed and published like the first; a request on an older head was
+#    answered by a later commit. tend does not wait here for people: tend watch
+#    runs it again when one requests changes.
+requested() { # the newest change request on the open PR's head, as JSON, or nothing
+	[ "$(gh pr view "$pr" --json state --jq .state)" = OPEN ] || return 0
+	gh api "repos/{owner}/{repo}/pulls/${pr##*/}/reviews" --paginate --jq "[.[] | select(.state == \"CHANGES_REQUESTED\" and .commit_id == \"$head\")] | last // empty"
+}
+while [ -n "$pr" ]; do
+	req=$(requested) || stop "could not read the reviews of $pr"
+	[ -n "$req" ] || break
+	id=$(jq -r .id <<<"$req") who=$(jq -r .user.login <<<"$req")
+	[ ! -e "$run/request-$id" ] || [ "$(agent_status "$impl")" = working ] ||
+		stop "the changes $who requested on $pr (review $id) were asked of $impl, which committed nothing and is not working on them. Look at its pane, then commit and run tend again, or delete $run/request-$id to have them asked once more"
+	comments=$(gh api "repos/{owner}/{repo}/pulls/${pr##*/}/reviews/$id/comments" --paginate --jq '.[] | "\(.path):\(.line // .original_line // "?"): \(.body)"') ||
+		stop "could not read the comments of review $id on $pr"
+	implementer
+	stage working "$impl makes the changes $who requested at ${head:0:7}" "tend waits for $impl, then has the new head reviewed and published"
+	ask "$impl" "$who, reviewing the pull request for $branch, requested changes at commit $head. Their review: $(jq -r .body <<<"$req")${comments:+ Their comments on lines: $comments} Make the changes they ask for that are within the agreed scope, run the tests, update implementation.md where a claim changes, and commit. Then write to $run/reply-$id, for $who, a few plain lines on what you changed and anything you did not and why. Ask no one." "$run/request-$id"
+	why=$(unbuilt)
+	[ -z "$why" ] || stop "$why"
+	[ "$(git rev-parse HEAD)" != "$head" ] ||
+		stop "$impl committed nothing for the changes $who requested on $pr. Look at its pane, then commit and run tend again, or delete $run/request-$id to have them asked once more"
+	[ ! -s "$run/reply-$id" ] || mv "$run/reply-$id" "$run/reply-$(git rev-parse HEAD)"
+	review
+	publish
+done
 
 herdr notification show "tend $cycle: $(jq -r .conclusion "$v")" --body "$where at $(jq -r .head "$v" | cut -c1-7) is ready for you" --sound done >/dev/null 2>&1 || true
 stage done "$(jq -r .conclusion "$v") for ${branch} at $(jq -r .head "$v" | cut -c1-7), verdict $v" "a person reviews $where and decides whether to merge it"

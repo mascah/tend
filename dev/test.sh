@@ -35,6 +35,9 @@ turn() { # name text
 			done
 			git add -A && git commit -qm build
 			[ -z "${BLOCK_AFTER_BUILD:-}" ] || block=$1 ;;
+		*"requested changes at commit"*)
+			echo plainer >>a.txt && git commit -qam "As asked"
+			echo "Made it plainer, as asked." >"$(grep -oE '[^ ]*/reply-[0-9]+' <<<"$2")" ;;
 		*squash-merged*) printf 'Add the file\n\nThe project needed a file.\n\nGrove: 261015-c0000\n' >"$(grep -oE '[^ ]*/message-[0-9a-f]{40}' <<<"$2")" ;;
 		*) echo fix >>a.txt && git commit -qam repair ;;
 		esac ;;
@@ -81,7 +84,7 @@ case "$1 $2" in
 	said "$(cat "$s/status-$3" 2>/dev/null || echo idle)" ;;
 "agent prompt")
 	case $3 in
-	impl-*) case $4 in /grove-implement*) fail=${IMPL_FAIL:-} ;; *) fail=${REPAIR_FAIL:-} ;; esac ;;
+	impl-*) case $4 in /grove-implement*) fail=${IMPL_FAIL:-} ;; *"requested changes at commit"*) fail=${REQUEST_FAIL:-} ;; *) fail=${REPAIR_FAIL:-} ;; esac ;;
 	*) fail=${REV_FAIL:-} ;;
 	esac
 	if [ "$(cat "$s/status-$3" 2>/dev/null)" = blocked ]; then
@@ -108,7 +111,7 @@ cat >"$top/bin/gh" <<'EOS'
 # and pr-<branch>.by its author. Reviews go to reviews (a JSON array, read back
 # through the caller's --jq), statuses to statuses as "<sha> <state> <account>".
 # CREATE_LOST opens the PR and then fails, as when GitHub acted but tend never
-# heard back.
+# heard back. pr-<branch>.merged marks it merged; its head is origin's branch.
 set -euo pipefail
 s=$HERDR_STATE
 printf 'gh %s\n' "$*" >>"$s/log"
@@ -121,15 +124,26 @@ case "$1 $2" in
 	b=$(arg --head "$@")
 	cat >"$s/pr-${b//\//_}"
 	echo "$by" >"$s/pr-${b//\//_}.by"
+	printf '%s\n%s\n' "$b" "$(git remote get-url origin)" >"$s/pr-${b//\//_}.where"
 	[ -z "${CREATE_LOST:-}" ] || exit 1
 	echo "https://example.test/pr/${b//\//_}" ;;
 "pr edit") cat >"$s/pr-${3##*/}" ;;
+"pr view")
+	k=$s/pr-${3##*/}
+	[ -f "$s/reviews" ] || echo '[]' >"$s/reviews"
+	{ read -r b; read -r o; } <"$k.where"
+	[ -e "$k.merged" ] && st=MERGED || st=OPEN
+	jq --arg st "$st" --arg h "$(git -C "$o" rev-parse "$b")" '{state: $st, headRefOid: $h, reviews: map({state, commit: {oid: .commit_id}, author: {login: .user.login}})}' "$s/reviews" |
+		jq -r "$(arg --jq "$@")" ;;
 api*)
 	[ -f "$s/reviews" ] || echo '[]' >"$s/reviews"
 	case $2 in
+	*/reviews/*/comments)
+		id=${2%/comments} id=${id##*/}
+		jq --argjson id "$id" '[.[] | select(.id == $id)][0].comments // []' "$s/reviews" | jq -r "$(arg --jq "$@")" ;;
 	*/reviews)
 		if [ "${3:-}" = --input ]; then
-			jq --arg by "$by" --slurpfile r /dev/stdin '. + [$r[0] + {user: {login: $by}}]' "$s/reviews" >"$s/reviews.new" && mv "$s/reviews.new" "$s/reviews"
+			jq --arg by "$by" --slurpfile r /dev/stdin '. + [$r[0] + {id: (length + 1), state: "COMMENTED", user: {login: $by}}]' "$s/reviews" >"$s/reviews.new" && mv "$s/reviews.new" "$s/reviews"
 		else
 			jq -r "$(arg --jq "$@")" "$s/reviews"
 		fi ;;
@@ -176,7 +190,7 @@ scenario() {
 	t=$top/$name
 	mkdir -p "$t/state"
 	export HERDR_STATE=$t/state TEND_STATE=$t/tend
-	unset REVIEW IMPL_FAIL IMPL_SLEEP REPAIR_FAIL REV_FAIL BLOCK_AFTER_BUILD CREATE_LOST
+	unset REVIEW IMPL_FAIL IMPL_SLEEP REPAIR_FAIL REV_FAIL BLOCK_AFTER_BUILD CREATE_LOST REQUEST_FAIL
 }
 run() { "$tend" "$t/repo" 261114-k0000 >"$t/out${1:-}" 2>"$t/err${1:-}"; } # [suffix for out and err]
 reviews() { grep -c '^agent prompt rev-' "$HERDR_STATE/log"; }
@@ -288,6 +302,70 @@ check "the old head's pass is not the new head's" test "$(grep -c "^$(head) succ
 check "its review says it needs a decision" grep -q 'needs a decision' "$HERDR_STATE/reviews"
 check "the earlier head keeps its one review" test "$(reviewed "$first")" = 1
 check "still one pull request" test "$(creates)" = 1
+
+# A teammate requests changes on the PR's head, with a comment on a line.
+request() {
+	jq --arg h "$(head)" '. + [{id: (900 + length), state: "CHANGES_REQUESTED", commit_id: $h, user: {login: "teammate"}, body: "Say it plainly.", comments: [{path: "a.txt", line: 1, body: "Plainer."}]}]' "$HERDR_STATE/reviews" >"$t/r" && mv "$t/r" "$HERDR_STATE/reviews"
+}
+watch() { WATCH_ONCE=1 "$tend" watch >/dev/null 2>"$t/watch"; }
+
+scenario request
+project "$t/repo" main remote
+allow
+run
+first=$(head)
+request
+run 2
+check "a run after a teammate requests changes passes" passed
+check "the implementer is asked once" test "$(prompts teammate)" = 1
+check "with their review" grep -q '^agent prompt impl-.* Their review: Say it plainly\.' "$HERDR_STATE/log"
+check "and their comment on a line" grep -q 'Their comments on lines: a.txt:1: Plainer\.' "$HERDR_STATE/log"
+check "the new head is reviewed" test "$(reviews)" = 2 -a "$(head)" != "$first"
+check "and published: its review carries the implementer's reply" test "$(jq -r --arg h "$(head)" '.[] | select(.commit_id == $h and .user.login == "the-bot") | .body' "$HERDR_STATE/reviews" | grep -c '^> Made it plainer, as asked\.')" = 1
+check "its own status" grep -qx "$(head) success the-bot" "$HERDR_STATE/statuses"
+check "still one pull request" test "$(creates)" = 1
+run 3
+check "the answered request is not asked again" test "$(prompts teammate)" = 1
+
+scenario request-uncertain
+project "$t/repo" main remote
+allow
+run
+request
+REQUEST_FAIL=agent_prompt_stalled run 2
+check "a stalled request prompt stops" test $? = 3
+run 3
+check "the rerun stops, as nothing was committed" test $? = 3
+check "and says so" grep -q "committed nothing and is not working on them" "$t/err3"
+check "without asking again" test "$(prompts teammate)" = 1
+rm "$TEND_STATE"/runs/*/request-*
+run 4
+check "with the mark deleted by a person, it is asked again and passes" passed
+check "twice in all" test "$(prompts teammate)" = 2
+
+scenario request-merged
+project "$t/repo" main remote
+allow
+run
+request
+touch "$(pr).merged"
+run 2
+check "a request on a merged pull request is not acted on" test "$(prompts teammate)" = 0
+
+scenario watch
+project "$t/repo" main remote
+allow
+run
+watch
+check "watch runs nothing when no one requested changes" test "$(grep -c 'running tend' "$t/watch")" = 0
+request
+watch
+check "watch runs tend when a teammate requests changes" grep -q 'changes requested on https://example.test/pr/' "$t/watch"
+check "and the request is asked" test "$(prompts teammate)" = 1
+request
+printf 'x needs-you: something\nnext: a person\n' >"$(echo "$TEND_STATE"/runs/*)/status"
+watch
+check "watch leaves an attempt that needs a person" test "$(prompts teammate)" = 1
 
 scenario publish-diverged
 project "$t/repo" main remote
