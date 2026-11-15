@@ -15,7 +15,7 @@ grove claim
 
 Grove holds what is agreed. Herdr runs the agents where you can watch and
 take over. tend is currently a prototype script between them. It reconstructs
-progress from Git, its own run files and Herdr; restart recovery is incomplete.
+progress from Git, its own run files and Herdr on every run.
 
 The agreed [execution plan](docs/work/261114-reliable-orchestration/spec.md)
 records the intended boundaries, review findings, delivery order and session
@@ -127,15 +127,20 @@ and Codex passed, in 135 s together. With Codex at its usage limit, Herdr
 reported `done`; the missing verdict file stopped the loop in 8 s, and the
 next run carried on.
 
-The script was renamed from that prototype (`.loop/` to `.tend/`, its
-messages and branch prefix) and has not been run end to end since.
+On 2026-11-15 the current script took a fresh attempt through with tend
+killed (`kill -9`) during implementation, review and repair, and Claude killed
+mid-repair. Each rerun waited for the agent still working without prompting it
+again. The killed repair stopped as uncertain on every run until the mark was
+deleted, then was asked once more and passed review. A planted defect (message
+and test reworded together) was failed by Codex and repaired. Details are in
+the plan's session handoff.
 
 Not yet shown:
 
 - a defect found in the implementer's own work;
 - a remote: a push, a pull request, a tracker, a second person;
-- an agent killed in the middle of a turn, or tend killed while one works,
-  with live agents (shown only with a stand-in for Herdr);
+- a dialog Herdr does not recognize (it reports `idle`, so tend prompts into
+  it; the missing verdict then stops tend);
 - whether the Herdr notification reaches a phone;
 - tmux without Herdr, a saved SSH machine, two cycles at once.
 

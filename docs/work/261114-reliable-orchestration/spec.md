@@ -12,17 +12,16 @@ Read this document and the repository instructions, then inspect the current
 branch, worktrees, diff and relevant implementation before acting. The baseline
 below is historical evidence, not a claim about the checkout you find.
 
-**Next Tend work: slice 1, recoverable execution.** Remote claim discovery,
-verdict validation, the configured target branch, runtime files outside the
-candidate, a controller lock, explicit repair delivery, waiting for a surviving
-agent and `tend status` are done with stand-in agents (see the session handoff).
-Next, demonstrate real interruptions with live agents through Herdr. Preserve existing attempts and candidate
-branches. Do not start proposal polling or multi-repository
-scheduling first.
+**Next Tend work: slice 2, one real shared-runner workflow.** Slice 1 is done on
+`tend/slice1-claim-verdict` (not merged; merging is the owner's decision), including
+live interruptions through Herdr with Claude and Codex (see the session handoff).
+Slice 2 needs its remote repository and publication authority settled with the owner
+before anything is pushed. Preserve existing attempts and candidate branches. Do not
+start proposal polling or multi-repository scheduling first.
 
-Grove #164 is independent work. Check its current implementation and coordinate
-with its owner before changing that checkout. Tend slices 1 and 2 do not depend
-on it. Do not automatically rerun the full model trial suite: its implementation
+Grove #164's implementation merged as #165 (`0083bba`). Check Grove's own record for
+its acceptance before treating G as finished, and coordinate with its owner before
+changing that checkout. Tend slice 2 does not depend on it. Do not automatically rerun the full model trial suite: its implementation
 record says the owner deferred it to conserve usage.
 
 At the end of each implementation session, update the Delivery status and
@@ -306,8 +305,8 @@ here describes delivery, not how strongly the architectural direction is agreed.
 
 | Slice | Status | Prerequisites | Acceptance |
 | --- | --- | --- | --- |
-| G — Finish Grove #164 | In progress externally | Existing Grove implementation and owner coordination | Invocation fix, outstanding behavioral findings and Grove's own acceptance |
-| 1 — Recoverable execution | In progress: lifecycle done with stand-in agents on `tend/slice1-claim-verdict` (not merged); live interruption demonstrations remain | Existing Tend prototype | [Recovery](#recoverable-execution), [review](#review-integrity), [Grove integration](#grove-integration-and-repository-configuration) |
+| G — Finish Grove #164 | Implementation merged as #165 (`0083bba`); acceptance per Grove's record | Existing Grove implementation and owner coordination | Invocation fix, outstanding behavioral findings and Grove's own acceptance |
+| 1 — Recoverable execution | Done on `tend/slice1-claim-verdict`, live interruptions demonstrated; not merged | Existing Tend prototype | [Recovery](#recoverable-execution), [review](#review-integrity), [Grove integration](#grove-integration-and-repository-configuration) |
 | 2 — One real shared-runner workflow | Not started | Slice 1 | [Publication](#shared-review-and-publication) |
 | 3 — Explicit request-to-proposal intake | Not started | Slice 2 and G available | [Intake and handoffs](#request-intake-and-explicit-handoffs) |
 | 4 — Prove portability | Not started | Earlier lifecycle demonstrated | [Portability](#portability) |
@@ -508,11 +507,49 @@ while an agent keeps working, with a planted defect for the repair. Record what
 each showed and what stays untested. Then slice 1 can be marked done and slice 2
 started.
 
+2026-11-15 — Slice 1, live interruptions. With the owner's go-ahead, ran the ledger
+fixture (`dev/fixture.sh`) through `bin/tend` at `03f2a2a` with Herdr 0.9.5, Claude
+Code 2.1.325, codex-cli 0.169.0 and Grove `0083bba`; `TEND_STATE` in a scratch folder.
+One attempt, `261115-8t6j4`, carried through eight runs, all on the same branch and run folder:
+
+- Implementation: `kill -9` of tend while Claude worked. Claude carried on; `tend
+  status` said to run again; the rerun waited ("still working ... not prompting
+  again") and the transcript holds `/grove-implement` once. Candidate `692d2d5`.
+- Review: `kill -9` of tend while Codex reviewed. The rerun reused and waited for
+  `rev-692d2d5`; Codex wrote a valid `success` verdict through `--add-dir` (live now).
+- Repair: a defect planted by hand as `f63d3fa` (the message reworded, its test
+  changed to match, tests passing). Codex failed it as actionable, citing the
+  spec's exact message. `kill -9` of the Claude process mid-repair: tend stopped
+  (no repair commit), and the next run stopped again as an uncertain repair rather
+  than asking again. After `repair-asked` was deleted by hand, a new Claude session
+  took the name and was asked once; `kill -9` of tend while it worked; the rerun
+  waited, Claude committed `f9996fb`, and Codex passed it. The transcript holds
+  the repair prompt once.
+- The candidate stayed clean throughout (no `.tend/`, nothing but `__pycache__`
+  ignored); the run folder holds three verdicts, one per head.
+
+Found, not fixed:
+
+- Codex opened on a "hook needs review" screen (a hook the owner had just added).
+  Herdr reported it `idle`, not `blocked`, so tend prompted into it; the
+  missing verdict stopped tend (exit 3) without a false result. The owner trusted
+  the hook and the rerun reused that reviewer. Owner's view: rare, so tend does not
+  read the screen for unknown dialogs.
+- `kill -9` of tend leaves its `herdr agent prompt --wait` child running until the
+  agent settles; it then exits by itself and holds no lock.
+
+Not exercised live: a remote (origin claim was shown with a bare repo only), a
+blocked agent, an agent killed mid-implementation or mid-review, Linux, tmux.
+`dev/test.sh` still passes 63 checks; no code changed this session.
+
+Next action: slice 2. Settle with the owner the remote repository and publication
+authority, then add one PR publication with deduplication across interruptions.
+
 A suitable prompt for a future implementation session is:
 
 > Read `docs/work/261114-reliable-orchestration/spec.md` in Tend and the repository
 > instructions. Revalidate the current handoff and implement the next unfinished
-> unit of slice 1 within its acceptance. Preserve unrelated work and active Grove
+> unit of slice 2 within its acceptance. Preserve unrelated work and active Grove
 > implementation. Update the delivery status with the revision, checks and next
 > action; do not advance into proposal intake or broader polling.
 
