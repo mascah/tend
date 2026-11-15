@@ -175,7 +175,7 @@ the plan's session handoff.
 Not yet shown:
 
 - a defect found in the implementer's own work;
-- a tracker, or a second person acting through the pull request;
+- a tracker;
 - a dialog Herdr does not recognize (it reports `idle`, so tend prompts into
   it; the missing verdict then stops tend);
 - whether the Herdr notification reaches a phone;

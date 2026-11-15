@@ -12,14 +12,14 @@ Read this document and the repository instructions, then inspect the current
 branch, worktrees, diff and relevant implementation before acting. The baseline
 below is historical evidence, not a claim about the checkout you find.
 
-**Next Tend work: finish slice 2, one real shared-runner workflow.** Slice 1 is
-done on `tend/slice1-claim-verdict` (not merged; merging is the owner's decision).
-Slice 2's publication is live on the private sandbox `mascah/tend-sandbox` as
-`mascah-bot`; the owner approved PR #2 as the teammate. Slice 2a, acting on
-requested changes with `tend watch`, is written and passes its regressions; its
-live run waits for PR #2 to be merged, which unpauses Grove (see the session
-handoff). Preserve existing attempts and candidate branches. Do not
-start proposal polling or multi-repository scheduling first.
+**Next Tend work: slice 3, explicit request-to-proposal intake, once its open
+decisions are settled with the owner** (first tracker, the cap on unmerged
+proposal PRs, mapping requests to repositories; see Deferred scope). Slices 1, 2
+and 2a are done on `tend/slice1-claim-verdict` (not merged; merging is the
+owner's decision), slices 2 and 2a shown live on the private sandbox
+`mascah/tend-sandbox`, publishing as `mascah-bot`, with the owner as the teammate
+(see the session handoff). Preserve existing attempts and candidate branches. Do
+not start proposal polling or multi-repository scheduling first.
 
 Grove #164's implementation merged as #165 (`0083bba`). Check Grove's own record for
 its acceptance before treating G as finished, and coordinate with its owner before
@@ -316,9 +316,9 @@ here describes delivery, not how strongly the architectural direction is agreed.
 | --- | --- | --- | --- |
 | G — Finish Grove #164 | Implementation merged as #165 (`0083bba`); acceptance per Grove's record | Existing Grove implementation and owner coordination | Invocation fix, outstanding behavioral findings and Grove's own acceptance |
 | 1 — Recoverable execution | Done on `tend/slice1-claim-verdict`, live interruptions demonstrated; not merged | Existing Tend prototype | [Recovery](#recoverable-execution), [review](#review-integrity), [Grove integration](#grove-integration-and-repository-configuration) |
-| 2 — One real shared-runner workflow | In progress: publication as `mascah-bot` live; the teammate approved PR #2, its merge remains; squash commit message from the implementer not yet live | Slice 1 | [Publication](#shared-review-and-publication) |
-| 2a — Act on requested changes | In progress: written, local regressions pass; not live | Slice 2 | [Below](#2a--act-on-requested-changes) |
-| 3 — Explicit request-to-proposal intake | Not started | Slice 2 and G available | [Intake and handoffs](#request-intake-and-explicit-handoffs) |
+| 2 — One real shared-runner workflow | Done on `tend/slice1-claim-verdict`, live on sandbox PRs #1–#3; not merged | Slice 1 | [Publication](#shared-review-and-publication) |
+| 2a — Act on requested changes | Done on `tend/slice1-claim-verdict`, live on sandbox PR #3; not merged | Slice 2 | [Below](#2a--act-on-requested-changes) |
+| 3 — Explicit request-to-proposal intake | Not started; open decisions first | Slice 2 and G available | [Intake and handoffs](#request-intake-and-explicit-handoffs) |
 | 4 — Prove portability | Not started | Earlier lifecycle demonstrated | [Portability](#portability) |
 
 ### G — Finish Grove #164 independently
@@ -682,11 +682,44 @@ Next action: the owner merges PR #2. Then plan a third sandbox cycle, run tend
 on it with `tend watch` in its own pane, and have the owner request changes on
 the bot's PR; record the commit message, the requested change and its reply.
 
+2026-11-15 — Slices 2 and 2a live. The owner merged PR #2 (approved as the
+teammate), which closed cycle `261115-pr0t1`. A third cycle was planned in the
+sandbox; a first version (refuse a negative amount) was wrong, as `validate`
+already refused it, and was withdrawn by a new commit; `261115-pr0t3` (refuse an
+invalid date on `add`) replaced it, after checking the gap was real.
+
+- Attempt `261115-28vwx`: implemented, Codex passed `a271ab2`, and `mascah-bot`
+  opened PR #3. Its title and description were the implementer's commit message:
+  subject "Refuse an invalid date when adding a record", three short paragraphs
+  (the problem, what `add` now does, what stays out of scope), `Grove: 261115-e0002`;
+  no tool or review talk. The head's review carried `grove review` collapsed.
+- `tend watch` (`WATCH_SECONDS=60`) ran in its own Herdr pane. The owner used
+  "Request changes" on `a271ab2` (format in the error message). Watch ran tend,
+  which wrote `request-5912015116` and asked Claude's existing session once; Claude
+  committed `09b9c1a` and wrote its reply. The watch was then stopped by hand
+  (Ctrl-C, killing that tend before the review) after a mistaken diagnosis that it
+  had not fired: it had, its sleep just had not ended. A one-pass watch then carried
+  on without asking again (the request is on the old head), Codex passed
+  `09b9c1a`, and `mascah-bot` posted that review with Claude's reply quoted (what
+  it changed, why it left the spec) and the `success` status.
+- Slice 2's acceptance, all live on the sandbox: implementation, independent
+  review, bounded repair (PR #1's planted defect), one PR with deduplication after
+  an interruption between the remote side effect and the local acknowledgment
+  (PR #1), and a second person reviewing and acting through the PR (approval and
+  merge of #2, requested changes on #3). Merging stayed the owner's.
+- Still not live: a failed final verdict through the bot; a branch someone else
+  pushed to; a teammate's request the implementer declines (no commit: tend stops
+  for the runner's person, and nothing is said on the PR); a request that changes
+  scope (the description is not rewritten). `tend watch` was left stopped.
+
+Next action: settle slice 3's open decisions with the owner before implementing
+it. Merging `tend/slice1-claim-verdict` is the owner's decision.
+
 A suitable prompt for a future implementation session is:
 
 > Read `docs/work/261114-reliable-orchestration/spec.md` in Tend and the repository
-> instructions. Revalidate the current handoff and implement the next unfinished
-> unit of slice 2 or 2a within its acceptance. Preserve unrelated work and active Grove
+> instructions. Revalidate the current handoff, settle slice 3's open decisions
+> with the owner, then implement its first unit within its acceptance. Preserve unrelated work and active Grove
 > implementation. Update the delivery status with the revision, checks and next
 > action; do not advance into proposal intake or broader polling.
 
