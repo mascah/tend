@@ -259,7 +259,7 @@ choices from consequential scope decisions.
 ### Portability
 
 Before calling Tend generic, demonstrate one non-Grove work item and one execution
-through tmux. The non-Grove path supplies its own scope and eligibility without
+through a second terminal (rex, 2026-11-15; tmux was dropped). The non-Grove path supplies its own scope and eligibility without
 requiring Grove files. The same lifecycle, review and recovery guarantees hold.
 
 GitHub, GitLab, Jira and Linear remain the intended tracker integrations. Prove
@@ -388,6 +388,71 @@ Use real second callers to guide extraction: a non-Grove work item, tmux, and a
 second tracker provider. Preserve the same state and review contract. Broader
 tracker coverage and multi-repository polling follow demonstrated integration
 needs; they are not implied completed by adding adapter names or configuration.
+
+Settled with the owner on 2026-11-15: tmux is dropped for now (rex and Herdr both
+report agent state; under tmux tend would infer it from the screen). The second
+tracker is Jira, as a source of requests and work items; code, pull requests,
+reviews and publication stay on GitHub, unchanged.
+
+#### 4b — Jira as the second tracker (design, before implementation)
+
+- Mapping. A Jira project spans repositories, so `TEND_STATE/jira` lists
+  `<site> <project-key> <origin-url>` a line, such as
+  `https://mikeascah03.atlassian.net SCRUM git@github.com:mascah/tend-sandbox.git`.
+  A project is taken only for an origin also listed in `TEND_STATE/publish`. One
+  project maps to one repository; a second line for the same project stops tend.
+- Trust. In Jira any user with Edit Issues permission can add `tend` or
+  `tend-build` and change an issue's text, and anyone with Create Issues can file
+  an issue already carrying them when Labels is on the create screen, unlike
+  GitHub, where labelling needs triage access. Mapping a project is therefore a
+  statement that everyone who can create or edit its issues may start agents;
+  check both before mapping one. True of SCRUM, whose only member is the owner.
+- Credentials. `JIRA_EMAIL` and `JIRA_API_TOKEN` from the environment, as Basic
+  authentication over HTTPS. tend calls Jira's REST API v3 with `curl`, the token
+  given on curl's standard input (`-K -`), never in its arguments, so the
+  regression suite stands in for Jira on `PATH` as it does for gh, Git, Herdr and
+  rex.
+- Requests (`tend propose <repo>`). Besides the repository's GitHub issues, each
+  mapped project's issues labelled `tend` whose status category is not Done, oldest
+  first (`/rest/api/3/search/jql`). Identity is the issue key: branch
+  `tend/jira-<KEY>` (such as `tend/jira-SCRUM-5`); a pull request from it in any
+  state means handled. Handled requests keep their label, so the search is followed
+  page by page (`nextPageToken`) past them until the cap is reached or results
+  end. The shared `CAP` (default 5) counts GitHub and Jira proposals together. The
+  drafter is given the summary, the description as text and the issue's browse
+  URL; the commit ends `Refs <KEY>`. The description (Atlassian Document Format)
+  becomes text that keeps what carries scope: a line per paragraph, heading and
+  list item, code blocks verbatim, and every link's destination and smart link's
+  URL. Once the pull request exists, tend comments its URL on the Jira issue, once,
+  found by that URL in the issue's comments, read page by page (`startAt`). A
+  request no proposal can be drafted from gets a Jira comment saying why, with a
+  marker, and loses its `tend` label; the run folder is set aside as for GitHub.
+- Finishing a handoff. A run folder records `linked` once the Jira comment, and the
+  proposal's summary review, are posted. A pull request means "do not draft
+  again", not "finished": each `tend propose` completes every run folder with a
+  pull request and no `linked`, whatever the cap, the label or the issue's status.
+  This closes the same gap in GitHub proposals, whose summary review is lost today
+  if tend stops between opening the pull request and posting it.
+- Identity is the key. A project-key rename changes every key, so its open
+  requests would be drafted again; accepted, as renames are rare and readable
+  branches are worth more.
+- Work items (`tend <repo> <KEY>`, such as `SCRUM-5`), for repositories without
+  Grove, as `issue-<n>`: approved by the `tend-build` label, done when the status
+  category is Done, scope from summary and description. The project must map to
+  the repository's origin. Branch `tend/build-<KEY>`, attempt
+  `jira-<KEY>-<cksum of repo path>`, commit message ending `Refs <KEY>` (GitHub's
+  `Closes` does not reach Jira). After publication, the pull request's URL is
+  commented on the issue once. Requested changes, watch, recovery and status work
+  as for any attempt.
+- Not in this unit: moving Jira issues through their workflow (people do; tend only
+  comments and removes its label), Jira Data Center, webhooks, and a Jira account
+  for tend apart from the owner's (comments are the owner's until one exists).
+- Evidence: a Jira stand-in in `dev/test.sh` (through `curl`), covering search and
+  comment pages, descriptions with links, smart links, lists and code, and a
+  handoff finished after an interruption; then one live proposal from project
+  SCRUM on `mascah/tend-sandbox`. Proposals need Grove and direct builds refuse it,
+  so Jira work items are shown by regressions only, as the owner settled for
+  `issue-<n>` (no live run in a repository without Grove).
 
 ## Deferred scope and unresolved choices
 
