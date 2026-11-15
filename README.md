@@ -11,7 +11,7 @@ grove claim
     -> one repair in the implementer's conversation, if the review asks
     -> Codex reviews the new head
     -> a branch and a verdict, waiting for you
-    -> with a listed origin, the branch pushed and one pull request
+    -> with a listed origin, a pull request and its reviews, as a bot account
 ```
 
 Grove holds what is agreed. Herdr runs the agents where you can watch and
@@ -61,15 +61,23 @@ After exit 3, or a kill, the same line carries on, with or without `origin`:
 what it last recorded and the next action, including "run it again" when
 tend was killed. It reads only, so it works while tend runs.
 
-With `origin`, tend publishes only if that URL is a line of `TEND_STATE/publish`;
-otherwise it says so and keeps the verdict local. When listed, at the end of a
-run it pushes the branch (never forced: a branch someone else pushed to stops
-for you), opens or updates one pull request onto the target, and sets the
-`tend/review` commit status on the reviewed head. The PR body carries the
-verdict, earlier reviews of the attempt and `grove review`'s summary. The PR is
-found on GitHub by its branch each run, so a rerun after any interruption
-updates it rather than opening another, and a later commit has no passing
-status until it is reviewed. tend never merges. Needs `gh` signed in.
+With `origin`, tend publishes only if a line of `TEND_STATE/publish` names that
+URL and the GitHub account to publish as, `<origin-url> <account>`; otherwise
+it says so and keeps the verdict local. The account is a separate one, such
+as a bot user with write access, signed in to `gh` beside yours (`gh auth
+login`, then `gh auth switch` back); tend takes its token for its own calls
+only. Every write is that account's, which also lets you approve its PRs:
+
+- the branch is pushed over HTTPS, never forced; a branch someone else pushed
+  to stops for you;
+- one pull request onto the target, its description written once from Grove
+  (the cycle, its changes, `grove review`'s summary) and then left to people;
+- each verdict of the attempt is a comment review on its own commit, and each
+  reviewed commit gets the `tend/review` status, so a later commit has no pass
+  until it is reviewed.
+
+The PR and the reviews are looked up on GitHub each run, never remembered, so
+a rerun after any interruption repeats neither. tend never merges.
 
 To cancel, stop tend (Ctrl-C or a kill). The agents keep their work and
 their turns. Stop an agent in its pane if you want it stopped too; running
@@ -97,7 +105,7 @@ whose agents act at once. It starts no agent and needs no Grove checkout.
 | Was the repair used? | `runs/<attempt>/repair-asked` exists (a prototype's `repaired` is read as asked). |
 | What is it doing? | `runs/<attempt>/status`: the last stage and next action. |
 | Is an agent still on a turn? | Herdr's status for its name: `working` is waited for. |
-| Is there a pull request? | `gh pr list --head <branch>` on GitHub, every run. |
+| Is there a pull request, and its reviews? | `gh pr list --head <branch>` and the account's reviews by commit, on GitHub, every run. |
 
 A pane's state says a turn ended, never that the work is done.
 

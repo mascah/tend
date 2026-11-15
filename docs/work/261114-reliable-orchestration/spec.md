@@ -14,9 +14,10 @@ below is historical evidence, not a claim about the checkout you find.
 
 **Next Tend work: finish slice 2, one real shared-runner workflow.** Slice 1 is
 done on `tend/slice1-claim-verdict` (not merged; merging is the owner's decision).
-Slice 2's publication is live on the private sandbox `mascah/tend-sandbox`, PR #1;
-what remains is the owner, as the teammate, reviewing and acting through that PR
-(see the session handoff). Tend publishes only to origins the runner lists. Preserve existing attempts and candidate branches. Do not
+Slice 2's publication is live on the private sandbox `mascah/tend-sandbox` as
+`mascah-bot`, PR #2; what remains is the owner, as the teammate, approving and
+merging through that PR (see the session handoff). Then slice 2a, acting on
+requested changes, which the owner agreed comes next. Preserve existing attempts and candidate branches. Do not
 start proposal polling or multi-repository scheduling first.
 
 Grove #164's implementation merged as #165 (`0083bba`). Check Grove's own record for
@@ -125,6 +126,13 @@ the tool, not by keeping the prototype under a particular number of lines.
   together so the lifecycle does not depend on one harness's conversation format.
 - Retain one automatic repair round and bounded execution. A saved session is
   useful for continuity, but artifacts must permit recovery if the session is gone.
+- Publication authority (settled 2026-11-15): a runner publishes only to origins
+  it lists, each with the GitHub account to publish as. That account, a bot user
+  (`mascah-bot` for the owner), makes every remote write: the push, the PR, its
+  reviews and statuses. People approve and merge. The PR description says what
+  the change is for and is written once; each verdict is a separate comment
+  review on its commit, never folded into the description. A GitHub App (check
+  runs, short-lived tokens) waits for a need a machine user cannot meet.
 - Humans retain scope approval and merge authority. A tracker label requesting
   execution does not approve an unapproved Grove proposal.
 - Use deterministic code for identity, deduplication, polling and routine
@@ -307,7 +315,8 @@ here describes delivery, not how strongly the architectural direction is agreed.
 | --- | --- | --- | --- |
 | G — Finish Grove #164 | Implementation merged as #165 (`0083bba`); acceptance per Grove's record | Existing Grove implementation and owner coordination | Invocation fix, outstanding behavioral findings and Grove's own acceptance |
 | 1 — Recoverable execution | Done on `tend/slice1-claim-verdict`, live interruptions demonstrated; not merged | Existing Tend prototype | [Recovery](#recoverable-execution), [review](#review-integrity), [Grove integration](#grove-integration-and-repository-configuration) |
-| 2 — One real shared-runner workflow | In progress: publication live on a sandbox PR; the second person's review remains | Slice 1 | [Publication](#shared-review-and-publication) |
+| 2 — One real shared-runner workflow | In progress: publication as `mascah-bot` live on sandbox PR #2; the teammate's approval and merge remain | Slice 1 | [Publication](#shared-review-and-publication) |
+| 2a — Act on requested changes | Not started; agreed next | Slice 2 | [Below](#2a--act-on-requested-changes) |
 | 3 — Explicit request-to-proposal intake | Not started | Slice 2 and G available | [Intake and handoffs](#request-intake-and-explicit-handoffs) |
 | 4 — Prove portability | Not started | Earlier lifecycle demonstrated | [Portability](#portability) |
 
@@ -337,6 +346,20 @@ Start from an approved cycle rather than inventing intake simultaneously. Add
 publication for one remote repository and show implementation, independent review,
 bounded repair, PR publication and a second person's review. Exercise interruption
 between remote side effects and local acknowledgment to prove deduplication.
+
+### 2a — Act on requested changes
+
+A teammate who requests changes on Tend's PR should not have to start Tend by
+hand. On a run, Tend reads review comments on its PR from people other than the
+publishing account since the last reviewed commit, gives them to the implementer's
+own local session as a repair, has Codex review the new commit, and publishes it.
+Each request gets one repair round; anything unclear or outside scope stops for
+a person. Then a small watch loop on the runner runs this for Tend's own open PRs
+every few minutes. This is narrower than intake polling, which stays deferred.
+
+Claude Code's `/autofix-pr` was considered and not chosen: it is a cloud session
+driven by GitHub webhooks and the Claude GitHub App, so it would fix the branch
+outside Tend's lock, records, review and repair bound, as another identity.
 
 ### 3 — Explicit request-to-proposal intake
 
@@ -586,11 +609,45 @@ Next action: the owner reviews PR #1 in `mascah/tend-sandbox` as the teammate an
 merges or requests changes through it. Record what they could and could not
 judge from the PR alone, then mark slice 2 done or add what was missing.
 
+2026-11-15 — Slice 2, publication as a separate account. The owner found the
+verdict-in-description clunky (it replaced the PR's intent) and asked that a
+separate account, `mascah-bot`, publish rather than the owner. Committed on
+`tend/slice1-claim-verdict` as `518c34e` plus the docs commit after it; not merged.
+
+- `TEND_STATE/publish` lines are `<origin-url> <account>`. Tend takes the account's
+  token from `gh`'s keyring (`gh auth token --user`) for its own calls; the owner's
+  account stays active. Pushes go over HTTPS (`pushInsteadOf` for an SSH origin,
+  `gh auth git-credential`). The description is written once, at creation, from
+  Grove's JSON and `grove review`; each verdict of the attempt is a COMMENT review
+  on its commit (a PR's author may not approve or request changes), found by
+  commit and account so it is posted once; each reviewed commit gets a status.
+- Owner decisions: comment reviews for now; the bot pushes too; commits keep the
+  implementer's local Git identity. `mascah-bot` was invited with write access and
+  the invitation accepted with its token (an earlier note here wrongly said it
+  already had access).
+- Checks: `dev/test.sh` passes 101. The `gh` stand-in now records which account's
+  token made each write and applies the caller's `--jq` to stored reviews. New:
+  PR authored by the account; description has no verdict and survives a person's
+  edit; one review per head, also after a lost create; a repaired failure's review
+  on its own commit; each head's status.
+- Live: PR #1 (the earlier format, authored by the owner) was merged by the owner,
+  which unpaused Grove. A second sandbox cycle, `261115-pr0t1` (`list` says `no
+  records`), was added and re-planned by hand after that merge made its plan stale.
+  Attempt `261115-fktq6` passed review at `bfff106` and opened PR #2: author,
+  branch push, review and status all `mascah-bot`. A rerun posted no second review
+  and left the description unchanged.
+- Not exercised live: a failed or repaired head through the bot (stand-in only),
+  a teammate's approval of a bot PR, requested changes (slice 2a).
+
+Next action: the owner approves and merges PR #2 as the teammate, or requests
+changes (which Tend will not act on until slice 2a). Record what could and could
+not be judged from the PR alone, mark slice 2 done, then start slice 2a.
+
 A suitable prompt for a future implementation session is:
 
 > Read `docs/work/261114-reliable-orchestration/spec.md` in Tend and the repository
 > instructions. Revalidate the current handoff and implement the next unfinished
-> unit of slice 2 within its acceptance. Preserve unrelated work and active Grove
+> unit of slice 2 or 2a within its acceptance. Preserve unrelated work and active Grove
 > implementation. Update the delivery status with the revision, checks and next
 > action; do not advance into proposal intake or broader polling.
 
