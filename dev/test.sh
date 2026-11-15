@@ -169,8 +169,9 @@ project "$t/repo"
 run
 # Put the attempt back as the prototype left it: its files in .tend/ in the checkout.
 run_dir=$(dirname "$(verdict)")
-touch "$run_dir/repaired"
-mkdir "$(worktree)/.tend" && mv "$run_dir"/* "$(worktree)/.tend/"
+case $run_dir in "$TEND_STATE"/runs/*)
+	touch "$run_dir/repaired" && mkdir "$(worktree)/.tend" && mv "$run_dir"/* "$(worktree)/.tend/" ;;
+esac
 run
 check "an attempt with a legacy .tend/ carries on" test $? = 0
 check "its verdict is reused, not discarded" test "$(reviews)" = 1

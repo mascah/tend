@@ -430,7 +430,7 @@ is the owner's decision.
 
 2026-11-14 — Slice 1, second unit: runtime files outside the candidate and a
 controller lock. Code written and local regressions passed; committed on
-`tend/slice1-claim-verdict` as the commit after `62bdeb5`; not merged.
+`tend/slice1-claim-verdict` as `fc8b3e9`, with a test guard in the next commit; not merged.
 
 - Run files: `TEND_STATE` (default `~/.local/state/tend`) holds `lock` and
   `runs/<attempt>/` with verdicts, `.rejected-*` and `repaired`. Not under `.git`:
