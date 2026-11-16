@@ -1,0 +1,158 @@
+# Review
+
+<!-- A maintained spec states the agreed behavior expected of the target branch.
+It is not a report of what the code does today or of what is deployed: where
+they differ, keep the rule and record the difference under "Known discrepancies". -->
+
+## Purpose
+
+Each candidate head of an attempt is reviewed by a fresh Codex session apart from the implementer, whose only output is a verdict file tend validates, and a failure the reviewer judges repairable gets one repair in the implementer's conversation before the new head is reviewed. A verdict is `verdict-<head>.json` in the attempt's run folder; actionable means every finding is an in-scope code fix that needs no decision from the owner. The owner, and anyone reading a published review, rely on a verdict meaning a review of exactly that commit happened.
+
+## Boundaries
+
+This covers starting and prompting the reviewer, what makes a verdict count,
+and the one repair with its `repair-asked` mark. When the attempt runs at
+all, its recovery in general and its exit statuses are
+[attempts](../attempts/spec.md); posting verdicts on GitHub is
+[publication](../publication/spec.md); what the reviewer is told an issue
+build must do is [work-items](../work-items/spec.md). Whether the reviewer's
+judgement is right is not checked.
+
+## Requirements
+
+### Requirement: A fresh reviewer for each head
+
+When an attempt's head has no valid verdict, the system shall start reviewer
+`rev-<short head>` as Codex with `-s workspace-write -a never --add-dir <run
+folder>`, reusing one an earlier run left, and prompt it once with the branch,
+the head, the change as `git diff <base>...HEAD`, what the work item must do
+and where the implementer's claims are, asking for material findings only, no
+edits or commits, and the verdict written to `verdict-<head>.json` in the run
+folder as `head`, `conclusion`, `actionable` and `summary`; and once the
+verdict is valid it shall close the reviewer's pane.
+
+#### Scenario: The reviewer's one writable folder
+
+- WHEN tend has a cycle's head reviewed
+- THEN the reviewer is started with `--add-dir TEND_STATE/runs/<attempt>`,
+  and the verdict file is there
+
+#### Scenario: A reviewer left working
+
+- GIVEN tend stopped because the reviewer's prompt timed out, and the reviewer
+  is still working
+- WHEN the owner runs tend again
+- THEN the reviewer is started once and prompted once in all
+
+### Requirement: Only a valid verdict counts
+
+The system shall count a verdict, new or cached, only when its file is valid
+JSON naming the head it is for, with `conclusion` `success` or `failure`,
+`actionable` a boolean and `summary` a string; if a cached verdict is not
+valid, it shall keep it as `verdict-<head>.json.rejected-<time>` and review
+the head again; and if the reviewer settles without writing a valid verdict,
+it shall stop for a person, naming the reviewer's pane.
+
+#### Scenario: A cached verdict for another head
+
+- GIVEN a reviewed attempt whose verdict file now names head `0000…0000`
+- WHEN the owner runs tend again
+- THEN the head is reviewed a second time and the verdict names the head
+
+#### Scenario: A cached verdict without a conclusion
+
+- GIVEN a reviewed attempt whose verdict file has lost its `conclusion`
+- WHEN the owner runs tend again
+- THEN the head is reviewed again and the set-aside file is kept as
+  `verdict-<head>.json.rejected-<time>`
+
+#### Scenario: A new verdict without a conclusion
+
+- GIVEN a reviewer that writes a verdict with no `conclusion`
+- WHEN the owner runs tend
+- THEN tend exits 3, saying the reviewer settled without a valid verdict
+
+### Requirement: The reviewer changes nothing
+
+If the head moved or the tree has uncommitted files once the reviewer's turn
+ends, then the system shall stop for a person, saying the reviewer changed the
+checkout, and publish nothing for that head.
+
+#### Scenario: A reviewer that commits
+
+- GIVEN a reviewer that commits a fix of its own as well as its verdict
+- WHEN its turn ends
+- THEN tend exits 3, saying `rev-<short head>` changed the checkout
+
+### Requirement: One repair
+
+When the head's verdict is a failure marked actionable and the attempt has
+asked no repair, the system shall write the reviewed head to `repair-asked`
+in the run folder just before prompting the implementer once with the
+verdict's findings, stop for a person if no commit follows, and have the new
+head reviewed; it shall ask no second repair in the attempt, and a failure
+that is not actionable, or that remains after the repair, shall exit 0 with
+that verdict for a person to decide.
+
+#### Scenario: Repaired and passed
+
+- GIVEN a reviewer that fails the first head as actionable and passes the next
+- WHEN the owner runs tend on the cycle
+- THEN the repair is asked once, the new head passes, `status` says `done:
+  success`, and tend exits 0
+
+#### Scenario: A finding that needs a decision
+
+- GIVEN a reviewer that fails the head with `actionable` false
+- WHEN tend has it reviewed
+- THEN no repair is asked, and tend exits 0 printing the failed verdict
+
+### Requirement: An uncertain repair goes to a person
+
+If `repair-asked` names the head under review, no commit has followed and the
+implementer is not working, then the system shall stop for a person on every
+run, saying the repair's outcome is unknown, until a person commits a fix or
+deletes `repair-asked`, which has the repair asked once more; an implementer
+still working on the repair shall be waited for; and a repair refused before
+its prompt went, as by a blocked implementer, shall leave the repair unused.
+
+#### Scenario: A stalled repair prompt
+
+- GIVEN tend stopped with exit 3 because the repair prompt stalled, and the
+  implementer is idle with no new commit
+- WHEN the owner runs tend again
+- THEN it exits 3 without asking the repair again, saying the repair has no
+  commit and the implementer is not working on it, and `tend status` shows
+  `needs-you: the repair asked`
+
+#### Scenario: The mark deleted
+
+- GIVEN that stopped attempt, and a person deletes `repair-asked`
+- WHEN the owner runs tend again
+- THEN the repair is asked a second time, the new head passes, and tend exits 0
+
+#### Scenario: The implementer still repairing
+
+- GIVEN the repair prompt timed out and the implementer is still working
+- WHEN the owner runs tend again
+- THEN tend waits for it, has the new head reviewed, exits 0, and the repair
+  was asked once
+
+#### Scenario: A blocked implementer
+
+- GIVEN the implementer is blocked when the head fails as actionable
+- WHEN tend would ask the repair
+- THEN it exits 3 with no `repair-asked` written; once the implementer is
+  idle, the next run asks the repair and passes
+
+## Known discrepancies
+
+None recorded.
+
+## Open questions
+
+None.
+
+## History
+
+- Written when tend adopted Grove (2026-11-16).
