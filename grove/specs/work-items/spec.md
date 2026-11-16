@@ -199,11 +199,7 @@ after its text, and the URL of every smart link.
 
 ## Known discrepancies
 
-- The commit message names the issue: README.md at 38b21d0 says a Jira build
-  ends its commit message `Refs <KEY>` but mentions a comment with the pull
-  request's URL only for proposals. A Jira build also comments it on the issue
-  once published (main.go `publish`, jira.go `jiraRequest`), as dev/test.sh's
-  jira-build scenario checks.
+None recorded.
 
 ## Open questions
 

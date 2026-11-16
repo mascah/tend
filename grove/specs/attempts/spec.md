@@ -214,23 +214,7 @@ write never leaves part of one.
 
 ## Known discrepancies
 
-- Exit statuses: README.md at 38b21d0 lists exits 0, 3 and 4 only. The code
-  (main.go) also exits 2 with a usage line when no work item is given, and 1
-  when a command it relies on fails unexpectedly.
-- One tend per runner: README.md at 38b21d0 says exit 4 means "another tend
-  is running on this machine". The lock is the file `lock` in TEND_STATE
-  (main.go `takeLock`), so tends with different TEND_STATE folders run
-  together.
-- Purpose: README.md at 38b21d0 gives TEND_STATE's default as
-  `~/.local/state/tend`; the code uses `$XDG_STATE_HOME/tend` when
-  `XDG_STATE_HOME` is set (main.go `main`).
-- README.md at 38b21d0, "What it asks of Grove", names three things:
-  `grove changes --json`, `grove claim` and `/grove-implement`. tend also
-  runs `grove review` for the head's published review
-  ([publication](../publication/spec.md)), prompts `/grove-propose
-  --unattended` ([intake](../intake/spec.md)), and takes a successful `grove
-  changes --json` as the sign a repository uses Grove
-  ([work-items](../work-items/spec.md)).
+None recorded.
 
 ## Open questions
 

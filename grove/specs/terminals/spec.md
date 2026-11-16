@@ -98,9 +98,10 @@ rex agent with no report, as at a dialog it does not report, or reporting
 When the system prompts an agent, it shall under Herdr use `herdr agent prompt
 --wait` with the `TIMEOUT_MS` timeout; and under rex it shall send the text as
 a bracketed paste when the agent has asked for one, then Enter, and count the
-prompt delivered only when the agent reports a new state within five
-seconds, otherwise reporting `agent_prompt_stalled`, then wait until the
-agent is idle, done or blocked.
+prompt delivered only when the agent reports a new state, which may be its
+final done, since Codex reports nothing while it works; reporting
+`agent_prompt_stalled` when none comes within the prompt's timeout; then wait
+until the agent is idle, done or blocked.
 
 #### Scenario: A paste under rex
 
@@ -161,16 +162,7 @@ forget it there.
 
 ## Known discrepancies
 
-- How agents start: README.md at 38b21d0 says "The repair prompt carries the
-  findings themselves, so the implementer reads nothing outside its
-  worktree". The implementer is started with `--add-dir` on the run folder
-  (main.go `implementer`) and is asked to write there: its notes for an issue
-  build (`implemented`), the commit message (`message-<head>`) and its reply
-  to requested changes (`reply-<review id>`); dev/test.sh's publish scenario
-  checks the flag.
-- Telling a person: README.md at 38b21d0 says of exit 3 that "A Herdr
-  notification says why". Under rex tend reports its state to its own tab
-  instead (rex.go `notify`), as README's rex paragraph says.
+None recorded.
 
 ## Open questions
 

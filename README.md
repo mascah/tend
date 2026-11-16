@@ -47,11 +47,16 @@ tend rather than being prompted into. rex worktrees are made by Git under
 `TEND_STATE/worktrees/`, and tend reports its own state to its tab.
 
 - Exit 0: the head is reviewed, and the verdict is printed.
-- Exit 3: a person is needed. A Herdr notification says why.
-- Exit 4: another tend is running on this machine, and nothing was done.
-  One tend runs at a time; the lock goes when it exits or is killed.
+- Exit 2: no work item was given; a usage line says how to give one.
+- Exit 3: a person is needed. A Herdr notification says why, or under rex
+  tend's own tab.
+- Exit 4: another tend is running with the same `TEND_STATE`, and nothing was
+  done. One tend runs at a time per state folder; the lock goes when it exits
+  or is killed.
+- Exit 1: a command tend relies on failed unexpectedly.
 
-Its own files live under `TEND_STATE` (default `~/.local/state/tend`): the
+Its own files live under `TEND_STATE` (default `$XDG_STATE_HOME/tend`, or
+`~/.local/state/tend` without it): the
 lock, and a folder per attempt under `runs/` holding its verdicts and repair
 mark. They never enter the candidate, so a repository needs no Git excludes.
 An attempt from before this, with a `.tend/` folder in its checkout, has
@@ -161,7 +166,7 @@ standard input. `tend propose` then also drafts the project's issues labelled
 `tend` and not done, on `tend/jira-<KEY>`, and comments the pull request's URL
 on the Jira issue; `tend <repo> <KEY>` builds one labelled `tend-build` in a
 repository without Grove, as `issue-<n>` does, ending its commit message `Refs
-<KEY>`. Anyone who can create or edit issues in a mapped project can start an
+<KEY>` and commenting the pull request's URL on it once published. Anyone who can create or edit issues in a mapped project can start an
 agent this way, so map only projects whose members you trust with that. A
 handoff stopped between the pull request and the Jira comment is finished by
 the next `tend propose`, which completes every intake folder with a `pr` and no
@@ -200,13 +205,14 @@ A pane's state says a turn ended, never that the work is done.
 
 ## What it asks of Grove
 
-Three things, through Grove's command line, and it never reads Grove's
-Markdown:
+Its command line and skills, and it never reads Grove's Markdown:
 
 - `grove changes --json`, for the document root, the target branch and the
-  attempt records;
+  attempt records, and as the sign that a repository uses Grove;
 - `grove claim <cycle-id>`, to take the cycle and record the attempt;
-- `/grove-implement <cycle-id>`, as the implementer's prompt.
+- `/grove-implement <cycle-id>`, as the implementer's prompt;
+- `grove review`, whose summary goes in the head's published review;
+- `/grove-propose --unattended`, as the drafter's prompt in `tend propose`.
 
 Grove does not know tend exists, and is useful without it.
 
@@ -217,8 +223,9 @@ Grove does not know tend exists, and is useful without it.
 - It answers one kind of dialog itself: whether to trust the folder, which
   Claude Code asks for each new worktree and Codex once for a repository.
 - The reviewer may write in the attempt's run folder besides its checkout
-  (`--add-dir`), where its verdict goes. The repair prompt carries the
-  findings themselves, so the implementer reads nothing outside its worktree.
+  (`--add-dir`), where its verdict goes. So may the implementer, which writes
+  its notes, the commit message and its replies there; the repair prompt
+  carries the findings themselves.
   It answers for whatever repo you pass it. Any other dialog stops the loop
   and notifies you.
 - Each attempt gets a Herdr worktree workspace. `herdr worktree create`
@@ -247,7 +254,6 @@ the plan's session handoff.
 Not yet shown:
 
 - a defect found in the implementer's own work;
-- a tracker;
 - a dialog Herdr does not recognize (it reports `idle`, so tend prompts into
   it; the missing verdict then stops tend);
 - whether the Herdr notification reaches a phone;
