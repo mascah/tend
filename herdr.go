@@ -20,6 +20,7 @@ type terminal interface {
 	prompt(name, text string) (string, string)              // the state it settled in, or "" and why
 	wait(name, ms string, until ...string) (string, string) // likewise
 	closePane(pane string)
+	closePlace(dir string) // the worktree's place closed, with its agents; Git removes what is left
 	notify(title, body, sound string)
 }
 
@@ -133,6 +134,16 @@ func (h *herdr) wait(name, ms string, until ...string) (string, string) {
 }
 
 func (h *herdr) closePane(pane string) { quiet("herdr", "pane", "close", pane) }
+
+// Herdr removes a worktree it has open, with its workspace.
+func (h *herdr) closePlace(d string) {
+	s, _ := quiet("herdr", "worktree", "list", "--cwd", repo)
+	for _, w := range list(get(parse(s), "result", "worktrees")) {
+		if ws := str(get(w, "open_workspace_id")); ws != "" && sameDir(str(get(w, "path")), d) {
+			quiet("herdr", "worktree", "remove", "--workspace", ws)
+		}
+	}
+}
 
 func (h *herdr) notify(title, body, sound string) {
 	quiet("herdr", "notification", "show", title, "--body", body, "--sound", sound)

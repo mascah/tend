@@ -12,11 +12,11 @@ Read this document and the repository instructions, then inspect the current
 branch, worktrees, diff and relevant implementation before acting. The baseline
 below is historical evidence, not a claim about the checkout you find.
 
-**Next Tend work: slice 4 is complete; choose what follows with the owner.**
-Agreed with the owner on 2026-11-15: the non-Grove work item, the port to Go and
-the terminal interface with Herdr and rex (shown live) are merged into `main`;
-tmux is dropped; Jira as the second tracker is done on `tend/slice4-jira` (not
-merged). Before that the order was drawn from Herdr and rex (the
+**Next Tend work: the known gaps are closed on `tend/known-gaps` (not merged);
+show the requested-change behaviour live, then choose what follows with the owner.**
+Slice 4 is complete and merged into `main`: the non-Grove work item, the port to
+Go, the terminal interface with Herdr and rex (shown live) and Jira as the second
+tracker (shown live); tmux is dropped. Before that the order was drawn from Herdr and rex (the
 owner's next multiplexer) or tmux if rex cannot report agent state; then the
 remaining terminal; then a second tracker. Slices 1–3 are merged into `main`. Slices 1, 2
 and 2a are done on `tend/slice1-claim-verdict` (not merged; merging is the
@@ -323,7 +323,7 @@ here describes delivery, not how strongly the architectural direction is agreed.
 | 2 — One real shared-runner workflow | Done on `tend/slice1-claim-verdict`, live on sandbox PRs #1–#3; not merged | Slice 1 | [Publication](#shared-review-and-publication) |
 | 2a — Act on requested changes | Done on `tend/slice1-claim-verdict`, live on sandbox PR #3; not merged | Slice 2 | [Below](#2a--act-on-requested-changes) |
 | 3 — Explicit request-to-proposal intake | Done on `tend/slice3-intake`, live on the sandbox; not merged | Slice 2 and G available | [Intake and handoffs](#request-intake-and-explicit-handoffs) |
-| 4 — Prove portability | Done: non-Grove work item, Go port and the rex terminal merged into `main`; Jira as the second tracker on `tend/slice4-jira` (not merged); tmux dropped | Earlier lifecycle demonstrated | [Portability](#portability) |
+| 4 — Prove portability | Done and merged into `main`: non-Grove work item, Go port, the rex terminal and Jira as the second tracker; tmux dropped | Earlier lifecycle demonstrated | [Portability](#portability) |
 
 ### G — Finish Grove #164 independently
 
@@ -1031,11 +1031,51 @@ known gaps (no fetch of the target before branching, leftover worktrees, a decli
 change request silent on the PR, a description stale after a scope-changing
 request), a Jira account for tend, and multi-repository polling.
 
+2026-11-15 — The known gaps. The owner merged `tend/slice4-jira` into `main`
+(`17048e0`, pushed) and asked for the recorded gaps to be closed; on
+`tend/known-gaps`, not merged.
+- Fetch: new work branches from `origin/<target>`, fetched first (a fetch that fails
+  with an origin stops), and proposals and issue builds count their commits from
+  it, as the reviewer's diff does; without an origin, the local target as before.
+  Grove's claim already branched from origin for cycles; proposals and issue builds
+  did not.
+- Leftover worktrees: each run folder names its worktree in `worktree`. At the start
+  of `tend propose` and of a run, a worktree whose pull request is merged or closed
+  is removed with its local branch and the terminal's place (Herdr's `worktree
+  remove`, or the rex sessions recorded for it, killed and forgotten), only when its
+  head is the pull request's and it is clean; otherwise left and said. A declined
+  request's worktree goes at once. The `tend-HHMMSS` branch a cycle's worktree is
+  made with is deleted after the claim. An issue build whose pull request is merged
+  is done, so tidying cannot lead to building it again. Folders from before this
+  change name no worktree and are not tidied.
+- A declined change request: the implementer is told to write its reply even when
+  it changes nothing. With no commit and a reply, the reply goes on the pull request
+  as the account's comment, once (found by a marker naming the review), and
+  `answered-<review node id>` keeps tend and `tend watch` from asking again; a new
+  change request on the same head is asked. With no commit and no reply, tend
+  stops for a person as before.
+- A stale description: tend records in `described` the head whose message is on
+  the pull request. After a later head is reviewed, the implementer writes the
+  message again, given the current one to keep what holds, and tend puts it on the
+  pull request with `gh pr edit`, unless the title or description differ from what
+  tend set, in which case a person has edited them and tend leaves them for good.
+  Pull requests opened before this change are not rewritten.
+- Checks: 281 pass, 31 new; against `main`'s build 20 of them fail (the fetch of a
+  cycle passes on both, as Grove's claim fetched).
+- Not exercised live. Not done: a closed, unmerged proposal is still never
+  redrafted, and comments on a proposal are not acted on (revision stays manual).
+
+Next action: show the requested-change behaviour on the sandbox: the owner
+requests an out-of-scope change on a bot pull request (expect the reply comment
+and no further ask), then a scope-changing one (expect the description
+rewritten); merging a pull request should then see its worktree removed on the
+next pass. Merging `tend/known-gaps` is the owner's.
+
 A suitable prompt for a future implementation session is:
 
 > Read `docs/work/261114-reliable-orchestration/spec.md` in Tend and the repository
-> instructions. Revalidate the current handoff; slice 4 is complete, so agree the
-> next unit with the owner from the recorded gaps and deferred scope. Preserve unrelated work and active Grove
+> instructions. Revalidate the current handoff; slice 4 and the known gaps are
+> done, so show the gaps' behaviour live, then agree the next unit with the owner. Preserve unrelated work and active Grove
 > implementation. Update the delivery status with the revision, checks and next
 > action; do not advance into proposal intake or broader polling.
 

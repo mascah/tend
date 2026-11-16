@@ -209,6 +209,19 @@ func (r *rex) wait(name, ms string, until ...string) (string, string) {
 
 func (r *rex) closePane(b string) { rexCmd("block", "close", "-s", r.session, b) }
 
+// Every session recorded for the worktree is killed and forgotten.
+func (r *rex) closePlace(d string) {
+	var keep []string
+	for _, line := range strings.Split(cat(state+"/rex-sessions"), "\n") {
+		if id, path, _ := strings.Cut(line, " "); line != "" && sameDir(path, d) {
+			rexCmd("kill", id)
+		} else if line != "" {
+			keep = append(keep, line+"\n")
+		}
+	}
+	os.WriteFile(state+"/rex-sessions", []byte(strings.Join(keep, "")), 0o644)
+}
+
 // tend reports its own state the same way, to the terminal it runs in, so its
 // tab shows whether it needs you or is done.
 func (r *rex) notify(title, body, sound string) {

@@ -34,9 +34,18 @@ turn() { # name text
 			echo "built" >>a.txt && git commit -qam "Build the issue"
 			[ -n "${NO_NOTES:-}" ] || echo "Built it; ran the tests." >"$(grep -oE '[^ ,]*/implemented' <<<"$2" | head -1)" ;;
 		*"requested changes at commit"*)
-			echo plainer >>a.txt && git commit -qam "As asked"
-			echo "Made it plainer, as asked." >"$(grep -oE '[^ ]*/reply-[0-9]+' <<<"$2")" ;;
-		*squash-merged*) printf 'Add the file\n\nThe project needed a file.\n\nGrove: 261015-c0000\n' >"$(grep -oE '[^ ]*/message-[0-9a-f]{40}' <<<"$2")" ;;
+			if [ -n "${REQUEST_DECLINE:-}" ]; then
+				echo "Out of scope: the issue asks for no wording change." >"$(grep -oE '[^ ]*/reply-[0-9]+' <<<"$2")"
+			else
+				echo plainer >>a.txt && git commit -qam "As asked"
+				echo "Made it plainer, as asked." >"$(grep -oE '[^ ]*/reply-[0-9]+' <<<"$2")"
+			fi ;;
+		*squash-merged*) # a new message for a later head, naming what was asked
+			m=$(grep -oE '[^ ]*/message-[0-9a-f]{40}' <<<"$2" | head -1)
+			case $2 in
+			*"earlier head"*) printf 'Add the file, plainer\n\nThe project needed a plain file.\n\nGrove: 261015-c0000\n' >"$m" ;;
+			*) printf 'Add the file\n\nThe project needed a file.\n\nGrove: 261015-c0000\n' >"$m" ;;
+			esac ;;
 		*) echo fix >>a.txt && git commit -qam repair ;;
 		esac ;;
 	prop-*)
@@ -292,21 +301,27 @@ case "$1 $2" in
 	arg --title "$@" >"$s/pr-${b//\//_}.title"
 	[ -z "${CREATE_LOST:-}" ] || exit 1
 	echo "https://example.test/pr/${b//\//_}" ;;
-"pr edit") cat >"$s/pr-${3##*/}" ;;
+"pr edit")
+	cat >"$s/pr-${3##*/}"
+	arg --title "$@" >"$s/pr-${3##*/}.title" ;;
+"pr comment")
+	[ -f "$s/comments" ] || echo '[]' >"$s/comments"
+	jq --arg n "${3##*/}" --arg by "$by" --rawfile b /dev/stdin '. + [{issue: $n, body: $b, user: {login: $by}}]' "$s/comments" >"$s/c.new" && mv "$s/c.new" "$s/comments" ;;
 "pr view")
 	k=$s/pr-${3##*/}
 	[ -f "$s/reviews" ] || echo '[]' >"$s/reviews"
 	{ read -r b; read -r o; } <"$k.where"
 	[ -e "$k.merged" ] && st=MERGED || st=OPEN
-	jq --arg st "$st" --arg h "$(git -C "$o" rev-parse "$b")" '{state: $st, headRefOid: $h, reviews: map({state, commit: {oid: .commit_id}, author: {login: .user.login}})}' "$s/reviews" |
-		jq -r "$(arg --jq "$@")" ;;
+	jq --arg st "$st" --arg h "$(git -C "$o" rev-parse "$b" 2>/dev/null)" --arg b "$b" --rawfile body "$k" --arg t "$(cat "$k.title" 2>/dev/null)" \
+		'{state: $st, headRefOid: $h, headRefName: $b, title: $t, body: $body, reviews: map({id: .node_id, state, commit: {oid: .commit_id}, author: {login: .user.login}})}' "$s/reviews" |
+		if q=$(arg --jq "$@") && [ -n "$q" ]; then jq -r "$q"; else cat; fi ;;
 api*)
 	[ -f "$s/reviews" ] || echo '[]' >"$s/reviews"
 	case $2 in
 	*/issues/*/comments)
 		[ -f "$s/comments" ] || echo '[]' >"$s/comments"
 		n=${2%/comments} n=${n##*/}
-		jq --argjson n "$n" '[.[] | select(.issue == $n)]' "$s/comments" | jq -r "$(arg --jq "$@")" ;;
+		jq --arg n "$n" '[.[] | select((.issue | tostring) == $n)]' "$s/comments" | jq -r "$(arg --jq "$@")" ;;
 	*/reviews/*/comments)
 		id=${2%/comments} id=${id##*/}
 		jq --argjson id "$id" '[.[] | select(.id == $id)][0].comments // []' "$s/reviews" | jq -r "$(arg --jq "$@")" ;;
@@ -359,7 +374,7 @@ scenario() {
 	t=$top/$name
 	mkdir -p "$t/state"
 	export HERDR_STATE=$t/state TEND_STATE=$t/tend
-	unset NO_NOTES REVIEW IMPL_FAIL IMPL_SLEEP REPAIR_FAIL REV_FAIL BLOCK_AFTER_BUILD CREATE_LOST REQUEST_FAIL PROPOSE_FAIL FOLLOW_FAIL DECLINE EDIT_FAIL CAP TRUST_DIALOG REX_STALL COMMENT_FAIL
+	unset NO_NOTES REVIEW IMPL_FAIL IMPL_SLEEP REPAIR_FAIL REV_FAIL BLOCK_AFTER_BUILD CREATE_LOST REQUEST_FAIL PROPOSE_FAIL FOLLOW_FAIL DECLINE EDIT_FAIL CAP TRUST_DIALOG REX_STALL COMMENT_FAIL REQUEST_DECLINE
 }
 run() { "$tend" "$t/repo" 261114-k0000 >"$t/out${1:-}" 2>"$t/err${1:-}"; } # [suffix for out and err]
 reviews() { grep -c '^agent prompt rev-' "$HERDR_STATE/log"; }
@@ -380,6 +395,7 @@ check "the verdict says success" test "$(jq -r .conclusion "$t/out" 2>/dev/null)
 check "with no Git excludes, the candidate stays clean" test -z "$(git -C "$(worktree)" status --porcelain 2>&1)"
 check "the verdict is kept outside the candidate" test -f "$(verdict)"
 check "the reviewer may write only there besides its checkout" grep -q -- "--add-dir $TEND_STATE/runs/" "$HERDR_STATE/log"
+check "the branch made for the worktree goes after the claim" test -z "$(git -C "$t/repo" branch --list 'tend-*')"
 
 scenario remote-resume
 project "$t/repo" main remote
@@ -474,7 +490,7 @@ check "still one pull request" test "$(creates)" = 1
 
 # A teammate requests changes on the PR's head, with a comment on a line.
 request() {
-	jq --arg h "$(head)" '. + [{id: (900 + length), state: "CHANGES_REQUESTED", commit_id: $h, user: {login: "teammate"}, body: "Say it plainly.", comments: [{path: "a.txt", line: 1, body: "Plainer."}]}]' "$HERDR_STATE/reviews" >"$t/r" && mv "$t/r" "$HERDR_STATE/reviews"
+	jq --arg h "$(head)" '. + [{id: (900 + length), node_id: "PRR_\(900 + length)", state: "CHANGES_REQUESTED", commit_id: $h, user: {login: "teammate"}, body: "Say it plainly.", comments: [{path: "a.txt", line: 1, body: "Plainer."}]}]' "$HERDR_STATE/reviews" >"$t/r" && mv "$t/r" "$HERDR_STATE/reviews"
 }
 watch() { WATCH_ONCE=1 "$tend" watch >/dev/null 2>"$t/watch"; }
 
@@ -495,6 +511,38 @@ check "its own status" grep -qx "$(head) success the-bot" "$HERDR_STATE/statuses
 check "still one pull request" test "$(creates)" = 1
 run 3
 check "the answered request is not asked again" test "$(prompts teammate)" = 1
+check "the description is written again for the new head" test "$(cat "$(pr).title")" = "Add the file, plainer"
+check "its body too" grep -q 'needed a plain file' "$(pr)"
+
+scenario request-edited
+project "$t/repo" main remote
+allow
+run
+echo "Their own words." >"$(pr)"
+request
+run 2
+check "a description a person edited is not written again" test "$(cat "$(pr)") $(grep -c '^gh pr edit' "$HERDR_STATE/log")" = "Their own words. 0"
+check "and tend says it left it" grep -q "a person has edited it" "$t/err2"
+
+scenario request-declined
+project "$t/repo" main remote
+allow
+run
+first=$(head)
+request
+REQUEST_DECLINE=1 run 2
+check "a request answered with no change exits 0" test $? = 0
+check "the implementer's reply goes on the pull request, as the account" test "$(jq -r '.[0].user.login' "$HERDR_STATE/comments")" = the-bot
+check "in its words" grep -q 'Out of scope: the issue asks' "$HERDR_STATE/comments"
+check "the unchanged head is not reviewed again" test "$(reviews)" = 1 -a "$(head)" = "$first"
+REQUEST_DECLINE=1 run 3
+check "a rerun neither asks again nor comments again" test "$(prompts teammate) $(jq length "$HERDR_STATE/comments")" = "1 1"
+watch
+check "watch leaves the answered request" test "$(grep -c 'running tend' "$t/watch")" = 0
+request
+REQUEST_DECLINE=1 watch
+check "but runs tend for a new request on the same head" grep -q 'changes requested on' "$t/watch"
+check "which is asked" test "$(prompts teammate)" = 2
 
 scenario request-uncertain
 project "$t/repo" main remote
@@ -583,6 +631,7 @@ check "opens no pull request" test ! -e "$(pr_of 1)"
 check "says why on the issue, as the account" test "$(jq -r '.[0].user.login' "$HERDR_STATE/comments")" = the-bot
 check "in the drafter's words" grep -q 'It names no outcome.' "$HERDR_STATE/comments"
 check "and takes the label off" test "$(labelled 1)" = false
+check "its worktree is removed, with its branch" test ! -e "$HERDR_STATE/wt-tend/issue-1" -a -z "$(git -C "$t/repo" branch --list tend/issue-1)"
 DECLINE=1 propose 2
 check "so a second pass leaves it" test "$(drafts) $(comments 1)" = "1 1"
 issues 1:tend
@@ -701,6 +750,11 @@ check "status finds the attempt" grep -q '^attempt issue-7-.* of issue-7: tend/b
 check "the overview lists it to review" grep -A1 '^Implementations to review' <<<"$("$tend" status "$t/repo")" | grep -q 'Add the file'
 build 2
 check "a rerun neither builds nor reviews again" test "$(grep -c '^agent prompt impl-issue-7-[0-9]* Implement' "$HERDR_STATE/log") $(reviews)" = "1 1"
+touch "$HERDR_STATE/pr-tend_build-7.merged"
+build 3
+check "once its pull request is merged, a rerun does nothing" test $? = 0 -a "$(reviews)" = 1
+check "and says so" grep -q "is merged; nothing to do" "$t/err3"
+check "its worktree is removed" test -z "$(bworktree)"
 
 scenario issue-ineligible
 plain
@@ -1064,5 +1118,60 @@ project "$t/repo"
 TRUST_DIALOG=1 rexrun
 check "under rex, the trust dialog of a new folder is answered" passed
 check "by choosing to trust it" grep -q '^rex send-key .* down enter' "$HERDR_STATE/rexlog"
+
+# Branching from origin's target, and tidying worktrees of finished work.
+pushed() { # a commit someone else pushed to origin's main: its hash
+	git clone -q "$t/repo.git" "$t/other" && (cd "$t/other" && echo theirs >b.txt && git add b.txt && git commit -qm theirs && git push -q origin main) && git -C "$t/other" rev-parse HEAD
+}
+
+scenario fetch-target
+project "$t/repo" main remote
+theirs=$(pushed)
+run
+check "an attempt starts from origin's target, fetched, though the local one is behind" git -C "$(worktree)" merge-base --is-ancestor "$theirs" HEAD
+check "and passes" passed
+
+scenario fetch-propose
+project "$t/repo" main remote
+allow
+theirs=$(pushed)
+issues 1:tend
+propose
+check "a proposal starts from origin's target, fetched" git -C "$HERDR_STATE/wt-tend/issue-1" merge-base --is-ancestor "$theirs" HEAD
+check "and is opened" test -e "$(pr_of 1)"
+
+scenario tidy
+project "$t/repo" main remote
+allow
+issues 1:tend
+run
+propose
+wt=$(worktree) b=$(branch) p=$(pr) pw=$HERDR_STATE/wt-tend/issue-1
+touch "$p.merged"
+propose 2
+check "a merged attempt's worktree is removed" test ! -e "$wt"
+check "with its local branch" test -z "$(git -C "$t/repo" branch --list "$b")"
+check "an open proposal's worktree stays" test -d "$pw"
+touch "$(pr_of 1).merged"
+echo scratch >"$pw/scratch.txt"
+propose 3
+check "a merged proposal's worktree with uncommitted files is left" test -d "$pw"
+check "and tend says so" grep -q "it has uncommitted files" "$t/err3"
+rm "$pw/scratch.txt"
+propose 4
+check "once clean, it is removed" test ! -e "$pw"
+check "and not looked at again" test ! -e "$TEND_STATE"/intake/*-1/worktree
+
+scenario rex-tidy
+project "$t/repo" main remote
+allow
+issues
+rexrun
+wt=$(rexwt)
+touch "$HERDR_STATE/pr-$(git -C "$wt" branch --show-current | tr / _).merged"
+TEND_TERMINAL=rex propose 2
+check "under rex, a merged attempt's worktree is removed" test ! -e "$wt"
+check "its session killed" grep -q '^rex kill session:1' "$HERDR_STATE/rexlog"
+check "and forgotten" test ! -s "$TEND_STATE/rex-sessions"
 
 [ "$fails" = 0 ] && echo "all passed" || { echo "$fails failed"; exit 1; }

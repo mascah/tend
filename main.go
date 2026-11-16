@@ -37,7 +37,7 @@ import (
 
 var (
 	mode, state, repo, cycle, run       string
-	kind, target, branch, id, dir       string
+	kind, target, base, branch, id, dir string
 	impl, root, what, notes, trailer, v string
 	head, pr, account, where            string
 	issue, rec                          any
@@ -291,6 +291,7 @@ func main() {
 	if mode == "propose" {
 		propose()
 	}
+	tidy()
 	attempt()
 }
 
@@ -329,8 +330,9 @@ func watch(repos []string) {
 			if !exists(d+"/pr") || !exists(d+"/attempt") || needsYou(d+"/status") {
 				continue
 			}
-			if s, _ := quiet("gh", "pr", "view", cat(d+"/pr"), "--json", "state,headRefOid,reviews", "--jq",
-				`.state == "OPEN" and (.headRefOid as $h | any(.reviews[]; .state == "CHANGES_REQUESTED" and .commit.oid == $h))`); s != "true" {
+			s, _ := quiet("gh", "pr", "view", cat(d+"/pr"), "--json", "state,headRefOid,reviews", "--jq",
+				`select(.state == "OPEN") | .headRefOid as $h | [.reviews[] | select(.state == "CHANGES_REQUESTED" and .commit.oid == $h)] | last | .id // empty`)
+			if s == "" || exists(d+"/answered-"+s) {
 				continue
 			}
 			a := strings.SplitN(cat(d+"/attempt"), "\n", 3)
@@ -700,6 +702,72 @@ func worktreeFor(b, base, label string) {
 	dir = term.worktree(b, base, label)
 }
 
+// The target new work starts from and is compared with: origin's, fetched
+// first, when the repository has an origin, so a stale local branch is never
+// the base.
+func fetchTarget() string {
+	if _, err := quiet("git", "-C", repo, "remote", "get-url", "origin"); err != nil {
+		return target
+	}
+	if _, err := quiet("git", "-C", repo, "fetch", "-q", "origin", target); err != nil {
+		stop("could not fetch %s from origin", target)
+	}
+	return "origin/" + target
+}
+
+// The worktree and its local branch removed, with the place the agents ran
+// in; left, and said, while it holds uncommitted files.
+func removeWorktree(d, b string) {
+	if !exists(d) {
+		return
+	}
+	if s := gitQ("-C", d, "status", "--porcelain"); s != "" {
+		say("left %s: it has uncommitted files", d)
+		return
+	}
+	term.closePlace(d)
+	if exists(d) {
+		quiet("git", "-C", repo, "worktree", "remove", d)
+	}
+	if !exists(d) {
+		quiet("git", "-C", repo, "branch", "-D", b)
+		say("removed %s", d)
+	}
+}
+
+// Worktrees tend made for this repository whose pull request is merged or
+// closed, removed when their head is the pull request's, so nothing is lost.
+// A run folder names its worktree in worktree, deleted once it is gone.
+func tidy() {
+	var listed []string
+	for _, line := range strings.Split(git("-C", repo, "worktree", "list", "--porcelain"), "\n") {
+		if p, found := strings.CutPrefix(line, "worktree "); found {
+			listed = append(listed, p)
+		}
+	}
+	fs, _ := filepath.Glob(state + "/runs/*/worktree")
+	more, _ := filepath.Glob(state + "/intake/*/worktree")
+	for _, f := range append(fs, more...) {
+		d, r := cat(f), filepath.Dir(f)
+		if !nonempty(r+"/pr") || !slices.ContainsFunc(listed, func(p string) bool { return sameDir(p, d) }) {
+			continue
+		}
+		s, err := out("gh", "pr", "view", cat(r+"/pr"), "--json", "state,headRefOid,headRefName", "--jq", `select(.state != "OPEN") | .headRefOid + " " + .headRefName`)
+		h, b, _ := strings.Cut(s, " ")
+		if err != nil || h == "" {
+			continue
+		}
+		if gitQ("-C", d, "rev-parse", "HEAD") != h {
+			say("left %s: its head is not its pull request's", d)
+			continue
+		}
+		removeWorktree(d, b)
+		if !exists(d) {
+			os.Remove(f)
+		}
+	}
+}
+
 func commits(rng string) bool { return git("rev-list", rng) != "" }
 func clean() bool             { return git("status", "--porcelain") == "" }
 func prNumber() string        { return pr[strings.LastIndex(pr, "/")+1:] }
@@ -737,6 +805,8 @@ func propose() {
 	token()
 	proj := project()
 	target, root = str(get(proj, "target")), str(get(proj, "root"))
+	base = fetchTarget()
+	tidy()
 	slug, err := out("gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner")
 	if err != nil {
 		stop("gh cannot see %s's repository", repo)
@@ -804,12 +874,13 @@ func draft(prefix string, r request) {
 	}
 	id = cat(run + "/id")
 	issue = r.fields
-	worktreeFor(b, target, "tend: "+r.ref)
+	worktreeFor(b, base, "tend: "+r.ref)
+	write(run+"/worktree", dir+"\n")
 	cd(dir)
 	impl = "prop-" + r.agent
 
 	// Draft, unless an earlier run already has the outcome: a commit, or a reason.
-	if !commits(target+"..HEAD") && !nonempty(run+"/declined") {
+	if !commits(base+"..HEAD") && !nonempty(run+"/declined") {
 		implementer()
 		if !exists(run + "/asked") {
 			stage("working", impl+" drafts a proposal from "+r.ref, "tend has it commit the draft, then opens a pull request")
@@ -826,11 +897,11 @@ func draft(prefix string, r request) {
 	}
 
 	switch {
-	case commits(target + "..HEAD"):
+	case commits(base + "..HEAD"):
 		if !clean() {
 			stop("%s: %s left uncommitted files in %s", r.ref, impl, dir)
 		}
-		changed := "\n" + git("diff", "--name-only", target+"...HEAD")
+		changed := "\n" + git("diff", "--name-only", base+"...HEAD")
 		if !strings.Contains(changed, "\n"+root+"/changes/") {
 			stop("%s: %s has commits but no change under %s/changes/", r.ref, b, root)
 		}
@@ -857,7 +928,7 @@ func draft(prefix string, r request) {
 		if posted == "" {
 			re := regexp.MustCompile("^" + regexp.QuoteMeta(root) + `/changes/([0-9]*-[a-z0-9]*)-`)
 			var ids []string
-			for _, f := range strings.Split(git("diff", "--name-only", "--diff-filter=A", target+"...HEAD"), "\n") {
+			for _, f := range strings.Split(git("diff", "--name-only", "--diff-filter=A", base+"...HEAD"), "\n") {
 				if m := re.FindStringSubmatch(f); m != nil && !slices.Contains(ids, m[1]) {
 					ids = append(ids, m[1])
 				}
@@ -888,6 +959,8 @@ func draft(prefix string, r request) {
 		}
 		stage("done", "no proposal from "+r.ref+"; said why on it", "a person edits the request and labels it again")
 		must("", os.Rename(run, run+".declined-"+id)) // a fresh attempt when the label comes back
+		cd(repo)
+		removeWorktree(dir, b)
 		say("%s: no proposal, said why", r.ref)
 	default:
 		stop("%s: %s committed no change and wrote no reason. Look at its pane, then commit the draft or write %s/declined, or delete %s/followed to have it asked again", r.ref, impl, run, run)
@@ -945,8 +1018,13 @@ func attempt() {
 			stop("gh cannot see %s's repository", repo)
 		}
 		branch = "tend/build-" + item.key
+		if s, _ := out("gh", "pr", "list", "--head", branch, "--state", "all", "--json", "state", "--jq", ".[0].state // empty"); s == "MERGED" {
+			say("%s's pull request from %s is merged; nothing to do", item.ref, branch)
+			os.Exit(0)
+		}
 		id = filepath.Base(issueRun(cycle))
-		worktreeFor(branch, target, "tend: "+item.ref)
+		base = fetchTarget()
+		worktreeFor(branch, base, "tend: "+item.ref)
 		cd(dir)
 		say("%s on %s in %s", item.ref, branch, dir)
 		what = item.named + ", quoted here: " + quoted("")
@@ -955,6 +1033,7 @@ func attempt() {
 		cd(repo)
 		proj := project()
 		target = str(get(proj, "target"))
+		base = fetchTarget()
 		rec = firstRun(proj, "cycle", cycle)
 		dir = str(get(rec, "checkout"))
 		if dir != "" && gitQ("-C", dir, "branch", "--show-current") == str(get(rec, "branch")) {
@@ -962,12 +1041,16 @@ func attempt() {
 			cd(dir)
 			say("carrying on attempt %s in %s", str(get(rec, "id")), dir)
 		} else {
-			dir = term.worktree("tend-"+time.Now().Format("150405"), target, "tend: "+cycle)
+			tmp := "tend-" + time.Now().Format("150405")
+			dir = term.worktree(tmp, base, "tend: "+cycle)
 			cd(dir)
 			if _, err := sh(nil, os.Stderr, false, "grove", "claim", cycle); err != nil {
 				stop("grove claim refused %s", cycle)
 			}
 			b := git("branch", "--show-current")
+			if b != tmp {
+				quiet("git", "branch", "-D", tmp) // Herdr needs a branch; Grove's claim makes its own
+			}
 			rec = firstRun(project(), "branch", b)
 			if rec == nil {
 				stop("claimed %s, but Grove shows no record for %s", cycle, b)
@@ -1020,6 +1103,7 @@ func attempt() {
 		os.Rename(run+"/repaired", run+"/repair-asked")
 	}
 	write(run+"/attempt", repo+"\n"+cycle+"\n") // for tend watch
+	write(run+"/worktree", dir+"\n")            // for tidy
 
 	// 2. Implement, unless the branch already holds a finished candidate.
 	if unbuilt() != "" {
@@ -1083,24 +1167,34 @@ func attempt() {
 		if req == nil {
 			break
 		}
-		rid, who := str(get(req, "id")), str(get(req, "user", "login"))
+		rid, nid, who := str(get(req, "id")), str(get(req, "node_id")), str(get(req, "user", "login"))
+		if exists(run + "/answered-" + nid) {
+			break
+		}
 		if exists(run+"/request-"+rid) && term.status(impl) != "working" {
-			stop("the changes %s requested on %s (review %s) were asked of %s, which committed nothing and is not working on them. Look at its pane, then commit and run tend again, or delete %s/request-%s to have them asked once more", who, pr, rid, impl, run, rid)
+			if !nonempty(run + "/reply-" + rid) {
+				stop("the changes %s requested on %s (review %s) were asked of %s, which committed nothing and is not working on them. Look at its pane, then commit and run tend again, or delete %s/request-%s to have them asked once more", who, pr, rid, impl, run, rid)
+			}
+		} else {
+			comments, err := out("gh", "api", reviewsAPI()+"/"+rid+"/comments", "--paginate", "--jq", `.[] | "\(.path):\(.line // .original_line // "?"): \(.body)"`)
+			if err != nil {
+				stop("could not read the comments of review %s on %s", rid, pr)
+			}
+			if comments != "" {
+				comments = " Their comments on lines: " + comments
+			}
+			implementer()
+			stage("working", fmt.Sprintf("%s makes the changes %s requested at %s", impl, who, short(head)), "tend waits for "+impl+", then has the new head reviewed and published")
+			ask(impl, fmt.Sprintf("%s, reviewing the pull request for %s, requested changes at commit %s. Their review: %s%s Make the changes they ask for that are within the agreed scope, run the tests, update %s where a claim changes, and commit. Then write to %s/reply-%s, for %s, a few plain lines on what you changed and anything you did not and why; if you change nothing, commit nothing and still write it. Ask no one.", who, branch, head, strings.TrimRight(str(get(req, "body")), "\n"), comments, notes, run, rid, who), run+"/request-"+rid)
+			built()
 		}
-		comments, err := out("gh", "api", reviewsAPI()+"/"+rid+"/comments", "--paginate", "--jq", `.[] | "\(.path):\(.line // .original_line // "?"): \(.body)"`)
-		if err != nil {
-			stop("could not read the comments of review %s on %s", rid, pr)
-		}
-		if comments != "" {
-			comments = " Their comments on lines: " + comments
-		}
-		implementer()
-		stage("working", fmt.Sprintf("%s makes the changes %s requested at %s", impl, who, short(head)), "tend waits for "+impl+", then has the new head reviewed and published")
-		ask(impl, fmt.Sprintf("%s, reviewing the pull request for %s, requested changes at commit %s. Their review: %s%s Make the changes they ask for that are within the agreed scope, run the tests, update %s where a claim changes, and commit. Then write to %s/reply-%s, for %s, a few plain lines on what you changed and anything you did not and why. Ask no one.", who, branch, head, strings.TrimRight(str(get(req, "body")), "\n"), comments, notes, run, rid, who), run+"/request-"+rid)
-		built()
 		now := git("rev-parse", "HEAD")
 		if now == head {
-			stop("%s committed nothing for the changes %s requested on %s. Look at its pane, then commit and run tend again, or delete %s/request-%s to have them asked once more", impl, who, pr, run, rid)
+			if !nonempty(run + "/reply-" + rid) {
+				stop("%s committed nothing for the changes %s requested on %s. Look at its pane, then commit and run tend again, or delete %s/request-%s to have them asked once more", impl, who, pr, run, rid)
+			}
+			answer(nid, who, cat(run+"/reply-"+rid))
+			break
 		}
 		if nonempty(run + "/reply-" + rid) {
 			os.Rename(run+"/reply-"+rid, run+"/reply-"+now)
@@ -1128,7 +1222,7 @@ func unbuilt() string {
 		return branch + " has uncommitted files"
 	}
 	if kind == "issue" {
-		if !commits(target + "..HEAD") {
+		if !commits(base + "..HEAD") {
 			return branch + " has no commit for " + item.ref
 		}
 		if !nonempty(run + "/implemented") {
@@ -1185,7 +1279,7 @@ func review() {
 		rpane = start(rev, "codex", true, "-s", "workspace-write", "-a", "never", "--add-dir", run)
 	}
 	stage("working", rev+" reviews "+short(h), "tend waits for its verdict")
-	ask(rev, fmt.Sprintf(`You are the independent reviewer of branch %s at commit %s. You did not write it and nobody can answer questions. The change is 'git diff %s...HEAD'; what it must do is %s. Check the code against those requirements and run the project's tests. Report only material findings: a defect, an unmet requirement, or a claim in %s the code does not support. Edit, stage and commit nothing. Your only output is the file %s, exactly this JSON shape: {"head": "%s", "conclusion": "success or failure", "actionable": true or false, "summary": "findings with file:line and what you ran"}. actionable is true only when every finding is an in-scope code fix that needs no decision from the owner.`, branch, h, target, what, notes, v, h), "")
+	ask(rev, fmt.Sprintf(`You are the independent reviewer of branch %s at commit %s. You did not write it and nobody can answer questions. The change is 'git diff %s...HEAD'; what it must do is %s. Check the code against those requirements and run the project's tests. Report only material findings: a defect, an unmet requirement, or a claim in %s the code does not support. Edit, stage and commit nothing. Your only output is the file %s, exactly this JSON shape: {"head": "%s", "conclusion": "success or failure", "actionable": true or false, "summary": "findings with file:line and what you ran"}. actionable is true only when every finding is an in-scope code fix that needs no decision from the owner.`, branch, h, base, what, notes, v, h), "")
 	// The pane said the turn ended; only the file says a review happened.
 	if !valid(v, h) {
 		stop("%s settled without a valid verdict for %s; look at pane %s", rev, short(h), rpane)
@@ -1202,8 +1296,9 @@ func review() {
 // here. Every write is that account's, never the owner's, so the owner can
 // approve: the branch pushed, never forced; one pull request, squash-merge
 // ready: its title and description the commit message the implementer
-// writes, set once and left to people after; a review per reviewed head, as a
-// comment since a PR's author may not approve or request changes; and the
+// writes, written again after a requested change until a person edits them;
+// a review per reviewed head, as a comment since a PR's author may not
+// approve or request changes; and the
 // tend/review status on that head, so a later commit carries no passing
 // result. The PR and reviews are looked up on GitHub each run, never
 // remembered, so a rerun after any interruption repeats neither. Merging
@@ -1225,26 +1320,13 @@ func publish() {
 	// The PR is squash-merged: its title and description become the commit's,
 	// so the implementer, who knows what changed and why, writes them.
 	if pr == "" {
-		msg := run + "/message-" + head
-		if !nonempty(msg) {
-			implementer()
-			stage("working", fmt.Sprintf("%s writes the commit message for %s", impl, short(head)), "tend opens the pull request with it")
-			ask(impl, fmt.Sprintf("Branch %s is reviewed and will be squash-merged into %s: the pull request's title becomes the commit's subject and its description the commit's body. Write that commit message to %s and nothing else. A subject of at most 72 characters in this repository's commit style (see git log %s), a blank line, then a body wrapped at 72 columns saying what the change does and why, for someone reading the history later who was not here. Describe the merged result, not how it was reached: no reviews, repairs, agents, tools, attempt IDs or file lists. End with the line '%s'. Commit nothing and leave the branch as it is.", branch, target, msg, target, trailer), "")
-			if !nonempty(msg) {
-				stop("%s settled without writing %s; look at its pane, then run tend again", impl, msg)
-			}
-			if git("rev-parse", "HEAD") != head || !clean() {
-				stop("%s changed the branch while writing the commit message", impl)
-			}
-		}
-		lines := strings.Split(string(must(os.ReadFile(msg))), "\n")
-		body := ""
-		if len(lines) > 2 {
-			body = strings.Join(lines[2:], "\n")
-		}
-		if pr, err = input(body, "gh", "pr", "create", "--base", target, "--head", branch, "--title", lines[0], "--body-file", "-"); err != nil {
+		title, body := titleBody(message(""))
+		if pr, err = input(body, "gh", "pr", "create", "--base", target, "--head", branch, "--title", title, "--body-file", "-"); err != nil {
 			stop("could not open a pull request for %s; run tend again, and it looks for one before opening another", branch)
 		}
+		write(run+"/described", head+"\n")
+	} else if d := cat(run + "/described"); d != "" && d != head {
+		redescribe(d)
 	}
 	// Every verdict of the attempt on a commit of the branch, oldest first, so
 	// a failure repaired within one run still shows.
@@ -1302,6 +1384,95 @@ func publish() {
 		stop("could not say on %s where its pull request is (%s); run tend again to finish", item.ref, pr)
 	}
 	say("published %s", pr)
+}
+
+// A change request the implementer answered with no commit: its reply goes on
+// the pull request once, found by the request's marker, and answered-<node id>
+// keeps tend and tend watch from asking again.
+func answer(nid, who, reply string) {
+	tag := "<!-- tend:answered " + nid + " -->"
+	said, err := out("gh", "api", "repos/{owner}/{repo}/issues/"+prNumber()+"/comments", "--paginate", "--jq", fmt.Sprintf(`.[] | select(.user.login == "%s" and (.body | contains("%s"))) | .id`, account, tag))
+	if err != nil {
+		stop("could not read the comments on %s", pr)
+	}
+	if said == "" {
+		body := fmt.Sprintf("**No change made for the changes %s requested at %s**\n\nThe implementer, on why:\n\n> %s\n\ntend will not ask again. To have it tried again, request changes saying what should change; or change the branch yourself.\n\n%s\n", who, short(head), strings.ReplaceAll(strings.TrimRight(reply, "\n"), "\n", "\n> "), tag)
+		if _, err := input(body, "gh", "pr", "comment", pr, "--body-file", "-"); err != nil {
+			stop("could not comment on %s; run tend again to finish", pr)
+		}
+	}
+	write(run+"/answered-"+nid, head+"\n")
+	say("%s made no change for %s's request; said why on %s", impl, who, pr)
+}
+
+// The commit message for the head, which the implementer writes to
+// message-<head> once: the pull request's title and description. was, if
+// given, is the message on the pull request now, kept where it still holds.
+func message(was string) string {
+	msg := run + "/message-" + head
+	if nonempty(msg) {
+		return msg
+	}
+	prev := ""
+	if was != "" {
+		prev = fmt.Sprintf(" The pull request's description now is in %s, written for an earlier head: keep what still holds and correct what later commits changed.", was)
+	}
+	implementer()
+	stage("working", fmt.Sprintf("%s writes the commit message for %s", impl, short(head)), "tend puts it on the pull request")
+	ask(impl, fmt.Sprintf("Branch %s is reviewed and will be squash-merged into %s: the pull request's title becomes the commit's subject and its description the commit's body. Write that commit message to %s and nothing else. A subject of at most 72 characters in this repository's commit style (see git log %s), a blank line, then a body wrapped at 72 columns saying what the change does and why, for someone reading the history later who was not here. Describe the merged result, not how it was reached: no reviews, repairs, agents, tools, attempt IDs or file lists. End with the line '%s'.%s Commit nothing and leave the branch as it is.", branch, target, msg, target, trailer, prev), "")
+	if !nonempty(msg) {
+		stop("%s settled without writing %s; look at its pane, then run tend again", impl, msg)
+	}
+	if git("rev-parse", "HEAD") != head || !clean() {
+		stop("%s changed the branch while writing the commit message", impl)
+	}
+	return msg
+}
+
+func titleBody(msg string) (string, string) {
+	lines := strings.Split(cat(msg), "\n")
+	if len(lines) > 2 {
+		return lines[0], strings.Join(lines[2:], "\n")
+	}
+	return lines[0], ""
+}
+
+// The title and description as GitHub may give them back, to compare.
+func fold(title, body string) string {
+	n := func(s string) string { return strings.TrimSpace(strings.ReplaceAll(s, "\r\n", "\n")) }
+	return n(title) + "\n\n" + n(body)
+}
+
+// After later commits, the description is written again for the new head
+// when it is still the message tend put there, the run folder's described
+// naming that head; once a person has edited it, it is theirs and tend leaves it.
+func redescribe(d string) {
+	s, err := out("gh", "pr", "view", pr, "--json", "state,title,body")
+	if err != nil {
+		stop("could not read %s", pr)
+	}
+	x := parse(s)
+	if str(get(x, "state")) != "OPEN" {
+		return
+	}
+	now, was := fold(str(get(x, "title")), str(get(x, "body"))), run+"/message-"+d
+	if nonempty(run+"/message-"+head) && now == fold(titleBody(run+"/message-"+head)) {
+		write(run+"/described", head+"\n") // a run stopped after the edit
+		return
+	}
+	if now != fold(titleBody(was)) {
+		os.Remove(run + "/described")
+		say("left %s's description as it is: a person has edited it", pr)
+		return
+	}
+	title, body := titleBody(message(was))
+	if fold(title, body) != now {
+		if _, err := input(body, "gh", "pr", "edit", pr, "--title", title, "--body-file", "-"); err != nil {
+			stop("could not rewrite %s's description", pr)
+		}
+		say("rewrote %s's description for %s", pr, short(head))
+	}
+	write(run+"/described", head+"\n")
 }
 
 // The newest change request on the open PR's head, or nothing.

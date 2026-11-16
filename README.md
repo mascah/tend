@@ -87,7 +87,8 @@ only. Every write is that account's, which also lets you approve its PRs:
 - one pull request onto the target, ready to squash-merge: its title and
   description are the commit message the implementer writes for the reviewed
   head (what the change does and why, for a later reader of the history), set
-  when the PR opens and then left to people;
+  when the PR opens and written again for a later head, until a person edits
+  them;
 - each verdict of the attempt is a comment review on its own commit, the
   head's with `grove review`'s summary folded in, and each reviewed commit
   gets the `tend/review` status, so a later commit has no pass until it is
@@ -101,8 +102,12 @@ the next run gives their review and line comments to the implementer's own
 session once, has the new head reviewed and publishes it, with the
 implementer's reply in the review. `request-<review id>` in the run folder
 records the ask just before it goes; asked with no commit since and nobody
-working, it stops for you, as the repair does. Plain comments are not acted
-on, and the PR description is not rewritten.
+working, it stops for you, as the repair does. When the implementer changes
+nothing (a request it judges out of scope, say), its reply goes on the PR as a
+comment and the request is not asked again; request changes again to have it
+tried. After the new head, the implementer rewrites the commit message and
+tend puts it on the PR, unless a person has edited the title or description
+since tend set them. Plain comments are not acted on.
 
 `tend watch` runs in a pane of its own and does that without you: every
 `WATCH_SECONDS` (default 300) it runs tend on each attempt whose PR is open
@@ -139,6 +144,13 @@ at most `CAP` (default 5) proposal pull requests stay open. Labelling an issue
 hands its text to an agent running in auto mode, so only people who may label
 (triage access) can send requests. Approving the proposal (merging it) and
 planning its cycle stay with people.
+
+New work branches from the target as origin has it, fetched first. Once a pull
+request is merged or closed, the next `tend propose` or run in that repository
+removes the worktree tend made for it, with its local branch and the agents'
+place, when its head is the pull request's and it holds no uncommitted files;
+otherwise it is left and tend says why. A declined request's worktree goes at
+once.
 
 Jira is a second source of requests and work items; code, pull requests and
 reviews stay on GitHub. A line of `TEND_STATE/jira` maps a project to the
@@ -210,8 +222,8 @@ Grove does not know tend exists, and is useful without it.
   It answers for whatever repo you pass it. Any other dialog stops the loop
   and notifies you.
 - Each attempt gets a Herdr worktree workspace. `herdr worktree create`
-  needs a branch name and `grove claim` then makes its own, so each attempt
-  leaves a stray `tend-HHMMSS` branch.
+  needs a branch name and `grove claim` then makes its own, so tend deletes
+  the `tend-HHMMSS` branch it made after the claim.
 
 ## What has been seen, and what has not
 
