@@ -98,7 +98,9 @@ exiting 0.
 ### Requirement: Watch acts on a person's behalf
 
 While `tend watch [<repo>...]` runs, the system shall, every `WATCH_SECONDS`
-(default 300), run `tend propose` on each repository given unless one of its
+(default 300), first fast-forward each repository's local target to origin's,
+fetched (only a fast-forward, and only of a clean checkout), since Grove reads
+the local target; run `tend propose` on each repository given unless one of its
 intake folders needs a person; then start on each repository given the oldest
 cycle that Grove would claim (`runs` in `grove changes --json`) and whose plan
 marks it `unattended`, saying so; and run tend again on each attempt whose
@@ -133,6 +135,13 @@ on.
 - WHEN a pass of `tend watch <repo>` runs
 - THEN its proposal pull request opens; and once a request's follow-up has
   stalled and needs a person, a further pass asks nothing more
+
+#### Scenario: A cycle marked unattended on GitHub
+
+- GIVEN a cycle marked `unattended` on origin's target, which the repository's
+  local target does not yet hold
+- WHEN a pass of `tend watch <repo>` runs
+- THEN the local target is fast-forwarded to origin's and the cycle is started
 
 #### Scenario: A cycle marked unattended
 

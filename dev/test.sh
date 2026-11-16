@@ -1139,6 +1139,19 @@ check "which is claimed, built and reviewed" test "$(records) $(reviews)" = "1 1
 watchrepo 3
 check "a claimed cycle is not started again" test "$(records) $(grep -c starting "$t/watch3")" = "1 0"
 
+scenario watch-unattended-merged
+project "$t/repo" main remote
+allow
+issues
+git clone -q "$t/repo.git" "$t/other" && (cd "$t/other" && echo 'unattended: true' >>grove/cycles/261114-k0000-one.yaml && git commit -qam unattend && git push -q origin main)
+watchrepo
+check "a cycle marked unattended on GitHub, not in the local checkout, is started" grep -q "starting unattended cycle 261114-k0000" "$t/watch"
+check "the local target is fast-forwarded to origin's" test "$(git -C "$t/repo" rev-parse main)" = "$(git -C "$t/repo.git" rev-parse main)"
+echo local >"$t/repo/a.txt"
+(cd "$t/other" && echo b >b.txt && git add b.txt && git commit -qm b && git push -q origin main)
+watchrepo 2
+check "a checkout with uncommitted changes is left as it is" grep -q "has uncommitted changes" "$t/watch2"
+
 # Branching from origin's target, and tidying worktrees of finished work.
 pushed() { # a commit someone else pushed to origin's main: its hash
 	git clone -q "$t/repo.git" "$t/other" && (cd "$t/other" && echo theirs >b.txt && git add b.txt && git commit -qm theirs && git push -q origin main) && git -C "$t/other" rev-parse HEAD
