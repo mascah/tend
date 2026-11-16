@@ -1065,11 +1065,33 @@ request), a Jira account for tend, and multi-repository polling.
 - Not exercised live. Not done: a closed, unmerged proposal is still never
   redrafted, and comments on a proposal are not acted on (revision stays manual).
 
-Next action: show the requested-change behaviour on the sandbox: the owner
-requests an out-of-scope change on a bot pull request (expect the reply comment
-and no further ask), then a scope-changing one (expect the description
-rewritten); merging a pull request should then see its worktree removed on the
-next pass. Merging `tend/known-gaps` is the owner's.
+The owner merged `tend/known-gaps` into `main` (`38b21d0`).
+
+2026-11-16 — The known gaps, live, and a rex fix. With the owner's approval, the
+session acted as the teammate on the sandbox with the owner's account. A new change
+`261116-r0001` (report refuses an invalid month) and cycle `261116-k0001` were
+committed to the sandbox's `main` as the fixture owner; tend, agents in rex, built
+it as PR #12 by `mascah-bot`.
+- First run: the reviewer's prompt stopped as `agent_prompt_stalled`, though Codex
+  wrote a success verdict 30 s later. Codex in rex reports no state while it works,
+  only `done` at the end of its turn (record at 19:53:06, verdict at 19:53:03), so
+  the five-second delivery gate could not hold. Fixed on `tend/rex-first-report`
+  (`8944fc8`, not merged): in rex a prompt is stalled only when the agent reports
+  nothing within the prompt's timeout. The rerun reused the verdict and published.
+- Out of scope: the owner asked for a `--year` option. One `tend watch` pass ran tend;
+  the implementer committed nothing and replied that the change's proposal puts other
+  report options out of scope; tend posted the reply on PR #12 as `mascah-bot`. A
+  second pass ran nothing; still one comment.
+- Scope-changing: the owner asked for the error to end with an example month. The
+  implementer committed `8c79f5d`, Codex passed it, and tend rewrote the PR's
+  description to quote the new error.
+- Merged: the owner's account squash-merged PR #12; the next `tend propose` removed
+  the worktree, its branch and its rex session. The worktree of the earlier PR #9,
+  from before run folders named their worktree, stays.
+
+Next action: run tend for real on the owner's mini, in a dedicated `tend` account
+with Herdr: grove (GitHub issues), memex (Jira) and tend itself, which adopts Grove
+on `tend/adopt-grove`. Merging `tend/rex-first-report` is the owner's.
 
 A suitable prompt for a future implementation session is:
 
