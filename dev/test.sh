@@ -387,6 +387,9 @@ verdict() { ls "$TEND_STATE"/runs/*/verdict-*.json; }
 worktree() { echo "$t"/state/wt-tend-[0-9]*; }
 said() { grep -q "$1" "$t/err"; }
 
+scenario version
+check "tend version names the build" test "$("$tend" version)" = "tend dev"
+
 scenario remote-claim
 project "$t/repo" main remote
 run
@@ -1120,9 +1123,7 @@ check "under rex, the trust dialog of a new folder is answered" passed
 check "by choosing to trust it" grep -q '^rex send-key .* down enter' "$HERDR_STATE/rexlog"
 
 # Cycles a person marked unattended when planning them.
-unattend() { (cd "$t/repo" && sed -i '' '$a\
-unattended: true
-' grove/cycles/261114-k0000-one.yaml && git commit -qam unattend && git push -q origin main); }
+unattend() { (cd "$t/repo" && echo 'unattended: true' >>grove/cycles/261114-k0000-one.yaml && git commit -qam unattend && git push -q origin main); }
 watchrepo() { WATCH_ONCE=1 "$tend" watch "$t/repo" >/dev/null 2>"$t/watch${1:-}"; }
 
 scenario watch-unattended

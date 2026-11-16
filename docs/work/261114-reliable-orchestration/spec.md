@@ -402,7 +402,7 @@ reviews and publication stay on GitHub, unchanged.
 
 - Mapping. A Jira project spans repositories, so `TEND_STATE/jira` lists
   `<site> <project-key> <origin-url>` a line, such as
-  `https://mikeascah03.atlassian.net SCRUM git@github.com:mascah/tend-sandbox.git`.
+  `https://<site>.atlassian.net SCRUM git@github.com:mascah/tend-sandbox.git`.
   A project is taken only for an origin also listed in `TEND_STATE/publish`. One
   project maps to one repository; a second line for the same project stops tend.
 - Trust. In Jira any user with Edit Issues permission can add `tend` or
@@ -1021,7 +1021,7 @@ exists, so a merged and deleted branch is never pushed again.
   token never in curl's arguments; the overview; a failed comment finished on the
   next pass with the label gone; a decline; a build with its comment and attempt
   name; unlabelled, done, unmapped and wrongly mapped issues refused).
-- Live: project SCRUM on mikeascah03.atlassian.net mapped to `mascah/tend-sandbox`,
+- Live: project SCRUM on the owner's Jira Cloud site mapped to `mascah/tend-sandbox`,
   agents in rex. SCRUM-5 ("ledger list should filter by category", with a link to
   the record-listing spec) became PR #10 by `mascah-bot`, "Propose filtering ledger
   list by category", body ending `Refs SCRUM-5`, a review with six open questions

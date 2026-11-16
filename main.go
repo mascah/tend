@@ -8,6 +8,7 @@
 //	tend status <repo> [<cycle-id>]
 //	tend watch [<repo>...]
 //	tend propose <repo>
+//	tend version
 //
 // Exit 0: the head is reviewed and the verdict printed. Exit 3: a person is
 // needed, and a Herdr notification says why. Exit 4: another tend holds this
@@ -236,8 +237,15 @@ func needsYou(f string) bool {
 	return regexp.MustCompile(`(?m)^[^ ]* needs-you:`).MatchString(cat(f))
 }
 
+// The release, set at build time; "dev" for a build from a checkout.
+var version = "dev"
+
 func main() {
 	args := os.Args[1:]
+	if len(args) == 1 && args[0] == "version" {
+		fmt.Println("tend " + version)
+		return
+	}
 	mode = "run"
 	if len(args) > 0 && slices.Contains([]string{"status", "watch", "propose"}, args[0]) {
 		mode, args = args[0], args[1:]

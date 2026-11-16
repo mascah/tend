@@ -24,7 +24,15 @@ handoff. Start there when continuing development across sessions.
 
 ## Run it
 
-Build it with Go 1.26 (`go build -o bin/tend .`). It needs `grove`, `git` and
+Install a release into `~/.local/bin` (`TEND_INSTALL_DIR` to change it), or a
+given version, and run it again to update; `tend version` says which you have:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/mascah/tend/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/mascah/tend/main/install.sh | sh -s -- v0.1.0
+```
+
+Or build it with Go 1.26 (`go build -o bin/tend .`). It needs `grove`, `git` and
 `gh` on PATH, Herdr or rex, and Claude Code and Codex signed in. Run it inside
 a Herdr pane or a rex terminal:
 
