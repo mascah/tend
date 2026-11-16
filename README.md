@@ -199,6 +199,46 @@ bin/tend ~/tmp/ledger 261114-pr0t0
 stand-in for Herdr whose agents act at once. It starts no agent and needs no
 Grove checkout.
 
+## How work reaches tend
+
+With `tend watch <repo>...` running, each pass (every `WATCH_SECONDS`, default
+300) picks up four kinds of work in the repositories it was given.
+
+1. **A request becomes a proposal.** Label an open GitHub issue `tend`, or an
+   issue of a mapped Jira project that is not done. tend drafts a Grove change
+   and opens it as a pull request by the publishing account, on
+   `tend/issue-<n>` or `tend/jira-<KEY>`, with a review listing the open
+   questions, consequential ones first; a Jira issue also gets a comment with
+   the pull request's URL. When no change can be drafted, tend comments why
+   and takes the label off; label it again after editing it to have it tried
+   again. At most `CAP` (default 5) proposals stay open per repository, and a
+   request with a proposal pull request in any state is not drafted again.
+2. **An approved change becomes a build.** Merging the proposal approves the
+   change. Plan a cycle for it (`/grove-plan`) and mark it `unattended: true`,
+   and tend claims it, has Claude implement it and Codex review it, repairs
+   once if the review asks, and opens the implementation pull request. A cycle
+   not marked `unattended` is built only when someone runs
+   `tend <repo> <cycle-id>`.
+3. **Requested changes.** On an implementation pull request, GitHub's
+   "Request changes" (not a plain comment) goes to the implementer. Either it
+   commits, the new head is reviewed, and the description is written again
+   unless a person has edited it; or it makes no change and its reply goes on
+   the pull request, and that review is not asked again. Request changes again
+   to have it tried.
+4. **Cleanup.** Once a pull request is merged or closed, a later pass removes
+   its worktree, branch and terminal workspace.
+
+Not picked up: plain comments, on any pull request, and comments on proposals
+(revising a proposal is a person's); issues without the label; cycles not
+marked `unattended`; a proposal closed without merging, which is never drafted
+again. In a repository without Grove, an issue labelled `tend-build` is built
+only by `tend <repo> issue-<n>` (or `<KEY>`).
+
+To see where things stand: `tend status <repo>` says what waits for whom;
+tend watch's own output says what it ran; the agents work in the terminal's
+workspaces, one per worktree; and when tend needs a person it stops and
+notifies.
+
 ## Where the prototype reads progress
 
 | Question | Read from |
