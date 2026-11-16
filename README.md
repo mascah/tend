@@ -117,8 +117,10 @@ since tend set them. Plain comments are not acted on.
 `tend watch` runs in a pane of its own and does that without you: every
 `WATCH_SECONDS` (default 300) it runs tend on each attempt whose PR is open
 with a change request on its head, and `tend propose` on each repository it
-was given. An attempt or request waiting for you is left alone until you have
-run tend on it.
+was given. In each of those repositories it then starts the oldest cycle that
+Grove would claim and whose plan marks it `unattended`: marking a cycle so when
+you plan it is how you let it be built with no one there. An attempt or request
+waiting for you is left alone until you have run tend on it.
 
 `tend status <repo>`, without a cycle, says what waits for whom: approved
 changes without a cycle (plan one), cycles not done with Grove's verdict,

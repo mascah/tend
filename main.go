@@ -296,9 +296,12 @@ func main() {
 }
 
 // tend watch: every WATCH_SECONDS (default 300), each attempt whose pull
-// request is open with a change request on its head is run again, and tend
-// propose runs for each repository named. An attempt or request waiting for a
-// person (needs-you) is left alone until a person has run tend on it.
+// request is open with a change request on its head is run again, and for
+// each repository named tend propose runs and then the oldest cycle Grove
+// would claim that its plan marks unattended is started: marking it is the
+// person's approval to build it with no one there. An attempt or request
+// waiting for a person (needs-you) is left alone until a person has run tend
+// on it; a claimed cycle is Grove's to refuse.
 func watch(repos []string) {
 	self := must(os.Executable())
 	again := func(a ...string) {
@@ -320,10 +323,13 @@ func watch(repos []string) {
 			}
 			s := strings.ReplaceAll(strings.TrimSpace(string(b)), "/", "_")
 			waits, _ := filepath.Glob(state + "/intake/" + s + "-*/status")
-			if slices.ContainsFunc(waits, needsYou) {
-				continue
+			if !slices.ContainsFunc(waits, needsYou) {
+				again("propose", r)
 			}
-			again("propose", r)
+			if c := unattended(r); c != "" {
+				say("starting unattended cycle %s in %s", c, r)
+				again(r, c)
+			}
 		}
 		ds := runDirs()
 		for _, d := range ds {
@@ -351,6 +357,24 @@ func watch(repos []string) {
 		}
 		time.Sleep(time.Duration(secs) * time.Second)
 	}
+}
+
+// The oldest cycle of the repository that Grove would claim now (eligible, not
+// claimed, the project not paused) and whose plan marks it unattended, or "".
+func unattended(r string) string {
+	c := exec.Command("grove", "changes", "--json")
+	c.Dir = r
+	b, err := c.Output()
+	if err != nil {
+		return ""
+	}
+	best, when := "", ""
+	for _, x := range list(get(parse(string(b)), "cycles")) {
+		if get(x, "unattended") == true && get(x, "runs") == true && get(x, "done") != true && (best == "" || str(get(x, "created")) < when) {
+			best, when = str(get(x, "id")), str(get(x, "created"))
+		}
+	}
+	return best
 }
 
 // grove changes --json in the current folder, or nothing without Grove.

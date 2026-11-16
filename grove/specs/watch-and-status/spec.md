@@ -99,9 +99,12 @@ exiting 0.
 
 While `tend watch [<repo>...]` runs, the system shall, every `WATCH_SECONDS`
 (default 300), run `tend propose` on each repository given unless one of its
-intake folders needs a person, and run tend again on each attempt whose pull
-request is open with a change request on its head that tend has not answered,
-unless the attempt needs a person, saying which pull request it acts on.
+intake folders needs a person; then start on each repository given the oldest
+cycle that Grove would claim (`runs` in `grove changes --json`) and whose plan
+marks it `unattended`, saying so; and run tend again on each attempt whose
+pull request is open with a change request on its head that tend has not
+answered, unless the attempt needs a person, saying which pull request it acts
+on.
 
 #### Scenario: Changes requested
 
@@ -130,6 +133,15 @@ unless the attempt needs a person, saying which pull request it acts on.
 - WHEN a pass of `tend watch <repo>` runs
 - THEN its proposal pull request opens; and once a request's follow-up has
   stalled and needs a person, a further pass asks nothing more
+
+#### Scenario: A cycle marked unattended
+
+- GIVEN a repository whose only cycle is not marked `unattended`
+- WHEN one pass of `tend watch <repo>` runs, then the plan is marked
+  `unattended` on the target and another pass runs, then a third
+- THEN the first starts nothing; the second says it is starting the cycle,
+  which is claimed, built and reviewed; the third starts nothing, as the
+  cycle is claimed
 
 ### Requirement: Finished worktrees are tidied
 

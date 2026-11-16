@@ -1119,6 +1119,25 @@ TRUST_DIALOG=1 rexrun
 check "under rex, the trust dialog of a new folder is answered" passed
 check "by choosing to trust it" grep -q '^rex send-key .* down enter' "$HERDR_STATE/rexlog"
 
+# Cycles a person marked unattended when planning them.
+unattend() { (cd "$t/repo" && sed -i '' '$a\
+unattended: true
+' grove/cycles/261114-k0000-one.yaml && git commit -qam unattend && git push -q origin main); }
+watchrepo() { WATCH_ONCE=1 "$tend" watch "$t/repo" >/dev/null 2>"$t/watch${1:-}"; }
+
+scenario watch-unattended
+project "$t/repo" main remote
+allow
+issues
+watchrepo
+check "watch starts no cycle that is not marked unattended" test "$(records)" = 0
+unattend
+watchrepo 2
+check "watch starts the cycle once its plan marks it unattended" grep -q "starting unattended cycle 261114-k0000" "$t/watch2"
+check "which is claimed, built and reviewed" test "$(records) $(reviews)" = "1 1"
+watchrepo 3
+check "a claimed cycle is not started again" test "$(records) $(grep -c starting "$t/watch3")" = "1 0"
+
 # Branching from origin's target, and tidying worktrees of finished work.
 pushed() { # a commit someone else pushed to origin's main: its hash
 	git clone -q "$t/repo.git" "$t/other" && (cd "$t/other" && echo theirs >b.txt && git add b.txt && git commit -qm theirs && git push -q origin main) && git -C "$t/other" rev-parse HEAD
