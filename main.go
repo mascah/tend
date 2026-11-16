@@ -329,6 +329,9 @@ func watch(repos []string) {
 			if err != nil {
 				continue
 			}
+			if g, err := groveIn(r); err == nil {
+				syncTarget(r, str(get(g, "target")))
+			}
 			s := strings.ReplaceAll(strings.TrimSpace(string(b)), "/", "_")
 			waits, _ := filepath.Glob(state + "/intake/" + s + "-*/status")
 			if !slices.ContainsFunc(waits, needsYou) {
@@ -370,19 +373,51 @@ func watch(repos []string) {
 // The oldest cycle of the repository that Grove would claim now (eligible, not
 // claimed, the project not paused) and whose plan marks it unattended, or "".
 func unattended(r string) string {
-	c := exec.Command("grove", "changes", "--json")
-	c.Dir = r
-	b, err := c.Output()
+	g, err := groveIn(r)
 	if err != nil {
 		return ""
 	}
 	best, when := "", ""
-	for _, x := range list(get(parse(string(b)), "cycles")) {
+	for _, x := range list(get(g, "cycles")) {
 		if get(x, "unattended") == true && get(x, "runs") == true && get(x, "done") != true && (best == "" || str(get(x, "created")) < when) {
 			best, when = str(get(x, "id")), str(get(x, "created"))
 		}
 	}
 	return best
+}
+
+// grove changes --json in folder r.
+func groveIn(r string) (any, error) {
+	c := exec.Command("grove", "changes", "--json")
+	c.Dir = r
+	b, err := c.Output()
+	return parse(string(b)), err
+}
+
+// The repository's local target fast-forwarded to origin's, fetched: Grove
+// reads the local target, so without this a change or cycle merged on GitHub
+// stays unseen. Only a fast-forward, and only of a clean checkout when the
+// target is checked out; otherwise it is left as it is and said.
+func syncTarget(r, t string) error {
+	if _, err := quiet("git", "-C", r, "remote", "get-url", "origin"); err != nil || t == "" {
+		return nil
+	}
+	if _, err := quiet("git", "-C", r, "fetch", "-q", "origin", t); err != nil {
+		return err
+	}
+	var err error
+	if gitQ("-C", r, "branch", "--show-current") != t {
+		_, err = quiet("git", "-C", r, "fetch", "-q", "origin", t+":"+t)
+	} else if gitQ("-C", r, "status", "--porcelain", "--untracked-files=no") != "" {
+		say("left %s's %s as it is: its checkout has uncommitted changes", r, t)
+		return nil
+	} else {
+		_, err = quiet("git", "-C", r, "merge", "-q", "--ff-only", "origin/"+t)
+	}
+	if err != nil {
+		say("left %s's %s as it is: it cannot be fast-forwarded to origin's", r, t)
+	}
+	return nil
 }
 
 // grove changes --json in the current folder, or nothing without Grove.
@@ -741,7 +776,7 @@ func fetchTarget() string {
 	if _, err := quiet("git", "-C", repo, "remote", "get-url", "origin"); err != nil {
 		return target
 	}
-	if _, err := quiet("git", "-C", repo, "fetch", "-q", "origin", target); err != nil {
+	if syncTarget(repo, target) != nil {
 		stop("could not fetch %s from origin", target)
 	}
 	return "origin/" + target
