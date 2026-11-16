@@ -12,8 +12,11 @@ Read this document and the repository instructions, then inspect the current
 branch, worktrees, diff and relevant implementation before acting. The baseline
 below is historical evidence, not a claim about the checkout you find.
 
-**Next Tend work: the known gaps are closed on `tend/known-gaps` (not merged);
-show the requested-change behaviour live, then choose what follows with the owner.**
+**Next Tend work: run tend for real on the owner's mini (grove with GitHub issues,
+memex with Jira, tend itself). Tend now uses Grove: its agreed behaviour is in
+`grove/specs/`, and new work is proposed and planned as Grove changes, so this
+document is the delivery record up to adopting Grove, not the place for new scope.**
+The known gaps are closed and shown live.
 Slice 4 is complete and merged into `main`: the non-Grove work item, the port to
 Go, the terminal interface with Herdr and rex (shown live) and Jira as the second
 tracker (shown live); tmux is dropped. Before that the order was drawn from Herdr and rex (the
