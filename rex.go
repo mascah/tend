@@ -157,8 +157,10 @@ func (r *rex) keys(name string, keys ...string) {
 }
 
 // The text goes as a bracketed paste when the agent asks for one, so its
-// newlines stay text, then Enter submits it. As with Herdr, a prompt counts as
-// delivered only once the agent reports something new within five seconds.
+// newlines stay text, then Enter submits it. A prompt counts as delivered once
+// the agent reports something new. Codex reports nothing while it works, only
+// done at the end of its turn, so the first report may come with the answer:
+// it is waited for as long as the answer is, then the prompt is stalled.
 func (r *rex) prompt(name, text string) (string, string) {
 	b := r.pane(name)
 	if b == "" {
@@ -176,7 +178,8 @@ func (r *rex) prompt(name, text string) (string, string) {
 	if _, err := rexCmd("send-key", "-s", r.session, "-b", b, "enter"); err != nil {
 		return "", "send_failed"
 	}
-	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(250 * time.Millisecond) {
+	n, _ := strconv.Atoi(timeout())
+	for deadline := time.Now().Add(time.Duration(n) * time.Millisecond); ; time.Sleep(250 * time.Millisecond) {
 		if rec := r.record(b); str(get(rec, "updated_at")) != before && state7501(rec) != "unknown" {
 			break
 		}

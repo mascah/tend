@@ -1090,8 +1090,8 @@ check "the repair was asked once" test "$(prompts An)" = 1
 
 scenario rex-stalled
 project "$t/repo"
-REX_STALL=1 rexrun
-check "under rex, a prompt the agent never takes up stops" test $? = 3
+REX_STALL=1 TIMEOUT_MS=1500 rexrun
+check "under rex, a prompt the agent never takes up stops, after the prompt's timeout" test $? = 3
 check "as stalled" said "agent_prompt_stalled"
 agent working impl
 rexrun 2
