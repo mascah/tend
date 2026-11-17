@@ -156,9 +156,12 @@ on.
 
 When `tend <repo> <item>` or `tend propose <repo>` runs, the system shall
 remove each worktree tend made for that repository whose pull request is
-merged or closed, with its local branch and its agents' place, when its head
-is the pull request's head and it holds no uncommitted files, and otherwise
-leave it and say why; and a declined request's worktree shall go at once.
+merged or closed, when its head is the pull request's head, and each
+attempt's worktree with no pull request whose Grove cycle is done and whose
+head the target holds, each with its local branch and its agents' place,
+when it holds no uncommitted files, no worktree is inside it and its
+implementer is not working, and otherwise leave it and say why; and a
+declined request's worktree shall go at once.
 
 #### Scenario: A merged attempt and an open proposal
 
@@ -181,6 +184,22 @@ leave it and say why; and a declined request's worktree shall go at once.
 - WHEN the owner runs `tend <repo> issue-7`
 - THEN the worktree of `tend/build-7` is removed
 
+#### Scenario: The cycle landed some other way
+
+- GIVEN an attempt with no pull request and no commits, whose cycle the
+  target then shows done, with a worktree inside the attempt's
+- WHEN `tend propose` runs, then runs again once that worktree is gone
+  while the implementer is working, then again once it is idle
+- THEN the first two leave the worktree, saying a worktree is inside it and
+  that its implementer is working, and the third removes it with its local
+  branch
+
+#### Scenario: The cycle is not done
+
+- GIVEN an attempt with no pull request whose cycle is not done
+- WHEN `tend propose` runs
+- THEN its worktree stays
+
 ## Known discrepancies
 
 None recorded.
@@ -192,3 +211,4 @@ None.
 ## History
 
 - Written when tend adopted Grove (2026-11-16).
+- [261117-bez30](../../changes/archive/261117-bez30-the-implementer-leaves-delivery-to-tend/) The implementer leaves delivery to tend

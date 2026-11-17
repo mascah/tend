@@ -29,6 +29,10 @@ turn() { # name text
 				[ "$d" = grove/changes/archive/ ] || grove archive "$(basename "$d" | cut -d- -f1-2)" >/dev/null 2>&1
 			done
 			git add -A && git commit -qm build
+			case ${STRAY:-} in # work left outside the attempt, as memex's cycle did
+			worktree) git worktree add -q "../stray-$1" -b "stray-$1" >/dev/null 2>&1 ;;
+			branch) git branch "stray-$1" ;;
+			esac
 			[ -z "${BLOCK_AFTER_BUILD:-}" ] || block=$1 ;;
 		"Implement GitHub issue"* | "Implement Jira issue"*)
 			echo "built" >>a.txt && git commit -qam "Build the issue"
@@ -374,7 +378,7 @@ scenario() {
 	t=$top/$name
 	mkdir -p "$t/state"
 	export HERDR_STATE=$t/state TEND_STATE=$t/tend
-	unset NO_NOTES REVIEW IMPL_FAIL IMPL_SLEEP REPAIR_FAIL REV_FAIL BLOCK_AFTER_BUILD CREATE_LOST REQUEST_FAIL PROPOSE_FAIL FOLLOW_FAIL DECLINE EDIT_FAIL CAP TRUST_DIALOG REX_STALL COMMENT_FAIL REQUEST_DECLINE
+	unset NO_NOTES REVIEW IMPL_FAIL IMPL_SLEEP REPAIR_FAIL REV_FAIL BLOCK_AFTER_BUILD CREATE_LOST REQUEST_FAIL PROPOSE_FAIL FOLLOW_FAIL DECLINE EDIT_FAIL CAP TRUST_DIALOG REX_STALL COMMENT_FAIL REQUEST_DECLINE STRAY
 }
 run() { "$tend" "$t/repo" 261114-k0000 >"$t/out${1:-}" 2>"$t/err${1:-}"; } # [suffix for out and err]
 reviews() { grep -c '^agent prompt rev-' "$HERDR_STATE/log"; }
@@ -413,6 +417,31 @@ check "one record for the cycle" test "$(records)" = 1
 check "an origin not listed for publication gets no push or pull request" test "$(grep -c '^gh ' "$HERDR_STATE/log")" = 0
 check "and tend says why" said "is not listed in"
 check "and its candidate branch is not pushed" test -z "$(git -C "$t/repo.git" branch --list 'grove/2*')"
+
+scenario runner
+project "$t/repo" main remote
+run
+check "the implementer is asked for the cycle under --runner" grep -q '^agent prompt impl-[^ ]* /grove-implement --runner 261114-k0000 --wait' "$HERDR_STATE/log"
+start=$(grep '^agent start impl-' "$HERDR_STATE/log")
+check "pushing and gh pr are denied to it" grep -qF -- '--disallowedTools Bash(git push:*) Bash(gh pr:*)' <<<"$start"
+check "it is told tend delivers, on its branch" grep -qF -- "--append-system-prompt This session works for tend on branch $(git -C "$(worktree)" branch --show-current) in this worktree. Commit your work on this branch. Push nothing" <<<"$start"
+
+scenario stray-worktree
+project "$t/repo" main remote
+STRAY=worktree run
+check "an implementer that adds a worktree stops for a person" test $? = 3
+check "naming it" said "it added the worktree .*stray-impl-"
+check "and nothing is reviewed" test "$(reviews)" = 0
+run 2
+check "a rerun stops again, from the same record" test $? = 3
+check "still with nothing reviewed" test "$(reviews)" = 0
+
+scenario stray-branch
+project "$t/repo" main remote
+STRAY=branch run
+check "an implementer that makes a branch with commits stops for a person" test $? = 3
+check "naming it" said "it made the branch stray-impl-.*, with commits"
+check "and nothing is reviewed" test "$(reviews)" = 0
 
 scenario local-resume
 project "$t/repo"
@@ -1157,6 +1186,16 @@ pushed() { # a commit someone else pushed to origin's main: its hash
 	git clone -q "$t/repo.git" "$t/other" && (cd "$t/other" && echo theirs >b.txt && git add b.txt && git commit -qm theirs && git push -q origin main) && git -C "$t/other" rev-parse HEAD
 }
 
+scenario drafter-terms
+project "$t/repo" main remote
+allow
+issues 1:tend
+propose
+start=$(grep '^agent start prop-' "$HERDR_STATE/log")
+check "the drafter is denied pushing and gh pr" grep -qF -- '--disallowedTools Bash(git push:*) Bash(gh pr:*)' <<<"$start"
+check "and told tend publishes" grep -qF -- 'Push nothing, open or edit no pull request' <<<"$start"
+check "but to commit only when tend asks" grep -qF 'Commit only when tend asks you to.' <<<"$start"
+
 scenario fetch-target
 project "$t/repo" main remote
 theirs=$(pushed)
@@ -1194,6 +1233,36 @@ rm "$pw/scratch.txt"
 propose 4
 check "once clean, it is removed" test ! -e "$pw"
 check "and not looked at again" test ! -e "$TEND_STATE"/intake/*-1/worktree
+
+scenario tidy-superseded
+project "$t/repo" main remote
+allow
+IMPL_FAIL=stub_failure run
+wt=$(worktree) b=$(branch)
+(cd "$t/repo" && grove archive 261015-c0000 >/dev/null && git add -A && git commit -qm "built elsewhere" && git push -q origin main)
+git -C "$t/repo" worktree add -q "$wt/nested" -b nested
+issues
+propose
+check "an attempt with a worktree inside it is left" test -d "$wt"
+check "and tend says so" grep -q "a worktree is inside it" "$t/err"
+git -C "$t/repo" worktree remove "$wt/nested"
+agent working impl-
+propose 2
+check "an attempt whose implementer is working is left" test -d "$wt"
+check "and tend says so" grep -q "its implementer is working" "$t/err2"
+agent idle impl-
+propose 3
+check "an attempt with no pull request whose cycle is done elsewhere is removed" test ! -e "$wt"
+check "with its local branch" test -z "$(git -C "$t/repo" branch --list "$b")"
+
+scenario tidy-unfinished
+project "$t/repo" main remote
+allow
+IMPL_FAIL=stub_failure run
+wt=$(worktree)
+issues
+propose
+check "an attempt with no pull request whose cycle is not done stays" test -d "$wt"
 
 scenario rex-tidy
 project "$t/repo" main remote

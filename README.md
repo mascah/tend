@@ -185,8 +185,8 @@ the next `tend propose`, which completes every intake folder with a `pr` and no
 To cancel, stop tend (Ctrl-C or a kill). The agents keep their work and
 their turns. Stop an agent in its pane if you want it stopped too; running
 tend again carries on from what Git and the run folder hold.
-`TIMEOUT_MS` sets the prompt wait timeout (default 30 minutes); a timeout
-does not stop the agent.
+`TIMEOUT_MS` sets the prompt wait timeout (default 4 hours, a backstop for a
+hung agent); a timeout does not stop the agent.
 
 To try it on a disposable repo, with a checkout of Grove beside this one:
 
@@ -260,7 +260,9 @@ Its command line and skills, and it never reads Grove's Markdown:
 - `grove changes --json`, for the document root, the target branch and the
   attempt records, and as the sign that a repository uses Grove;
 - `grove claim <cycle-id>`, to take the cycle and record the attempt;
-- `/grove-implement <cycle-id>`, as the implementer's prompt;
+- `/grove-implement --runner <cycle-id>`, as the implementer's prompt, so
+  the project's `rules.delivery` lines are left out: tend delivers the work
+  (Grove 0.12.0 or later);
 - `grove review`, whose summary goes in the head's published review;
 - `/grove-propose --unattended`, as the drafter's prompt in `tend propose`.
 
@@ -270,6 +272,19 @@ Grove does not know tend exists, and is useful without it.
 
 - Claude Code starts with `--permission-mode auto`, so routine commands ask
   nobody. Codex starts with `-s workspace-write -a never`.
+- tend delivers the work, never the agent. The implementer and the drafter
+  are told so in their system prompt (`--append-system-prompt`), above any
+  skill or project rule: work on this branch in this worktree, push nothing,
+  open or edit no pull request, create no branch or worktree; the
+  implementer is also told to commit, the drafter to commit only when tend
+  asks. `git push` and `gh pr` are denied to
+  them (`--disallowedTools`), which catches a mistake, not a determined
+  agent. After each implementer turn tend compares the repository's
+  worktrees and local branches with a record made just before the prompt.
+  A worktree added, a new branch holding commits, or the attempt's worktree
+  left on another branch stops for you, and nothing is reviewed or
+  published. The agents run as your OS user, so they can reach the
+  publishing account's token; a separate user for agents would close that.
 - It answers one kind of dialog itself: whether to trust the folder, which
   Claude Code asks for each new worktree and Codex once for a repository.
 - The reviewer may write in the attempt's run folder besides its checkout
