@@ -1,0 +1,5 @@
+title: "The implementer leaves delivery to tend"
+created: 2026-11-17T06:15:20Z
+description: Tend tells its agents it delivers the work, guards against pushing, checks each implementer turn left its work on the attempt's branch, waits longer, and tidies attempts whose work landed elsewhere.
+schema: default
+base: a513d2ff81a60466e4d0ef713fdb5798fc79278d

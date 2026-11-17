@@ -26,4 +26,14 @@ context: "Go 1.26, standard library only; build with `go build -o bin/tend .`; t
 # Kinds: proposal, change-spec, tasks, implementation, spec, and those of
 # the project's own schemas.
 # Skills: explore, prototype, propose, plan, implement, archive.
-rules: {}
+# Under delivery, by skill, how the work leaves the checkout; a runner that
+# delivers it itself, as tend does, has these left out (--runner).
+rules:
+  skills:
+    implement:
+      - Commit after each task, naming its task ID.
+  delivery:
+    propose:
+      - Commit the change on a branch other than main, push it to origin and open a pull request with gh pr create.
+    implement:
+      - When you are done, push the branch to origin and open a pull request with gh pr create, listing the changes archived and each blocked task with its question.

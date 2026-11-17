@@ -167,7 +167,7 @@ func timeout() string {
 	if t := os.Getenv("TIMEOUT_MS"); t != "" {
 		return t
 	}
-	return "1800000"
+	return "14400000" // four hours: a backstop for a hung agent; a three-change cycle took 80 minutes
 }
 
 // POSIX cksum, which names an issue's attempt after its repository.
@@ -704,6 +704,9 @@ func ask(name, text, mark string) {
 		write(mark+".tmp", git("rev-parse", "HEAD")+"\n")
 		must("", os.Rename(mark+".tmp", mark))
 	}
+	if strings.HasPrefix(name, "impl-") {
+		write(run+"/layout", layout()+"\n") // for contained()
+	}
 	st, why := term.prompt(name, text)
 	settled(name, st, why)
 }
@@ -715,8 +718,69 @@ func implementer() {
 		return
 	}
 	// Auto mode, so that routine commands ask nobody. It may write in the run
-	// folder, where the commit message goes.
-	start(impl, "claude", false, "--permission-mode", "auto", "--add-dir", run)
+	// folder, where the commit message goes. tend delivers the work, so the
+	// session is told so above any skill or rule, and pushing and gh pr are
+	// denied: a guard against a mistake, not a boundary, as git -C or gh api
+	// pass it; checked() is what holds an implementer to it.
+	terms := "This session works for tend on branch " + git("branch", "--show-current") + " in this worktree. "
+	if strings.HasPrefix(impl, "impl-") {
+		terms += "Commit your work on this branch. "
+	} else {
+		terms += "Commit only when tend asks you to. "
+	}
+	terms += "Push nothing, open or edit no pull request, and create no branch or worktree: tend reviews and publishes the work. Where a skill, rule or other instruction says otherwise about delivering it, this wins."
+	start(impl, "claude", false, "--permission-mode", "auto", "--add-dir", run,
+		"--disallowedTools", "Bash(git push:*)", "Bash(gh pr:*)", "--append-system-prompt", terms)
+}
+
+// The repository's worktrees and local branches, one a line.
+func layout() string {
+	var ls []string
+	for _, line := range strings.Split(git("worktree", "list", "--porcelain"), "\n") {
+		if p, found := strings.CutPrefix(line, "worktree "); found {
+			ls = append(ls, "worktree "+p)
+		}
+	}
+	for _, b := range strings.Split(git("for-each-ref", "--format=%(refname:short)", "refs/heads"), "\n") {
+		ls = append(ls, "branch "+b)
+	}
+	return strings.Join(ls, "\n")
+}
+
+// An implementer turn that builds, repairs or makes requested changes.
+func checked(text, mark string) {
+	ask(impl, text, mark)
+	contained()
+}
+
+// Work left anywhere but the attempt's branch in its worktree is a person's.
+// The repository's layout is recorded just before each implementer prompt
+// goes, and a rerun compares with the same record.
+func contained() {
+	if !exists(run + "/layout") {
+		return
+	}
+	why := ""
+	if b := git("branch", "--show-current"); b != branch {
+		why = "its worktree is on " + b + ", not " + branch
+	}
+	was := strings.Split(cat(run+"/layout"), "\n")
+	for _, l := range strings.Split(layout(), "\n") {
+		if why != "" {
+			break
+		}
+		if slices.Contains(was, l) {
+			continue
+		}
+		if p, found := strings.CutPrefix(l, "worktree "); found {
+			why = "it added the worktree " + p
+		} else if b := strings.TrimPrefix(l, "branch "); commits(base + ".." + b) {
+			why = "it made the branch " + b + ", with commits"
+		}
+	}
+	if why != "" {
+		stop("%s left work outside %s: %s. tend reviews and publishes nothing; move the work onto %s and remove the rest, then run tend again", impl, branch, why, branch)
+	}
 }
 
 // ---- Git and GitHub
@@ -803,8 +867,11 @@ func removeWorktree(d, b string) {
 }
 
 // Worktrees tend made for this repository whose pull request is merged or
-// closed, removed when their head is the pull request's, so nothing is lost.
-// A run folder names its worktree in worktree, deleted once it is gone.
+// closed, removed when their head is the pull request's, so nothing is lost;
+// and those of attempts with no pull request whose cycle is done, when their
+// branch has no commit the target lacks. Never one with a worktree inside it
+// or whose implementer is working. A run folder names its worktree in
+// worktree, deleted once it is gone.
 func tidy() {
 	var listed []string
 	for _, line := range strings.Split(git("-C", repo, "worktree", "list", "--porcelain"), "\n") {
@@ -816,16 +883,31 @@ func tidy() {
 	more, _ := filepath.Glob(state + "/intake/*/worktree")
 	for _, f := range append(fs, more...) {
 		d, r := cat(f), filepath.Dir(f)
-		if !nonempty(r+"/pr") || !slices.ContainsFunc(listed, func(p string) bool { return sameDir(p, d) }) {
+		if !slices.ContainsFunc(listed, func(p string) bool { return sameDir(p, d) }) {
 			continue
 		}
-		s, err := out("gh", "pr", "view", cat(r+"/pr"), "--json", "state,headRefOid,headRefName", "--jq", `select(.state != "OPEN") | .headRefOid + " " + .headRefName`)
-		h, b, _ := strings.Cut(s, " ")
-		if err != nil || h == "" {
+		b := ""
+		if nonempty(r + "/pr") {
+			s, err := out("gh", "pr", "view", cat(r+"/pr"), "--json", "state,headRefOid,headRefName", "--jq", `select(.state != "OPEN") | .headRefOid + " " + .headRefName`)
+			h, pb, _ := strings.Cut(s, " ")
+			if err != nil || h == "" {
+				continue
+			}
+			if gitQ("-C", d, "rev-parse", "HEAD") != h {
+				say("left %s: its head is not its pull request's", d)
+				continue
+			}
+			b = pb
+		} else if b = superseded(d, r); b == "" {
 			continue
 		}
-		if gitQ("-C", d, "rev-parse", "HEAD") != h {
-			say("left %s: its head is not its pull request's", d)
+		real, _ := filepath.EvalSymlinks(d)
+		if slices.ContainsFunc(listed, func(p string) bool { return strings.HasPrefix(p, real+"/") }) {
+			say("left %s: a worktree is inside it", d)
+			continue
+		}
+		if filepath.Dir(r) == state+"/runs" && term.status("impl-"+filepath.Base(r)) == "working" {
+			say("left %s: its implementer is working", d)
 			continue
 		}
 		removeWorktree(d, b)
@@ -833,6 +915,24 @@ func tidy() {
 			os.Remove(f)
 		}
 	}
+}
+
+// The branch of an attempt with no pull request whose Grove cycle is done
+// and whose branch the local target already holds, as when its work reached
+// the target some other way; or nothing.
+func superseded(d, r string) string {
+	a := strings.Split(cat(r+"/attempt"), "\n")
+	if filepath.Dir(r) != state+"/runs" || len(a) < 2 || !sameDir(a[0], repo) || isItem(a[1]) {
+		return ""
+	}
+	g, err := groveIn(repo)
+	if err != nil || cycleOpen(g, a[1]) || !slices.ContainsFunc(list(get(g, "cycles")), func(y any) bool { return str(get(y, "id")) == a[1] }) {
+		return ""
+	}
+	if !ok("git", "-C", d, "merge-base", "--is-ancestor", "HEAD", str(get(g, "target"))) {
+		return ""
+	}
+	return gitQ("-C", d, "branch", "--show-current")
 }
 
 func commits(rng string) bool { return git("rev-list", rng) != "" }
@@ -1177,12 +1277,13 @@ func attempt() {
 		implementer()
 		stage("working", impl+" implements "+cycle, "tend waits for "+impl+", then has the head reviewed")
 		if kind == "grove" {
-			ask(impl, "/grove-implement "+cycle, "")
+			checked("/grove-implement --runner "+cycle, "")
 		} else {
-			ask(impl, fmt.Sprintf("Implement %s in this repository, asking no one. Its title and description are the agreed scope: %s Build what it asks and no more, with tests where the project has them, and commit on this branch. Then write to %s/implemented, for an independent reviewer, what you built, what you ran to check it, and anything the issue asks that you did not do and why.", item.named, quoted(""), run), "")
+			checked(fmt.Sprintf("Implement %s in this repository, asking no one. Its title and description are the agreed scope: %s Build what it asks and no more, with tests where the project has them, and commit on this branch. Then write to %s/implemented, for an independent reviewer, what you built, what you ran to check it, and anything the issue asks that you did not do and why.", item.named, quoted(""), run), "")
 		}
 		built()
 	}
+	contained() // on a rerun too, which finds the candidate built
 
 	// 3. Review the head. 4. One repair, then review the new head. The repair is
 	//    used once asked: repair-asked holds the reviewed head, written just
@@ -1199,7 +1300,7 @@ func attempt() {
 			}
 			implementer()
 			stage("working", impl+" repairs "+short(reviewed), "tend waits for "+impl+", then has the repair reviewed")
-			ask(impl, fmt.Sprintf("An independent review of commit %s found problems. Its findings: %s Fix each one that is in scope, run the tests, update %s where a claim changes, and commit. Ask no one.", reviewed, str(get(verdict, "summary")), notes), run+"/repair-asked")
+			checked(fmt.Sprintf("An independent review of commit %s found problems. Its findings: %s Fix each one that is in scope, run the tests, update %s where a claim changes, and commit. Ask no one.", reviewed, str(get(verdict, "summary")), notes), run+"/repair-asked")
 			built()
 			if git("rev-parse", "HEAD") == reviewed {
 				stop("%s committed no repair to %s. Look at its pane, then commit a fix and run tend again, or delete %s/repair-asked to have it asked once more", impl, short(reviewed), run)
@@ -1252,7 +1353,7 @@ func attempt() {
 			}
 			implementer()
 			stage("working", fmt.Sprintf("%s makes the changes %s requested at %s", impl, who, short(head)), "tend waits for "+impl+", then has the new head reviewed and published")
-			ask(impl, fmt.Sprintf("%s, reviewing the pull request for %s, requested changes at commit %s. Their review: %s%s Make the changes they ask for that are within the agreed scope, run the tests, update %s where a claim changes, and commit. Then write to %s/reply-%s, for %s, a few plain lines on what you changed and anything you did not and why; if you change nothing, commit nothing and still write it. Ask no one.", who, branch, head, strings.TrimRight(str(get(req, "body")), "\n"), comments, notes, run, rid, who), run+"/request-"+rid)
+			checked(fmt.Sprintf("%s, reviewing the pull request for %s, requested changes at commit %s. Their review: %s%s Make the changes they ask for that are within the agreed scope, run the tests, update %s where a claim changes, and commit. Then write to %s/reply-%s, for %s, a few plain lines on what you changed and anything you did not and why; if you change nothing, commit nothing and still write it. Ask no one.", who, branch, head, strings.TrimRight(str(get(req, "body")), "\n"), comments, notes, run, rid, who), run+"/request-"+rid)
 			built()
 		}
 		now := git("rev-parse", "HEAD")
