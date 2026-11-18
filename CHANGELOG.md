@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/mascah/tend/compare/v0.2.0...v0.2.1) (2026-11-18)
+
+
+### Bug Fixes
+
+* answer Claude's --add-dir dialog, and stop at Codex's hook review ([#6](https://github.com/mascah/tend/issues/6)) ([8e30c55](https://github.com/mascah/tend/commit/8e30c55473a2a52f11694f912f5785ebf3562e4f))
+
 ## [0.2.0](https://github.com/mascah/tend/compare/v0.1.1...v0.2.0) (2026-11-17)
 
 
