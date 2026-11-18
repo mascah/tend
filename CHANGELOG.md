@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/mascah/tend/compare/v0.1.1...v0.2.0) (2026-11-17)
+
+
+### Features
+
+* the implementer leaves delivery to tend ([#4](https://github.com/mascah/tend/issues/4)) ([117ace3](https://github.com/mascah/tend/commit/117ace331345572478e6e06ad1cc723a179210db))
+
 ## [0.1.1](https://github.com/mascah/tend/compare/v0.1.0...v0.1.1) (2026-11-16)
 
 
