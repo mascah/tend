@@ -1534,6 +1534,9 @@ func publish() {
 			"-f", "description=Independent review of "+short(h)+": "+c, "-f", "target_url="+pr); err != nil {
 			stop("could not set the tend/review status on %s", short(h))
 		}
+		if h == head {
+			markDraft(c != "success")
+		}
 		body := fmt.Sprintf("**Independent review of %s: %s**\n\n%s\n\n", short(h), c, str(get(x, "summary")))
 		if c != "success" {
 			if get(x, "actionable") == true {
@@ -1565,6 +1568,24 @@ func publish() {
 		stop("could not say on %s where its pull request is (%s); run tend again to finish", item.ref, pr)
 	}
 	say("published %s", pr)
+}
+
+// A pull request whose head failed review is made a draft, and one whose head
+// passed made ready, once per reviewed head, so a person may change it after.
+// The description is the squash commit's, so it does not say; and where
+// GitHub offers no drafts, the review and status still do.
+func markDraft(want bool) {
+	d, err := out("gh", "pr", "view", pr, "--json", "isDraft", "--jq", ".isDraft")
+	if err != nil || (d == "true") == want {
+		return
+	}
+	a, as := []string{"pr", "ready", pr}, "ready for review"
+	if want {
+		a, as = append(a, "--undo"), "a draft"
+	}
+	if _, err := out("gh", a...); err != nil {
+		say("could not make %s %s; its review and status say how it stands", pr, as)
+	}
 }
 
 // A change request the implementer answered with no commit: its reply goes on
