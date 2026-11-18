@@ -151,7 +151,7 @@ cat >"$top/bin/rex" <<'EOS'
 # Enter. program_status reports status-<name> (idle when absent), with an
 # updated_at that each turn moves; "none" is no record, as at a dialog; a
 # working agent with a pending turn takes it when polled again. TRUST_DIALOG starts
-# agents at the trust dialog; REX_STALL leaves a prompt untaken and pending.
+# agents at the trust dialog (TRUST_TEXT, its answer); REX_STALL leaves a prompt untaken and pending.
 set -euo pipefail
 s=$HERDR_STATE
 . "$(dirname "$0")/turn.sh"
@@ -216,7 +216,7 @@ send-key)
 		bump "$n"
 		[ -z "${block:-}" ] || echo blocked >"$s/status-$block"
 	fi ;;
-capture) [ ! -e "$s/trust-$(name "$@")" ] || echo "Yes, I trust this folder" ;;
+capture) [ ! -e "$s/trust-$(name "$@")" ] || echo "${TRUST_TEXT:-Yes, I trust this folder}" ;;
 esac
 EOS
 chmod +x "$top/bin/rex"
@@ -378,7 +378,7 @@ scenario() {
 	t=$top/$name
 	mkdir -p "$t/state"
 	export HERDR_STATE=$t/state TEND_STATE=$t/tend
-	unset NO_NOTES REVIEW IMPL_FAIL IMPL_SLEEP REPAIR_FAIL REV_FAIL BLOCK_AFTER_BUILD CREATE_LOST REQUEST_FAIL PROPOSE_FAIL FOLLOW_FAIL DECLINE EDIT_FAIL CAP TRUST_DIALOG REX_STALL COMMENT_FAIL REQUEST_DECLINE STRAY
+	unset NO_NOTES REVIEW IMPL_FAIL IMPL_SLEEP REPAIR_FAIL REV_FAIL BLOCK_AFTER_BUILD CREATE_LOST REQUEST_FAIL PROPOSE_FAIL FOLLOW_FAIL DECLINE EDIT_FAIL CAP TRUST_DIALOG TRUST_TEXT REX_STALL COMMENT_FAIL REQUEST_DECLINE STRAY
 }
 run() { "$tend" "$t/repo" 261114-k0000 >"$t/out${1:-}" 2>"$t/err${1:-}"; } # [suffix for out and err]
 reviews() { grep -c '^agent prompt rev-' "$HERDR_STATE/log"; }
@@ -1150,6 +1150,19 @@ project "$t/repo"
 TRUST_DIALOG=1 rexrun
 check "under rex, the trust dialog of a new folder is answered" passed
 check "by choosing to trust it" grep -q '^rex send-key .* down enter' "$HERDR_STATE/rexlog"
+
+scenario rex-add-dir
+project "$t/repo"
+TRUST_DIALOG=1 TRUST_TEXT="Yes, add it" rexrun
+check "Claude's dialog for adding the run folder is answered" passed
+check "by choosing to add it" grep -q '^rex send-key .* down enter' "$HERDR_STATE/rexlog"
+
+scenario rex-hooks
+project "$t/repo"
+TRUST_DIALOG=1 TRUST_TEXT="Hooks can run outside the sandbox after you trust them." rexrun
+check "an agent asking to review new hooks stops for a person" test $? = 3
+check "saying so" said "asks to review new or changed hooks"
+check "and is sent no key" sh -c "! grep -q '^rex send-key' '$HERDR_STATE/rexlog'"
 
 # Cycles a person marked unattended when planning them.
 unattend() { (cd "$t/repo" && echo 'unattended: true' >>grove/cycles/261114-k0000-one.yaml && git commit -qam unattend && git push -q origin main); }

@@ -22,6 +22,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -642,31 +643,43 @@ func takeLock() {
 // ---- agents
 
 // Start an agent. A folder the harness has never seen gets its trust dialog,
-// Claude's per worktree and Codex's per repository, answered here.
+// Claude's per worktree and Codex's per repository, answered here, as is
+// Claude's dialog for adding tend's run folder with --add-dir. One may follow
+// another, so each is answered in turn. Codex's review of new or changed hooks
+// is never answered: a hook trusted runs outside the sandbox, and one in the
+// candidate is the implementer's to write. Herdr may call an agent at that
+// dialog ready, so the screen is read even when it does.
 // ponytail: trusts whatever repo the caller passed; the real tool should
 // answer only for repos the owner registered.
 func start(name, kind string, fresh bool, args ...string) string {
 	p, err := term.start(name, kind, fresh, args)
-	if err == nil {
-		return p
-	}
-	screen := term.read(name)
-	switch {
-	case strings.Contains(screen, "Yes, I trust this folder"):
-		term.keys(name, "down", "enter")
-	case strings.Contains(screen, "Trust and continue"):
-		term.keys(name, "enter")
-	default:
-		code := err.Error()
-		if code == "" {
-			code = "unknown"
+	for range 3 {
+		screen := term.read(name)
+		if strings.Contains(screen, "Hooks can run outside the sandbox") {
+			stop("%s asks to review new or changed hooks, which run outside its sandbox once trusted; tend trusts none. Answer it in its pane, then run tend again", name)
 		}
-		stop("%s did not start: %s", name, code)
+		if err == nil {
+			return p
+		}
+		switch {
+		case strings.Contains(screen, "Yes, I trust this folder"), strings.Contains(screen, "Yes, add it"):
+			term.keys(name, "down", "enter")
+		case strings.Contains(screen, "Trust and continue"):
+			term.keys(name, "enter")
+		default:
+			code := err.Error()
+			if code == "" {
+				code = "unknown"
+			}
+			stop("%s did not start: %s", name, code)
+		}
+		// Codex comes out of its dialog as done, not idle.
+		err = nil
+		if _, why := term.wait(name, "60000", "idle", "done"); why != "" {
+			err = errors.New(why)
+		}
 	}
-	// Codex comes out of its dialog as done, not idle.
-	if _, why := term.wait(name, "60000", "idle", "done"); why != "" {
-		stop("%s did not start", name)
-	}
+	stop("%s did not start: %s", name, err)
 	return p
 }
 
@@ -688,7 +701,7 @@ func await(name string) {
 
 // Prompt an agent and wait for it to settle. An agent still working, as after
 // tend was killed, is waited for and not prompted again. Blocked or unknown is
-// a person's; tend answers no dialog but the trust one above. A timeout or
+// a person's; tend answers no dialog but those in start. A timeout or
 // stall does not prove a prompt undelivered, so nothing here sends one twice.
 // mark, if given, records HEAD just before the prompt is sent.
 func ask(name, text, mark string) {
