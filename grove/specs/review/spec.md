@@ -23,8 +23,8 @@ judgement is right is not checked.
 ### Requirement: A fresh reviewer for each head
 
 When an attempt's head has no valid verdict, the system shall start reviewer
-`rev-<short head>` as Codex with `-s workspace-write -a never --add-dir <run
-folder>`, reusing one an earlier run left, and prompt it once with the branch,
+`rev-<short head>` as Codex with `-s workspace-write -c
+sandbox_workspace_write.network_access=true -a never --add-dir <run folder>`, reusing one an earlier run left, and prompt it once with the branch,
 the head, the change as `git diff <base>...HEAD`, what the work item must do
 and where the implementer's claims are, asking for material findings only, no
 edits or commits, and the verdict written to `verdict-<head>.json` in the run

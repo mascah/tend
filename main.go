@@ -1457,7 +1457,9 @@ func review() {
 	// A reviewer left by an earlier run, working or not, is reused.
 	rpane := term.pane(rev)
 	if rpane == "" {
-		rpane = start(rev, "codex", true, "-s", "workspace-write", "-a", "never", "--add-dir", run)
+		// With network, so a test that serves on localhost runs: the sandbox
+		// otherwise denies a bind. The implementer has the network already.
+		rpane = start(rev, "codex", true, "-s", "workspace-write", "-c", "sandbox_workspace_write.network_access=true", "-a", "never", "--add-dir", run)
 	}
 	stage("working", rev+" reviews "+short(h), "tend waits for its verdict")
 	ask(rev, fmt.Sprintf(`You are the independent reviewer of branch %s at commit %s. You did not write it and nobody can answer questions. The change is 'git diff %s...HEAD'; what it must do is %s. Check the code against those requirements and run the project's tests. Report only material findings: a defect, an unmet requirement, or a claim in %s the code does not support. Edit, stage and commit nothing. Your only output is the file %s, exactly this JSON shape: {"head": "%s", "conclusion": "success or failure", "actionable": true or false, "summary": "findings with file:line and what you ran"}. actionable is true only when every finding is an in-scope code fix that needs no decision from the owner.`, branch, h, base, what, notes, v, h), "")

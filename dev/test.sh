@@ -476,6 +476,7 @@ check "the implementer was asked for the commit message once" test "$(prompts Br
 check "titled with its subject" grep -q '^gh pr create .*--title Add the file ' "$HERDR_STATE/log"
 check "described by its body alone" test "$(cat "$(pr)")" = "$(printf 'The project needed a file.\n\nGrove: 261015-c0000')"
 check "the implementer may write in the run folder" grep -q -- "--add-dir $TEND_STATE/runs/" <(grep '^agent start impl-' "$HERDR_STATE/log")
+check "the reviewer has the network, to serve on localhost" grep -q -- "-c sandbox_workspace_write.network_access=true -a never" <(grep '^agent start rev-' "$HERDR_STATE/log")
 check "the head's review shows what merging approves" grep -q 'What merging approves' "$HERDR_STATE/reviews"
 check "the head gets one review, a comment by the account" test "$(jq -r --arg h "$(head)" '[.[] | select(.commit_id == $h and .event == "COMMENT" and .user.login == "the-bot")] | length' "$HERDR_STATE/reviews")" = 1
 check "saying it passed" grep -q 'review of .*: success' "$HERDR_STATE/reviews"
