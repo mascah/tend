@@ -22,6 +22,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -642,31 +643,37 @@ func takeLock() {
 // ---- agents
 
 // Start an agent. A folder the harness has never seen gets its trust dialog,
-// Claude's per worktree and Codex's per repository, answered here.
+// Claude's per worktree and Codex's per repository, answered here, as is
+// Claude's dialog for adding tend's run folder with --add-dir. One may follow
+// another, so each is answered in turn.
 // ponytail: trusts whatever repo the caller passed; the real tool should
 // answer only for repos the owner registered.
 func start(name, kind string, fresh bool, args ...string) string {
 	p, err := term.start(name, kind, fresh, args)
-	if err == nil {
-		return p
-	}
-	screen := term.read(name)
-	switch {
-	case strings.Contains(screen, "Yes, I trust this folder"):
-		term.keys(name, "down", "enter")
-	case strings.Contains(screen, "Trust and continue"):
-		term.keys(name, "enter")
-	default:
-		code := err.Error()
-		if code == "" {
-			code = "unknown"
+	for range 3 {
+		if err == nil {
+			return p
 		}
-		stop("%s did not start: %s", name, code)
+		screen := term.read(name)
+		switch {
+		case strings.Contains(screen, "Yes, I trust this folder"), strings.Contains(screen, "Yes, add it"):
+			term.keys(name, "down", "enter")
+		case strings.Contains(screen, "Trust and continue"):
+			term.keys(name, "enter")
+		default:
+			code := err.Error()
+			if code == "" {
+				code = "unknown"
+			}
+			stop("%s did not start: %s", name, code)
+		}
+		// Codex comes out of its dialog as done, not idle.
+		err = nil
+		if _, why := term.wait(name, "60000", "idle", "done"); why != "" {
+			err = errors.New(why)
+		}
 	}
-	// Codex comes out of its dialog as done, not idle.
-	if _, why := term.wait(name, "60000", "idle", "done"); why != "" {
-		stop("%s did not start", name)
-	}
+	stop("%s did not start: %s", name, err)
 	return p
 }
 
