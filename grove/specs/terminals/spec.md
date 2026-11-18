@@ -6,7 +6,7 @@ they differ, keep the rule and record the difference under "Known discrepancies"
 
 ## Purpose
 
-tend runs its agents in Herdr or rex, where the owner can watch and take over, and this covers which one, where a worktree's agents run, how an agent is started, found and observed, how a prompt is delivered, the one dialog tend answers, how tend tells a person, and how a worktree's place is closed. A place is where one worktree's agents run: a Herdr workspace, or a rex session. An agent is found by its name: `impl-<attempt>` implements, `rev-<short head>` reviews, `prop-<request>` drafts a proposal.
+tend runs its agents in Herdr or rex, where the owner can watch and take over, and this covers which one, where a worktree's agents run, how an agent is started, found and observed, how a prompt is delivered, the dialogs tend answers, how tend tells a person, and how a worktree's place is closed. A place is where one worktree's agents run: a Herdr workspace, or a rex session. An agent is found by its name: `impl-<attempt>` implements, `rev-<short head>` reviews, `prop-<request>` drafts a proposal.
 
 ## Boundaries
 
@@ -129,13 +129,20 @@ until the agent is idle, done or blocked.
   the next run says it is still working on an earlier prompt, waits, prompts
   `/grove-implement` once in all, and exits 0
 
-### Requirement: The trust dialog is answered
+### Requirement: The trust dialogs are answered
 
-If an agent starts at the dialog asking whether to trust its folder, then the
-system shall answer it by choosing to trust the folder, Down then Enter at
-"Yes, I trust this folder" or Enter at "Trust and continue", and wait for the
-agent to be ready; and if an agent fails to start for any other reason, the
-system shall stop for a person, saying it did not start.
+If an agent starts at the dialog asking whether to trust its folder, or at
+Claude Code's dialog asking whether to add tend's run folder with
+`--add-dir`, then the system shall answer it by choosing to trust or add the
+folder, Down then Enter at "Yes, I trust this folder" or "Yes, add it", or
+Enter at "Trust and continue", and wait for the agent to be ready, answering
+each in turn when one follows another; and if an agent fails to start for any
+other reason, the system shall stop for a person, saying it did not start.
+
+If an agent starts at Codex's dialog asking to review new or changed hooks,
+then the system shall stop for a person, saying so, and send it no key, even
+when the terminal calls the agent ready: a trusted hook runs outside the
+sandbox, and a hook in the candidate is the implementer's to write.
 
 #### Scenario: A new folder under rex
 
@@ -143,6 +150,20 @@ system shall stop for a person, saying it did not start.
 - WHEN tend takes a cycle to a verdict
 - THEN rex is sent the keys `down enter`, and tend exits 0 with a passing
   verdict
+
+#### Scenario: Adding the run folder under rex
+
+- GIVEN under rex agents that start at the dialog for adding a directory
+- WHEN tend takes a cycle to a verdict
+- THEN rex is sent the keys `down enter`, and tend exits 0 with a passing
+  verdict
+
+#### Scenario: New hooks under rex
+
+- GIVEN under rex an agent that starts at the dialog asking to review hooks
+- WHEN tend starts it
+- THEN tend exits 3 saying it asks to review new or changed hooks, and rex
+  is sent no key
 
 ### Requirement: Telling a person
 

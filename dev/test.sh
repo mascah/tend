@@ -1157,6 +1157,13 @@ TRUST_DIALOG=1 TRUST_TEXT="Yes, add it" rexrun
 check "Claude's dialog for adding the run folder is answered" passed
 check "by choosing to add it" grep -q '^rex send-key .* down enter' "$HERDR_STATE/rexlog"
 
+scenario rex-hooks
+project "$t/repo"
+TRUST_DIALOG=1 TRUST_TEXT="Hooks can run outside the sandbox after you trust them." rexrun
+check "an agent asking to review new hooks stops for a person" test $? = 3
+check "saying so" said "asks to review new or changed hooks"
+check "and is sent no key" sh -c "! grep -q '^rex send-key' '$HERDR_STATE/rexlog'"
+
 # Cycles a person marked unattended when planning them.
 unattend() { (cd "$t/repo" && echo 'unattended: true' >>grove/cycles/261114-k0000-one.yaml && git commit -qam unattend && git push -q origin main); }
 watchrepo() { WATCH_ONCE=1 "$tend" watch "$t/repo" >/dev/null 2>"$t/watch${1:-}"; }

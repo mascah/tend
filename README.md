@@ -285,8 +285,11 @@ Grove does not know tend exists, and is useful without it.
   left on another branch stops for you, and nothing is reviewed or
   published. The agents run as your OS user, so they can reach the
   publishing account's token; a separate user for agents would close that.
-- It answers one kind of dialog itself: whether to trust the folder, which
-  Claude Code asks for each new worktree and Codex once for a repository.
+- It answers the trust dialogs itself: whether to trust the folder, which
+  Claude Code asks for each new worktree and Codex once for a repository,
+  and Claude Code's whether to add the run folder (`--add-dir`). It never
+  trusts Codex hooks: when Codex asks to review new or changed hooks, tend
+  stops for you, since a trusted hook runs outside the sandbox.
 - The reviewer may write in the attempt's run folder besides its checkout
   (`--add-dir`), where its verdict goes. So may the implementer, which writes
   its notes, the commit message and its replies there; the repair prompt
