@@ -68,7 +68,8 @@ and creates no branch or worktree, as tend delivers the work, and this wins
 over any other instruction about delivering it, an implementer also being
 told to commit its work on the branch and a drafter to commit only when tend
 asks; a reviewer as Codex with `-s
-workspace-write -a never --add-dir <run folder>`; and if an agent's pane is
+workspace-write -c sandbox_workspace_write.network_access=true -a never
+--add-dir <run folder>`, so the tests it runs may serve on localhost; and if an agent's pane is
 gone, a new session shall take its name and find the work in Git.
 
 #### Scenario: The implementer's flags

@@ -1457,7 +1457,9 @@ func review() {
 	// A reviewer left by an earlier run, working or not, is reused.
 	rpane := term.pane(rev)
 	if rpane == "" {
-		rpane = start(rev, "codex", true, "-s", "workspace-write", "-a", "never", "--add-dir", run)
+		// With network, so a test that serves on localhost runs: the sandbox
+		// otherwise denies a bind. The implementer has the network already.
+		rpane = start(rev, "codex", true, "-s", "workspace-write", "-c", "sandbox_workspace_write.network_access=true", "-a", "never", "--add-dir", run)
 	}
 	stage("working", rev+" reviews "+short(h), "tend waits for its verdict")
 	ask(rev, fmt.Sprintf(`You are the independent reviewer of branch %s at commit %s. You did not write it and nobody can answer questions. The change is 'git diff %s...HEAD'; what it must do is %s. Check the code against those requirements and run the project's tests. Report only material findings: a defect, an unmet requirement, or a claim in %s the code does not support. Edit, stage and commit nothing. Your only output is the file %s, exactly this JSON shape: {"head": "%s", "conclusion": "success or failure", "actionable": true or false, "summary": "findings with file:line and what you ran"}. actionable is true only when every finding is an in-scope code fix that needs no decision from the owner.`, branch, h, base, what, notes, v, h), "")
@@ -1534,6 +1536,9 @@ func publish() {
 			"-f", "description=Independent review of "+short(h)+": "+c, "-f", "target_url="+pr); err != nil {
 			stop("could not set the tend/review status on %s", short(h))
 		}
+		if h == head {
+			markDraft(c != "success")
+		}
 		body := fmt.Sprintf("**Independent review of %s: %s**\n\n%s\n\n", short(h), c, str(get(x, "summary")))
 		if c != "success" {
 			if get(x, "actionable") == true {
@@ -1565,6 +1570,24 @@ func publish() {
 		stop("could not say on %s where its pull request is (%s); run tend again to finish", item.ref, pr)
 	}
 	say("published %s", pr)
+}
+
+// A pull request whose head failed review is made a draft, and one whose head
+// passed made ready, once per reviewed head, so a person may change it after.
+// The description is the squash commit's, so it does not say; and where
+// GitHub offers no drafts, the review and status still do.
+func markDraft(want bool) {
+	d, err := out("gh", "pr", "view", pr, "--json", "isDraft", "--jq", ".isDraft")
+	if err != nil || (d == "true") == want {
+		return
+	}
+	a, as := []string{"pr", "ready", pr}, "ready for review"
+	if want {
+		a, as = append(a, "--undo"), "a draft"
+	}
+	if _, err := out("gh", a...); err != nil {
+		say("could not make %s %s; its review and status say how it stands", pr, as)
+	}
 }
 
 // A change request the implementer answered with no commit: its reply goes on

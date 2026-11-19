@@ -271,7 +271,9 @@ Grove does not know tend exists, and is useful without it.
 ## What it does to your agents
 
 - Claude Code starts with `--permission-mode auto`, so routine commands ask
-  nobody. Codex starts with `-s workspace-write -a never`.
+  nobody. Codex starts with `-s workspace-write -a never`, with network
+  access (`-c sandbox_workspace_write.network_access=true`) so the tests it
+  runs may serve on localhost, which its sandbox otherwise denies.
 - tend delivers the work, never the agent. The implementer and the drafter
   are told so in their system prompt (`--append-system-prompt`), above any
   skill or project rule: work on this branch in this worktree, push nothing,

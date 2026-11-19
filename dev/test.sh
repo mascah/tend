@@ -305,6 +305,9 @@ case "$1 $2" in
 	arg --title "$@" >"$s/pr-${b//\//_}.title"
 	[ -z "${CREATE_LOST:-}" ] || exit 1
 	echo "https://example.test/pr/${b//\//_}" ;;
+"pr ready")
+	[ -z "${DRAFT_FAIL:-}" ] || exit 1
+	if [ "${4:-}" = --undo ]; then touch "$s/pr-${3##*/}.draft"; else rm -f "$s/pr-${3##*/}.draft"; fi ;;
 "pr edit")
 	cat >"$s/pr-${3##*/}"
 	arg --title "$@" >"$s/pr-${3##*/}.title" ;;
@@ -316,8 +319,9 @@ case "$1 $2" in
 	[ -f "$s/reviews" ] || echo '[]' >"$s/reviews"
 	{ read -r b; read -r o; } <"$k.where"
 	[ -e "$k.merged" ] && st=MERGED || st=OPEN
-	jq --arg st "$st" --arg h "$(git -C "$o" rev-parse "$b" 2>/dev/null)" --arg b "$b" --rawfile body "$k" --arg t "$(cat "$k.title" 2>/dev/null)" \
-		'{state: $st, headRefOid: $h, headRefName: $b, title: $t, body: $body, reviews: map({id: .node_id, state, commit: {oid: .commit_id}, author: {login: .user.login}})}' "$s/reviews" |
+	[ -e "$k.draft" ] && dr=true || dr=false
+	jq --arg st "$st" --argjson dr "$dr" --arg h "$(git -C "$o" rev-parse "$b" 2>/dev/null)" --arg b "$b" --rawfile body "$k" --arg t "$(cat "$k.title" 2>/dev/null)" \
+		'{state: $st, isDraft: $dr, headRefOid: $h, headRefName: $b, title: $t, body: $body, reviews: map({id: .node_id, state, commit: {oid: .commit_id}, author: {login: .user.login}})}' "$s/reviews" |
 		if q=$(arg --jq "$@") && [ -n "$q" ]; then jq -r "$q"; else cat; fi ;;
 api*)
 	[ -f "$s/reviews" ] || echo '[]' >"$s/reviews"
@@ -378,7 +382,7 @@ scenario() {
 	t=$top/$name
 	mkdir -p "$t/state"
 	export HERDR_STATE=$t/state TEND_STATE=$t/tend
-	unset NO_NOTES REVIEW IMPL_FAIL IMPL_SLEEP REPAIR_FAIL REV_FAIL BLOCK_AFTER_BUILD CREATE_LOST REQUEST_FAIL PROPOSE_FAIL FOLLOW_FAIL DECLINE EDIT_FAIL CAP TRUST_DIALOG TRUST_TEXT REX_STALL COMMENT_FAIL REQUEST_DECLINE STRAY
+	unset NO_NOTES REVIEW IMPL_FAIL IMPL_SLEEP REPAIR_FAIL REV_FAIL BLOCK_AFTER_BUILD CREATE_LOST REQUEST_FAIL PROPOSE_FAIL FOLLOW_FAIL DECLINE EDIT_FAIL CAP TRUST_DIALOG TRUST_TEXT REX_STALL DRAFT_FAIL COMMENT_FAIL REQUEST_DECLINE STRAY
 }
 run() { "$tend" "$t/repo" 261114-k0000 >"$t/out${1:-}" 2>"$t/err${1:-}"; } # [suffix for out and err]
 reviews() { grep -c '^agent prompt rev-' "$HERDR_STATE/log"; }
@@ -472,11 +476,13 @@ check "the implementer was asked for the commit message once" test "$(prompts Br
 check "titled with its subject" grep -q '^gh pr create .*--title Add the file ' "$HERDR_STATE/log"
 check "described by its body alone" test "$(cat "$(pr)")" = "$(printf 'The project needed a file.\n\nGrove: 261015-c0000')"
 check "the implementer may write in the run folder" grep -q -- "--add-dir $TEND_STATE/runs/" <(grep '^agent start impl-' "$HERDR_STATE/log")
+check "the reviewer has the network, to serve on localhost" grep -q -- "-c sandbox_workspace_write.network_access=true -a never" <(grep '^agent start rev-' "$HERDR_STATE/log")
 check "the head's review shows what merging approves" grep -q 'What merging approves' "$HERDR_STATE/reviews"
 check "the head gets one review, a comment by the account" test "$(jq -r --arg h "$(head)" '[.[] | select(.commit_id == $h and .event == "COMMENT" and .user.login == "the-bot")] | length' "$HERDR_STATE/reviews")" = 1
 check "saying it passed" grep -q 'review of .*: success' "$HERDR_STATE/reviews"
 check "the head carries the tend/review status, set by the account" grep -qx "$(head) success the-bot" "$HERDR_STATE/statuses"
 check "status points at the pull request" grep -q 'a person reviews https://example.test/pr/' <<<"$(status)"
+check "a passing head leaves it ready" test ! -e "$(pr).draft" -a "$(grep -c '^gh pr ready' "$HERDR_STATE/log")" = 0
 echo "A person's description." >"$(pr)"
 run 2
 check "a repeated run opens no second pull request" test "$(creates)" = 1
@@ -519,6 +525,25 @@ check "the old head's pass is not the new head's" test "$(grep -c "^$(head) succ
 check "its review says it needs a decision" grep -q 'needs a decision' "$HERDR_STATE/reviews"
 check "the earlier head keeps its one review" test "$(reviewed "$first")" = 1
 check "still one pull request" test "$(creates)" = 1
+check "a failed head makes the pull request a draft" test -e "$(pr).draft"
+(cd "$(worktree)" && echo fixed >>a.txt && git commit -qam "Fix it")
+run 3
+check "a later head that passes makes it ready" test ! -e "$(pr).draft"
+
+scenario publish-failed
+project "$t/repo" main remote
+allow
+REVIEW=decision run
+check "a first publish whose head failed review" test $? = 0
+check "opens the pull request as a draft" test -e "$(pr).draft"
+check "described by the commit message alone" test "$(cat "$(pr)")" = "$(printf 'The project needed a file.\n\nGrove: 261015-c0000')"
+
+scenario publish-no-drafts
+project "$t/repo" main remote
+allow
+REVIEW=decision DRAFT_FAIL=1 run
+check "where drafts are refused, the run still publishes" test $? = 0
+check "and says the review and status say how it stands" said "its review and status say how it stands"
 
 # A teammate requests changes on the PR's head, with a comment on a line.
 request() {
