@@ -1,0 +1,4 @@
+title: "Answer the add-dir dialog under rex without waiting a minute"
+created: 2026-11-21T19:32:08Z
+schema: bugfix
+base: ed385addcfef4b6530e7cdd2b65f71ae0556e9de
