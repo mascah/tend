@@ -137,8 +137,11 @@ Claude Code's dialog asking whether to add tend's run folder with
 `--add-dir`, then the system shall answer it by choosing to trust or add the
 folder, Down then Enter at "Yes, I trust this folder" or "Yes, add it", or
 Enter at "Trust and continue", and wait for the agent to be ready, answering
-each in turn when one follows another; and if an agent fails to start for any
-other reason, the system shall stop for a person, saying it did not start.
+each in turn when one follows another; it shall pause before answering, as
+Claude Code refuses keys that reach a dialog before it takes focus, and answer
+again a dialog still on screen after an answer, even when the terminal calls
+the agent ready; and if an agent fails to start for any other reason, the
+system shall stop for a person, saying it did not start.
 
 If an agent starts at Codex's dialog asking to review new or changed hooks,
 then the system shall stop for a person, saying so, and send it no key, even
@@ -158,6 +161,14 @@ sandbox, and a hook in the candidate is the implementer's to write.
 - WHEN tend takes a cycle to a verdict
 - THEN rex is sent the keys `down enter`, and tend exits 0 with a passing
   verdict
+
+#### Scenario: A dialog that refuses the first answer under rex
+
+- GIVEN under rex agents at the dialog for adding a directory, which refuses
+  the first answer and is called idle behind it
+- WHEN tend takes a cycle to a verdict
+- THEN rex is sent `down enter` twice for an agent, and tend exits 0 with a
+  passing verdict
 
 #### Scenario: New hooks under rex
 

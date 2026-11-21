@@ -289,7 +289,10 @@ Grove does not know tend exists, and is useful without it.
   publishing account's token; a separate user for agents would close that.
 - It answers the trust dialogs itself: whether to trust the folder, which
   Claude Code asks for each new worktree and Codex once for a repository,
-  and Claude Code's whether to add the run folder (`--add-dir`). It never
+  and Claude Code's whether to add the run folder (`--add-dir`). To skip
+  that last one, trust tend's state folder once: run `claude` in
+  `~/.local/state/tend` (or `$TEND_STATE`) and choose "Yes, I trust this
+  folder"; every run folder below it is then added without asking. It never
   trusts Codex hooks: when Codex asks to review new or changed hooks, tend
   stops for you, since a trusted hook runs outside the sandbox.
 - The reviewer may write in the attempt's run folder besides its checkout
