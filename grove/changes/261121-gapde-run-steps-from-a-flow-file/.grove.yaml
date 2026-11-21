@@ -1,0 +1,5 @@
+title: "Run steps from a flow file"
+created: 2026-11-21T19:23:42Z
+description: tend becomes the thing that runs steps; how work flows is a file the project holds
+schema: default
+base: ed385addcfef4b6530e7cdd2b65f71ae0556e9de

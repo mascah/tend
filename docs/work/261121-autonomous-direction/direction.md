@@ -1,0 +1,160 @@
+# Grove and tend: direction for autonomous development
+
+A record of one exploratory conversation with the owner on 2026-11-21,
+reviewed with Codex over four rounds; decisions 11 and 12 and the implied
+order changed after that review. It is direction, not a spec: nothing here is
+built, and only step 1 of the implied order is proposed. Decisions are the
+owner's; lines marked (inference) are the assistant's and not confirmed.
+
+## Background
+
+- **Grove** keeps what is agreed, as Markdown in Git: maintained specs, changes
+  (proposals with tasks) and cycles (changes planned to be built together). A
+  change is approved when its proposal is merged into the target branch. Grove
+  launches no agent. `grove claim` records an attempt on the branch
+  `grove/runs` with a compare-and-swap push, and refuses while the latest
+  attempt's cycle is not done, so a project builds one cycle at a time.
+- **tend** is a Go program (about 2,400 lines, standard library only) that takes
+  one approved cycle through one attempt: a worktree, a Claude implementer in a
+  terminal multiplexer, a separate Codex reviewer that writes a verdict file
+  tend validates, one repair, then a pull request published by a separate bot
+  account with a `tend/review` commit status. It never merges. It also drafts
+  proposals from labelled GitHub or Jira issues, and `tend watch` runs all of
+  this on a timer. It recovers after a kill without prompting an agent twice.
+  Its agreed behaviour is seven maintained specs: attempts, review, publication,
+  intake, terminals, watch-and-status, work-items.
+- **Today's human steps per change:** label an issue; merge the proposal; plan a
+  cycle and mark it `unattended` (a merge); merge the implementation.
+- **tend's acceptance suite** is one Bash file (1,329 lines, 72 scenarios, 326
+  checks) that drives the binary through stand-ins for the multiplexers, `gh`
+  and `curl`. It passes on `main` (ed385ad). It runs serially in 7 min 37 s on
+  the owner's machine, and the CI job takes about 15 minutes. There is no way
+  to run one scenario. Its fixture hand-writes Grove's documents: a Grove
+  release that changed the cycle file format made about half the checks fail
+  until the fixture was updated, although tend itself was unaffected. CI pins
+  Grove's version.
+- **Comparison studied:** beads (a work-item store that knows nothing of
+  orchestration; its charter gives scheduling and assignment to the layer
+  above), Gas Town (standing agents hold authority: a Mayor decomposes and
+  assigns, a Refinery merges, no approval step, no gating independent review)
+  and Gas City (an orchestrator drives workflows defined as data outside any
+  session; judgment is done by fresh agents in steps whose artifacts are
+  checked; gates are check scripts, never an agent; the Mayor is a window).
+
+## Decisions
+
+1. **Autonomy.** Agents propose, plan, build, merge and file the work they
+   discover. The owner keeps direction: goals and principles.
+2. **Reach.** This is a supported mode a project opts into. Grove and tend keep
+   today's supervised defaults for projects that do not.
+3. **What still needs the owner in that mode:**
+   - (a) The rules agents work under: the flow file (decision 7), CI, the
+     repository ruleset, CODEOWNERS, the principles file, `grove.yaml`, agent
+     instructions, skills, deploy config. These are protected paths. tend reads
+     the flow file and these rules from the target branch, never from a
+     candidate, so a candidate's edit to them cannot authorize that candidate.
+   - (b) What the product is: a change that would shift its identity. This
+     needs judgment.
+   - (c) Money and data: a database, auth, a paid API, a new dependency, storing
+     what a visitor typed. Protected paths hold the parts a file shows (the
+     lockfile, deploy config). The rest needs judgment, like (b), on both the
+     proposal and the built change, because an ordinary code change can store
+     data. A change that crosses (b) or (c) waits for the owner.
+   - (d) Spend: a daily cap that counts every prompt tend sends unattended, in
+     any step, to a fresh agent or a continuing one, checked before each
+     prompt. Building, repairing, drafting, decomposing and prototyping all
+     stop when it is reached.
+
+   Approval before production is not needed for the first project but should be
+   something a project can ask for (inference).
+4. **Agent-originated ideas** wait for the owner's yes or no. Work needed for an
+   outcome the owner accepted flows without the owner. An outcome an agent adds
+   is a pitch and waits; a broad goal approves no new outcome by itself. Some
+   pitches need to be built or prototyped before they can be judged. A pull
+   request that approves a proposal holds only Grove documents; a built pitch
+   stays on an unmerged branch until accepted, and then goes through the
+   implementation flow like any change. Later, with trust, agent ideas may ship
+   without waiting.
+5. **A standing agent** the owner talks to is part of the first version of the
+   autonomous mode. It is a window: it writes down goals and requests, reads
+   status and reports. It holds no authority to approve, plan or merge.
+6. **tend drives.** Every delegated job is a step: an agent given a prompt, a
+   file it must write that tend checks, and a rule for what that file allows
+   next (go on, retry up to a limit, stop for a person). A step either starts a
+   fresh agent or continues the agent of an earlier step: review is fresh, and
+   a repair or a person's requested changes continue the implementer's
+   conversation, as the review and publication specs say today. The flow file
+   must be able to say which. Today only review works this way.
+7. **How work flows is a file the project holds**, not code in tend. Adding a
+   step, removing a human approval, or running a different flow in another
+   project is an edit to that file, made by the owner (decision 3a). tend
+   becomes the thing that runs steps.
+8. **Approval stays a merge; scheduling stops being one.** An approved change is
+   ready when everything it waits on is archived as finished on the target
+   (Grove's existing meaning; finished on an attempt's branch releases nothing)
+   and nothing in flight is planned to touch the same requirements or files.
+   That overlap check only reduces collisions, since an implementer may touch
+   files its plan did not name; the merge train (decision 9) is the guarantee.
+   How many pieces run at once, and which first, is a setting in the flow file.
+9. **Several pieces of work run at once**, easily controlled by the person
+   running it, and finished candidates land through a merge train: each is
+   tested by CI combined with the target and the candidates ahead of it, with
+   several tested at once. A candidate that fails in the train or no longer
+   merges goes back to its implementer, and its new head is reviewed again. The
+   reviewer's verdict stays with the head it reviewed and is not repeated for
+   each position in the train (inference).
+10. **No Dolt or other database for now.** Revisit only if parallel work shows a
+    need for a store with many writers and queries.
+11. **Order.** tend is rewritten around steps before the new project (a typing
+    practice web app) starts. The owner first chose full parity with today's
+    suite as the bar, then reversed it: "rewrite them all! `tend` is a project
+    I literally started a week ago, we can rewrite the whole thing." The seven
+    specs still say what the built-in flows do; the old suite is not a bar to
+    pass first.
+12. **Test suite.** Rewritten in Go with the rewrite, replacing `dev/test.sh`.
+    The earlier plan, to split the Bash suite per spec first and move to Go
+    afterwards, is dropped.
+
+## Implied order (inference)
+
+1. tend: rewrite around steps and a flow file, with Go tests. Proposed as
+   change 261121-gapde.
+2. Grove: first settle what is claimed, a cycle or a change (the first open
+   question below). Then scheduling leaves merges and more than one piece of
+   work can be claimed.
+3. tend: parallel work and the merge train; the autonomous flow's new steps
+   (decompose a goal, check a proposal against decision 3, plan); the standing
+   agent. Each with its own tests.
+4. The typing app, as the first project in the autonomous mode.
+
+Found on the way, and independent of all of it: under rex, tend waits a full
+60 seconds before answering Claude's dialog for adding the run folder
+(`rex.go:137-146` at ed385ad). It wants a `bugfix` change of its own.
+
+## Open questions
+
+- Whether a cycle survives as an optional "build these together", or goes away.
+  This blocks step 2.
+- The flow file's format and what a step can express. A throwaway prototype was
+  offered and declined in favour of going straight to the rebuild.
+- Who runs the merge train. GitHub's merge queue needs CI to run on its
+  `merge_group` event and waits for every required check on the train's own
+  commit, so `tend/review` would have to be reported there too; whether it is
+  available to a repository owned by a personal account is not verified. The
+  alternative is tend running the train as a step, which means tend merges.
+- Where goals, pitches and discovered work are written down: GitHub issues or
+  Grove documents.
+- What a built pitch is: a throwaway to try, or the real change parked on an
+  unmerged branch.
+- When no person approves a proposal, who answers its open questions, and which
+  step judges decision 3b, the judged part of 3c, and whether work is needed for
+  an accepted outcome or is a new one (decision 4).
+- The standing agent: where it runs, how the owner reaches it, what it may
+  write, and how it recovers lost context.
+- Known ceiling carried over: agents run as the same OS user that holds the
+  bot's token, so a determined agent could post its own `tend/review` status.
+- Known ceiling, accepted for now: decisions 3b and 3c are judged on each
+  change against its own base. Two changes in flight that cross a boundary only
+  in combination are tested together by CI in the train but not judged
+  together. Judging every train position would slow the train to an agent's
+  pace. Revisit when a project holds real user data.
