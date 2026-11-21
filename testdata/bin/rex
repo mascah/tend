@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# rex stand-in. Sessions and blocks are lines of rex-sessions ("id label") and
+# rex-blocks ("session block label"). A block labelled with an agent's name is
+# that agent, sharing the Herdr stand-in's agent-, status- and pending- files
+# and its log lines, so the same turns happen. A prompt is the text sent, then
+# Enter. program_status reports status-<name> (idle when absent), with an
+# updated_at that each turn moves; "none" is no record, as at a dialog; a
+# working agent with a pending turn takes it when polled again. TRUST_DIALOG starts
+# agents at the trust dialog (TRUST_TEXT, its answer); TRUST_REFUSE has it refuse the first
+# answer, as Claude does keys sent before it takes focus, and report idle behind it;
+# REX_STALL leaves a prompt untaken and pending.
+set -euo pipefail
+s=$HERDR_STATE
+. "$(dirname "$0")/turn.sh"
+args=()
+for a in "$@"; do case $a in --autostart=false | --json | --focus=false | --trim | --split=right) ;; *) args+=("$a") ;; esac; done
+set -- "${args[@]}"
+printf 'rex %s\n' "$*" >>"$s/rexlog"
+touch "$s/rex-sessions" "$s/rex-blocks"
+arg() { local flag=$1; shift; while [ $# -gt 1 ]; do [ "$1" != "$flag" ] || { echo "$2"; return; }; shift; done; }
+name() { awk -v b="$(arg -b "$@")" '$2 == b { print $3 }' "$s/rex-blocks"; }
+bump() { echo $(($(cat "$s/updated-$1" 2>/dev/null || echo 0) + 1)) >"$s/updated-$1"; }
+case $1 in
+ls) jq -Rn '{sessions: [inputs | split(" ") | {session_id: .[0], label: .[1]}]}' <"$s/rex-sessions" ;;
+new)
+	id=session:$(($(wc -l <"$s/rex-sessions") + 1))
+	echo "$id $2" >>"$s/rex-sessions"
+	echo "$id $id-0 shell" >>"$s/rex-blocks"
+	jq -n --arg id "$id" '{session_id: $id, initial_windows: [{block_ids: [($id + "-0")]}]}' ;;
+split)
+	n=$(arg --label "$@") b=$(arg -s "$@")-$(($(wc -l <"$s/rex-blocks") + 1))
+	echo "$(arg -s "$@") $b $n" >>"$s/rex-blocks"
+	shift "$(($(printf '%s\n' "$@" | grep -nx -- -- | cut -d: -f1)))"
+	printf 'agent start %s --kind %s -- %s\n' "$n" "$1" "${*:2}" >>"$s/log"
+	touch "$s/agent-$n"
+	[ -z "${TRUST_DIALOG:-}" ] || { echo none >"$s/status-$n"; touch "$s/trust-$n"; }
+	[ -z "${TRUST_REFUSE:-}" ] || touch "$s/refuse-$n"
+	jq -n --arg b "$b" '{block_ids: [$b]}' ;;
+block)
+	case $2 in
+	ls) jq -Rn --arg s "$(arg -s "$@")" '{blocks: [inputs | split(" ") | select(.[0] == $s) | {block_id: .[1], label: .[2]}]}' <"$s/rex-blocks" ;;
+	close) grep -v " ${!#} " "$s/rex-blocks" >"$s/rb" || true; mv "$s/rb" "$s/rex-blocks" ;;
+	call)
+		n=$(name "$@")
+		case ${!#} in
+		modes) echo '{"screen":"alternate","modes":[{"name":"bracketed_paste","number":2004,"set":true}]}' ;;
+		program_status)
+			# A working agent is seen working once, then finishes its turn.
+			if [ "$(cat "$s/status-$n" 2>/dev/null)" = working ] && [ -f "$s/pending-$n" ] && [ -e "$s/seen-$n" ]; then
+				turn "$n" "$(cat "$s/pending-$n")"
+				rm "$s/pending-$n" "$s/status-$n" "$s/seen-$n"
+				bump "$n"
+			elif [ "$(cat "$s/status-$n" 2>/dev/null)" = working ]; then
+				touch "$s/seen-$n"
+			fi
+			st=$(cat "$s/status-$n" 2>/dev/null || echo idle)
+			if [ "$st" = none ]; then echo '{"records":[]}'; else
+				jq -n --arg st "$st" --arg u "$(cat "$s/updated-$n" 2>/dev/null || echo 0)" '{records: [{state: $st, updated_at: $u, app: "agent"}]}'
+			fi ;;
+		esac ;;
+	esac ;;
+send) n=$(name "$@"); printf '%s' "${!#}" | sed $'s/\e\\[20[01]~//g' >>"$s/typed-$n" ;;
+send-key)
+	n=$(name "$@")
+	if [ -e "$s/refuse-$n" ]; then
+		rm "$s/refuse-$n" "$s/status-$n"
+		bump "$n"
+	elif [ -e "$s/trust-$n" ]; then
+		rm "$s/trust-$n" "$s/status-$n"
+		bump "$n"
+	elif [ -f "$s/typed-$n" ]; then
+		text=$(cat "$s/typed-$n")
+		rm "$s/typed-$n"
+		printf 'agent prompt %s %s\n' "$n" "$text" >>"$s/log"
+		if [ -n "${REX_STALL:-}" ]; then printf '%s' "$text" >"$s/pending-$n"; exit 0; fi
+		turn "$n" "$text"
+		bump "$n"
+		[ -z "${block:-}" ] || echo blocked >"$s/status-$block"
+	fi ;;
+capture) [ ! -e "$s/trust-$(name "$@")" ] || echo "${TRUST_TEXT:-Yes, I trust this folder}" ;;
+esac

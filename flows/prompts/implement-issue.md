@@ -1,0 +1,1 @@
+Implement {named} in this repository, asking no one. Its title and description are the agreed scope: {scope} Build what it asks and no more, with tests where the project has them, and commit on this branch. Then write to {run}/implemented, for an independent reviewer, what you built, what you ran to check it, and anything the issue asks that you did not do and why.

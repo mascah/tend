@@ -9,8 +9,8 @@ Written 2026-11-21.
 
 ## 1. tend: run steps from a flow file
 
-Status: proposed as change 261121-gapde, in pull request #12. Not approved,
-not built.
+Status: change 261121-gapde, approved in pull request #12, built on branch
+`grove/261121-gapde-run-steps-from-a-flow-file`, waiting for review.
 
 tend is rewritten around steps and a flow file the project holds
 (`tend/flow.yaml`), with today's build and intake loops as built-in flows and

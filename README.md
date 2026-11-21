@@ -195,9 +195,11 @@ dev/fixture.sh ~/tmp/ledger
 bin/tend ~/tmp/ledger 261114-pr0t0
 ```
 
-`dev/test.sh` builds tend and runs the regressions: real Git and Grove, a
-stand-in for Herdr whose agents act at once. It starts no agent and needs no
-Grove checkout.
+`go test ./...` builds tend and runs its acceptance tests, in parallel:
+`tend_test.go` drives the binary with real Git and Grove and stand-ins in
+`testdata/bin` for Herdr, rex, `gh` and `curl`, whose agents act at once. It
+starts no agent and needs no Grove checkout, but needs `grove` and `jq` on
+`PATH`. Run one scenario by name with `go test -run 'TestTend/^publish$'`.
 
 ## How work reaches tend
 
@@ -252,6 +254,81 @@ notifies.
 | Is there a pull request, and its reviews? | `gh pr list --head <branch>` and the account's reviews by commit, on GitHub, every run. |
 
 A pane's state says a turn ended, never that the work is done.
+
+## Flows: the steps an attempt runs
+
+What an attempt does is a flow of steps. tend has two built in: `build`, the
+loop above (implement, review, one repair, publish, act on requested
+changes), and `propose`, which drafts a request. A project changes them with
+`tend/flow.yaml`, read from the target branch as origin holds it, never from
+the attempt's own branch, so an agent cannot change the flow it runs in. A
+flow named in the file replaces the built-in one of that name; one it does not
+name stays built in.
+
+`tend flow <repo>` prints the flows in effect, each headed by where it comes
+from. Saved as `tend/flow.yaml`, that text is a valid flow file that behaves
+the same, and a place to start editing.
+
+```yaml
+build:
+  start: implement
+  steps:
+    implement:
+      agent: claude
+      prompt: prompts/implement-{kind}.md
+      result: commit
+      next: {ok: review}
+    review:
+      agent: codex
+      prompt: prompts/review.md
+      result: verdict verdict-{head}.json
+      next: {success: check, failure: publish, actionable: repair}
+    check: # the project's own, its prompt in tend/prompts/check.md
+      agent: codex
+      prompt: prompts/check.md
+      result: verdict check-{head}.json
+      next: {success: publish}
+    repair:
+      continue: implement
+      prompt: prompts/repair.md
+      result: commit
+      limit: 1
+      next: {ok: review, spent: publish}
+    publish:
+      next: {ok: end, requested: request}
+    request:
+      continue: implement
+      prompt: prompts/request.md
+      result: commit or file reply-{review_id}
+      next: {ok: review}
+```
+
+A step can say:
+
+- `agent: claude` or `agent: codex`, for a fresh agent with tend's own
+  flags for that harness, or `continue: <step>`, for that step's agent and
+  conversation. A flow names no flag.
+- `prompt`: a file under `tend/` on the target branch, or else one of tend's
+  built-in prompts. Its `{branch}`, `{head}`, `{base}`, `{run}`, `{result}`,
+  `{notes}`, `{findings}` and the like are filled in.
+- `result`: `commit`, `file <name>`, `verdict <name>` (written in the run
+  folder, in the reviewer's JSON shape) or `commit or file <name>`. With none,
+  the turn ending is the result. Only verdicts named `verdict-{head}.json`
+  are published as reviews of the pull request.
+- `limit`: how many times the step is asked in an attempt.
+- `next`: where each outcome goes, to a step, `end` or `person`. Outcomes are
+  `ok`, a verdict's `success`, `failure` and `actionable`, and `spent` once
+  the limit is used. An outcome `next` does not name stops for a person.
+
+`publish` is tend's own: a flow places it and says only what follows it. A
+flow without it publishes nothing. tend refuses, exiting 3 before any agent
+starts, a file that is not YAML, holds a field it does not know, names a
+step, harness, prompt or outcome that does not exist, or loops with no
+limited step.
+
+Each step asked is recorded in the run folder (`<step>-asked`, a head a
+line), so a rerun after a kill waits for an agent still working, takes a
+result already there, and never asks a step twice for the same thing.
 
 ## What it asks of Grove
 
