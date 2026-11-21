@@ -184,7 +184,6 @@ here to confirm it passes; CI still checks `install.sh` only.
 
 ## Reconciliation
 
-Every task is done. The change spec's ADDED requirements become the maintained
-`flows` spec at archive. No maintained spec sentence was found that the
-rewrite cannot hold, and the attempts, review, publication, intake,
-work-items and terminals specs are unchanged.
+- flows: applied to `grove/specs/flows/spec.md`, a new maintained spec, with
+  every ADDED requirement copied in word for word. Its "Observed current
+  behavior" was what the work replaced, so none of it is kept.
