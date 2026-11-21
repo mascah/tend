@@ -645,27 +645,29 @@ func takeLock() {
 // Start an agent. A folder the harness has never seen gets its trust dialog,
 // Claude's per worktree and Codex's per repository, answered here, as is
 // Claude's dialog for adding tend's run folder with --add-dir. One may follow
-// another, so each is answered in turn. Codex's review of new or changed hooks
-// is never answered: a hook trusted runs outside the sandbox, and one in the
-// candidate is the implementer's to write. Herdr may call an agent at that
-// dialog ready, so the screen is read even when it does.
+// another, so each is answered in turn. Claude refuses keys that reach a dialog
+// before it takes focus, as typeahead, and puts it back at "No"; so tend pauses
+// before answering, and a dialog still on screen after an answer, even behind
+// an agent called ready, is answered again. Codex's review of new or changed
+// hooks is never answered: a hook trusted runs outside the sandbox, and one in
+// the candidate is the implementer's to write.
 // ponytail: trusts whatever repo the caller passed; the real tool should
 // answer only for repos the owner registered.
 func start(name, kind string, fresh bool, args ...string) string {
 	p, err := term.start(name, kind, fresh, args)
 	for range 3 {
 		screen := term.read(name)
-		if strings.Contains(screen, "Hooks can run outside the sandbox") {
-			stop("%s asks to review new or changed hooks, which run outside its sandbox once trusted; tend trusts none. Answer it in its pane, then run tend again", name)
-		}
-		if err == nil {
-			return p
-		}
 		switch {
+		case strings.Contains(screen, "Hooks can run outside the sandbox"):
+			stop("%s asks to review new or changed hooks, which run outside its sandbox once trusted; tend trusts none. Answer it in its pane, then run tend again", name)
 		case strings.Contains(screen, "Yes, I trust this folder"), strings.Contains(screen, "Yes, add it"):
+			time.Sleep(time.Second)
 			term.keys(name, "down", "enter")
 		case strings.Contains(screen, "Trust and continue"):
+			time.Sleep(time.Second)
 			term.keys(name, "enter")
+		case err == nil:
+			return p
 		default:
 			code := err.Error()
 			if code == "" {
@@ -679,7 +681,7 @@ func start(name, kind string, fresh bool, args ...string) string {
 			err = errors.New(why)
 		}
 	}
-	stop("%s did not start: %s", name, err)
+	stop("%s did not start: its startup dialog would not take tend's answer", name)
 	return p
 }
 
