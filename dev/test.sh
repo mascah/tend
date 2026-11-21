@@ -1184,9 +1184,11 @@ check "by choosing to trust it" grep -q '^rex send-key .* down enter' "$HERDR_ST
 
 scenario rex-add-dir
 project "$t/repo"
+SECONDS=0
 TRUST_DIALOG=1 TRUST_TEXT="Yes, add it" rexrun
 check "Claude's dialog for adding the run folder is answered" passed
 check "by choosing to add it" grep -q '^rex send-key .* down enter' "$HERDR_STATE/rexlog"
+check "without waiting out the agents' first reports" test "$SECONDS" -lt 60
 
 scenario rex-add-dir-refused
 project "$t/repo"

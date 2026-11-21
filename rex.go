@@ -139,7 +139,8 @@ func (r *rex) start(name, kind string, _ bool, args []string) (string, error) {
 		case "idle", "done":
 			return b, nil
 		}
-		if strings.Contains(strings.ToLower(r.read(name)), "trust") {
+		// A dialog start answers or stops at: no first report will come.
+		if screen := strings.ToLower(r.read(name)); strings.Contains(screen, "trust") || strings.Contains(screen, "yes, add it") {
 			return b, errors.New("agent_not_ready")
 		}
 	}
