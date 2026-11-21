@@ -8,7 +8,7 @@ behavior".
 A flow is a named set of steps that an attempt goes through once it has its
 branch and worktree. A step is an agent given a prompt, a result tend checks,
 and what each outcome of that result allows next. The flow file is
-`tend/flow.json` in the project.
+`tend/flow.yaml` in the project.
 
 ## ADDED Requirements
 
@@ -21,7 +21,7 @@ work-items specs say.
 
 #### Scenario: A project without a flow file
 
-- GIVEN a repository whose target branch holds no `tend/flow.json`, with one
+- GIVEN a repository whose target branch holds no `tend/flow.yaml`, with one
   approved cycle
 - WHEN the owner runs tend on the cycle
 - THEN the cycle is implemented, reviewed, repaired at most once and
@@ -29,7 +29,7 @@ work-items specs say.
 
 ### Requirement: A project's flow replaces the built-in one of its name
 
-Where the target branch holds `tend/flow.json`, the system shall run each flow
+Where the target branch holds `tend/flow.yaml`, the system shall run each flow
 that file names in place of the built-in flow of that name, and the built-in
 flow for a name it does not hold.
 
@@ -49,7 +49,7 @@ from the attempt's branch or worktree.
 
 #### Scenario: The implementer edits the flow
 
-- GIVEN an attempt whose implementer commits a `tend/flow.json` that drops the
+- GIVEN an attempt whose implementer commits a `tend/flow.yaml` that drops the
   `review` step
 - WHEN tend carries on the attempt
 - THEN the head is reviewed as the target's flow says, and the edit is part
@@ -172,7 +172,7 @@ and shall publish nothing in a flow that has no such step.
 
 ### Requirement: A flow that is not valid
 
-If the flow file is not JSON, holds a field tend does not know, names a step,
+If the flow file is not YAML, holds a field tend does not know, names a step,
 harness, prompt file or outcome that does not exist, or holds a loop no step
 of which has a limit, then the system shall stop with exit 3 before starting
 or prompting any agent, with one sentence naming the file and the fault.
@@ -182,7 +182,7 @@ or prompting any agent, with one sentence naming the file and the fault.
 - GIVEN a flow whose `review` gives `actionable` to `repair`, whose `repair`
   gives `ok` to `review`, and neither has a limit
 - WHEN the owner runs tend
-- THEN tend exits 3 saying `tend/flow.json` loops through `review` and
+- THEN tend exits 3 saying `tend/flow.yaml` loops through `review` and
   `repair` with no limit, and no agent is started
 
 ### Requirement: Print the flows in effect
@@ -196,7 +196,7 @@ say which each is.
 
 - GIVEN a repository with no flow file
 - WHEN the owner runs `tend flow <repo>` and saves what it prints as
-  `tend/flow.json`
+  `tend/flow.yaml`
 - THEN the file is valid, and attempts behave as before it was added
 
 ## Observed current behavior

@@ -54,10 +54,13 @@ and all of them in parallel.
 - Any change to Grove.
 - What the seven maintained specs say. The built-in flows keep their
   behaviour; where a sentence of theirs cannot hold, the implementer says so
-  and stops, as open question 9 says.
+  and stops, as decision 13 says.
 - How agents are started, their flags, and the dialogs tend answers
   (`grove/specs/terminals/spec.md`). A flow names a harness and nothing else
   about it.
+- The 60-second wait under rex before Claude's dialog for adding the run
+  folder is answered. It is wrong today and independent of this change;
+  bugfix change 261121-7a3cz fixes it.
 
 ## Decisions
 
@@ -80,58 +83,46 @@ document records.
    candidate. Both came from the review of the direction document, whose
    fixes the owner accepted ("ok with the rest", then "ok").
 
+5. The flow file is YAML, at `tend/flow.yaml`, with each prompt a file beside
+   it; tend takes the dependency that needs. The draft proposed JSON to keep
+   tend on the standard library alone. The owner: "No, we can use
+   dependencies, I never said tend was std lib only." Reason: the file is what
+   people read, review and protect, and YAML takes comments.
+
+The owner accepted the draft's other choices as written: "Agree with the rest
+of the calls".
+
+6. This is one change. The engine cannot be accepted without a flow to run,
+   and a tend that runs builds through the engine and intake through the old
+   code has two ways of doing everything.
+7. Both built-in flows move in this change, `build` and `propose`. A build is
+   a Grove cycle or a work item, with a person's requested changes.
+8. Claiming, the worktree, the lock, tidying, `watch` and `status` stay tend's
+   own and are not steps. A flow starts once the attempt has its branch and
+   worktree. Publishing is tend's own too, and a flow places it by name.
+9. A flow names an agent's harness, `claude` or `codex`, and cannot set its
+   flags. The flags are what keep an agent from pushing or opening a pull
+   request (`grove/specs/terminals/spec.md`, "How agents start"), so a flow
+   file must not be able to loosen them.
+10. A flow that can loop for ever is refused. Every loop must pass through a
+    step with a limit. Today's "one repair" is the repair step's limit of 1.
+11. A flow that is not valid exits 3, a person being needed, and starts or
+    prompts no agent.
+12. `dev/test.sh` is deleted in this change, once each of its scenarios has a
+    Go test of the same name or a reason in `implementation.md` for having
+    none. The four stand-ins (Herdr, rex, `gh`, `curl`) are kept as scripts
+    under `testdata/`, since they hold what a week of live runs taught; only
+    the scenarios are rewritten.
+13. The seven maintained specs are not modified. They describe the built-in
+    flows, including the names of run files such as `repair-asked`. If the
+    implementer finds a sentence the engine cannot keep, it blocks the task
+    with the sentence and the reason, and does not rewrite the spec.
+14. `tend flow` exists. Without it a project has nothing to start its file
+    from, and nobody can see which flow is in effect.
+
 ## Open questions
 
-This change was drafted without a round of questions, at the owner's request.
-Each choice the round would have asked is here with the answer the change is
-written to. None must be answered before review. Striking one means revising
-the task it names.
-
-1. **One change or several?** Written as one. The engine cannot be accepted
-   without a flow to run, and a tend that runs builds through the engine and
-   intake through the old code has two ways of doing everything. Decides
-   every task.
-2. **The file is JSON, at `tend/flow.json`, with each prompt a file beside
-   it.** JSON because tend is standard library only and Go's has no YAML or
-   TOML. Prompts are separate Markdown files because a prompt inside a JSON
-   string cannot be read or reviewed. The cost is that JSON takes no comments.
-   The other answer is YAML with one dependency, `gopkg.in/yaml.v3`, which
-   Grove already uses. Decides T-01.
-3. **Both built-in flows move in this change, `build` and `propose`.** A
-   build is a Grove cycle or a work item, with a person's requested changes.
-   Decides T-02 and T-03.
-4. **Claiming, the worktree, the lock, tidying, `watch` and `status` stay
-   tend's own and are not steps.** A flow starts once the attempt has its
-   branch and worktree. Publishing is tend's own too, and a flow places it by
-   name. Decides T-02.
-5. **A flow names an agent's harness, `claude` or `codex`, and cannot set its
-   flags.** The flags are what keep an agent from pushing or opening a pull
-   request (`grove/specs/terminals/spec.md`, "How agents start"), so a flow
-   file must not be able to loosen them. Decides T-01.
-6. **A flow that can loop for ever is refused.** Every loop must pass through
-   a step with a limit. Today's "one repair" is the repair step's limit of 1.
-   Decides T-01.
-7. **A flow that is not valid exits 3**, a person being needed, and starts or
-   prompts no agent. Decides T-01.
-8. **`dev/test.sh` is deleted in this change**, once each of its scenarios has
-   a Go test of the same name or a reason in `implementation.md` for having
-   none. The four stand-ins (Herdr, rex, `gh`, `curl`) are kept as scripts
-   under `testdata/`, since they hold what a week of live runs taught; only
-   the scenarios are rewritten. Decides T-05.
-9. **The seven maintained specs are not modified.** They describe the built-in
-   flows, including the names of run files such as `repair-asked`. If the
-   implementer finds a sentence the engine cannot keep, it blocks the task
-   with the sentence and the reason, and does not rewrite the spec. Decides
-   T-02 and T-03.
-10. **`tend flow` exists.** Without it a project has nothing to start its
-    file from, and nobody can see which flow is in effect. Decides T-04.
-11. **A 60-second stall under rex is left out, for a `bugfix` change of its
-    own.** `rex.go:137-146` at ed385ad returns early from an agent's start
-    only when the screen contains "trust"; Claude's dialog for adding the run
-    folder reads "Yes, add it", so tend waits the full 60 seconds before
-    answering it. Two scenarios, `rex-add-dir` and `rex-add-dir-refused`, are
-    251 of the suite's 398 seconds for this reason. It is wrong today and
-    independent of this change. Decides no task here.
+None.
 
 ## Related documents
 

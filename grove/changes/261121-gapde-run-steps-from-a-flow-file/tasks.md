@@ -1,18 +1,20 @@
 ## T-01 — The step engine and the flow file
 
-Result: tend can run a flow read from `tend/flow.json` on the target branch:
+Result: tend can run a flow read from `tend/flow.yaml` on the target branch:
 prompt each step once, check its result, follow its outcome, hold its limit,
 recover after a kill, and refuse a flow that is not valid.
 
 Files:
 - `flow.go`
 - `flow_test.go`
+- `go.mod`
+- `go.sum`
 
-Interfaces: the flow file `tend/flow.json` and its prompt files; the step
+Interfaces: the flow file `tend/flow.yaml` and its prompt files; the step
 record in an attempt's run folder.
 
-Constraints: standard library only. A flow names a harness and none of its
-flags.
+Constraints: the one new dependency is a YAML parser. A flow names a harness
+and none of its flags.
 
 Acceptance:
 - Each scenario of "The flow is read from the target branch", "A step prompts
@@ -30,7 +32,7 @@ directly is gone.
 Files:
 - `main.go`
 - `flow.go`
-- `flows/build.json`
+- `flows/build.yaml`
 - `flows/prompts/`
 
 Interfaces: the built-in flow `build`, with its step `publish`.
@@ -52,7 +54,7 @@ flow, and the code that ran that loop directly is gone.
 
 Files:
 - `main.go`
-- `flows/propose.json`
+- `flows/propose.yaml`
 - `flows/prompts/`
 
 Interfaces: the built-in flow `propose`.
@@ -98,4 +100,4 @@ Acceptance:
 - `go test ./...` passes, and CI runs it in place of `dev/test.sh`.
 - One scenario runs alone by name.
 - `dev/test.sh` is removed, and the README and the `context` line of
-  `grove.yaml` name the Go tests.
+  `grove.yaml` name the Go tests and no longer say standard library only.
