@@ -647,9 +647,21 @@ func reachInOrder(name string, s *step, r result, h, rec string) string {
 		return ""
 	}
 	isReq := reviewReq != nil && name == reqStep
-	left := func(a string) string {
+	// The build's implementation is asked whenever Git shows the branch
+	// unfinished, so an ask whose turn tend saw end leaves the record, which
+	// then holds only one that may still be in flight (killed, timed out).
+	implementing := flowName == "build" && name == fl.Start && r.commit
+	left := func(a string, seen bool) string {
+		if implementing && seen {
+			hs := asks(rec)
+			setAsks(rec, slices.Delete(hs, used[rec]-1, used[rec]))
+			used[rec]--
+		}
 		if flowName == "build" && r.commit {
 			if why := unbuilt(); why != "" {
+				if implementing && seen {
+					stop("%s", why)
+				}
 				stop("%s. Look at %s's pane, then finish it and run tend again, or delete %s to have %s asked once more", why, agent, rec, name)
 			}
 		}
@@ -678,16 +690,17 @@ func reachInOrder(name string, s *step, r result, h, rec string) string {
 	if hs := asks(rec); used[rec] < len(hs) {
 		a := hs[used[rec]]
 		used[rec]++
-		if term.status(agent) == "working" {
+		seen := term.status(agent) == "working"
+		if seen {
 			text1, next1 := doing(name, agent)
 			stage("working", text1, next1)
 			say("%s is still working on an earlier prompt; waiting for it, not prompting again", agent)
 			await(agent)
 		}
-		return left(a)
+		return left(a, seen)
 	}
 	if f != "" && nonempty(f) {
-		return left(h)
+		return left(h, false)
 	}
 	// The implementation of a branch that already holds a finished candidate
 	// is never asked, judged from Git.
@@ -699,5 +712,5 @@ func reachInOrder(name string, s *step, r result, h, rec string) string {
 	}
 	promptStep(name, rec)
 	used[rec]++
-	return left(h)
+	return left(h, true)
 }

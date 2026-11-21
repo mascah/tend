@@ -71,7 +71,7 @@ func newSc(t *testing.T) *sc {
 	return s
 }
 
-var dropped = regexp.MustCompile(`^(TEND_|HERDR_|REX_|JIRA_|GIT_|GH_|WATCH_|NO_NOTES|REVIEW|IMPL_|REPAIR_FAIL|REV_FAIL|BLOCK_AFTER_BUILD|CREATE_LOST|REQUEST_|PROPOSE_FAIL|FOLLOW_FAIL|DECLINE|EDIT_FAIL|CAP|TRUST_|DRAFT_FAIL|COMMENT_FAIL|STRAY|CHECK|TIMEOUT_MS|KEEP)`)
+var dropped = regexp.MustCompile(`^(TEND_|HERDR_|REX_|JIRA_|GIT_|GH_|WATCH_|NO_NOTES|REVIEW|IMPL_|REPAIR_FAIL|REV_FAIL|BLOCK_AFTER_BUILD|CREATE_LOST|REQUEST_|PROPOSE_FAIL|FOLLOW_FAIL|DECLINE|EDIT_FAIL|CAP|TRUST_|DRAFT_FAIL|COMMENT_FAIL|STRAY|CHECK|UNFINISHED|TIMEOUT_MS|KEEP)`)
 
 // The environment every command of the scenario gets, then extra ("K=V").
 func (s *sc) env(extra ...string) []string {
@@ -1105,6 +1105,15 @@ var scenarios = []scenario{
 		s.agent("idle", "impl")
 		r = s.run("REVIEW=repairable")
 		s.check("once unblocked, the repair is asked and passes", r.passed())
+	}},
+	{"unfinished", func(s *sc) {
+		s.project("main", false)
+		r := s.run("UNFINISHED=1")
+		s.check("an implementer turn that leaves the cycle unbuilt stops for a person", r.code == 3)
+		s.check("naming what is missing, with no record to delete", r.said(`261015-c0000`) && !r.said(`delete`))
+		r = s.run()
+		s.check("the rerun asks the implementation again and passes", r.passed())
+		s.check("prompting it twice in all", s.prompts("/grove-implement") == 2)
 	}},
 	{"survivor-implementing", func(s *sc) {
 		s.project("main", false)

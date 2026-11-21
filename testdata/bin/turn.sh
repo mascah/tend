@@ -3,6 +3,10 @@ turn() { # name text
 	impl-*)
 		case $2 in
 		/grove-implement*)
+			if [ -n "${UNFINISHED:-}" ]; then # a turn that ends with the cycle not built
+				echo part >>a.txt && git commit -qam part
+				return
+			fi
 			for d in grove/changes/*/; do
 				[ "$d" = grove/changes/archive/ ] || grove archive "$(basename "$d" | cut -d- -f1-2)" >/dev/null 2>&1
 			done

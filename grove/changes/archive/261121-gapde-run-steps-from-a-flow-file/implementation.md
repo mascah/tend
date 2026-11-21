@@ -30,7 +30,7 @@ the stand-ins.
 Checks run on 2026-11-21: `gofmt -l .` and `go vet ./...` clean;
 `go test ./...` passed in 43.8 s, every `TestTend` and `TestFlows` subtest.
 
-Also changed: `testdata/bin/turn.sh` — gives a project step `check-*` its
+Also changed: `testdata/bin/turn.sh` — adds `UNFINISHED`, an implementer turn that builds nothing, gives a project step `check-*` its
 turn (`CHECK=success|failure|none`), and adds `REVIEW=actionable` for a
 reviewer that fails every head as actionable.
 Also changed: `testdata/bin/herdr` — adds `CHECK_FAIL`, and while
@@ -45,15 +45,24 @@ Check: a prompt the terminal refused (an error code containing neither
 the step's record, so a rerun asks it again. A timed-out or stalled prompt
 keeps it, counting as possibly delivered, as the attempts spec says.
 Check: a step recorded as asked, with no result and its agent not working,
-now stops on every rerun for every step, the implementer's included: "Look
-at its pane ... or delete `<record>` to have it asked once more". Before,
-tend would have prompted the implementer again. The flows spec requires
-this, and so does the attempts spec's "an agent still working ... not
-prompted again". The old `IMPL_SLEEP` stand-in left the agent idle while
-tend was killed, and the new engine rightly stopped on it; it was the only
+stops on every rerun until a person supplies the result or deletes the
+record, as the flows spec says. This now includes a reviewer whose prompt
+timed out and which went idle with no verdict. Old tend prompted it again,
+but the attempts spec counts a timed-out prompt as possibly delivered and
+never resent. The built-in `implement` step is the exception, because the
+attempts spec says the implementation is asked whenever Git shows the branch
+unfinished. An implement ask whose turn tend saw end leaves its record, so a
+rerun asks it again, as old tend did, and only an ask that may still be in
+flight (killed, timed out, stalled) stops. `TestTend/unfinished` checks this:
+an implementer turn that leaves the cycle unbuilt stops naming what is
+missing, and the rerun prompts it again and passes. That scenario failed on
+the first build of this branch, which stopped on every rerun. The old
+`IMPL_SLEEP` stand-in left the agent idle while tend was killed mid-turn,
+which the new engine rightly treats as possibly delivered. It was the only
 check in `dev/test.sh` that failed against the rewrite (`lock: after the
 holder is killed, tend takes over`), and the stand-in now models the
-working agent.
+working agent. A limit on a project's start step therefore counts only asks
+in flight.
 Check: a step's fields are `agent` (`claude` or `codex`) or `continue`
 (a step), `prompt`, `result`, `limit` and `next`. A result is `commit`,
 `file <name>`, `verdict <name>` or `commit or file <name>`, and with none the
