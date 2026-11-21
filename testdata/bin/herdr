@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Herdr stand-in, its agents taking their turns from turn.sh.
+# IMPL_FAIL, REPAIR_FAIL and REV_FAIL fail that prompt with the code they hold,
+# leaving its turn pending; an agent whose status file says working then takes
+# that turn when waited for, as one that outlived tend would. IMPL_SLEEP holds
+# the implementer's prompt that long. As Herdr does, a blocked agent refuses a
+# prompt.
+set -euo pipefail
+s=$HERDR_STATE
+printf '%s\n' "$*" >>"$s/log"
+said() { jq -n --arg st "$1" '{result: {agent: {agent_status: $st, pane_id: "p9"}}}'; }
+. "$(dirname "$0")/turn.sh"
+case "$1 $2" in
+"worktree create")
+	shift 2
+	while [ $# -gt 0 ]; do
+		case $1 in --cwd) repo=$2 ;; --branch) b=$2 ;; --base) base=$2 ;; esac
+		shift
+	done
+	git -C "$repo" worktree add -q -b "$b" "$s/wt-$b" "$base" >/dev/null 2>&1
+	jq -n --arg p "$s/wt-$b" '{result: {worktree: {path: $p}, workspace: {workspace_id: "w1"}}}' ;;
+"worktree list") echo '{"result":{"worktrees":[]}}' ;;
+"worktree open") echo '{"result":{"workspace":{"workspace_id":"w1"}}}' ;;
+"pane list") echo '{"result":{"panes":[{"pane_id":"p0","agent":null}]}}' ;;
+"pane split") echo '{"result":{"pane":{"pane_id":"p1"}}}' ;;
+"agent start") touch "$s/agent-$3" ;;
+"agent get")
+	[ -f "$s/agent-$3" ] || { echo '{"error":{"code":"agent_not_found"}}'; exit 1; }
+	said "$(cat "$s/status-$3" 2>/dev/null || echo idle)" ;;
+"agent wait")
+	if [ "$(cat "$s/status-$3" 2>/dev/null)" = working ] && [ -f "$s/pending-$3" ]; then
+		turn "$3" "$(cat "$s/pending-$3")"
+		rm "$s/pending-$3" "$s/status-$3"
+	fi
+	said "$(cat "$s/status-$3" 2>/dev/null || echo idle)" ;;
+"agent prompt")
+	case $3 in
+	impl-*) case $4 in /grove-implement* | "Implement GitHub issue"* | "Implement Jira issue"*) fail=${IMPL_FAIL:-} ;; *"requested changes at commit"*) fail=${REQUEST_FAIL:-} ;; *) fail=${REPAIR_FAIL:-} ;; esac ;;
+	prop-*) case $4 in /grove-propose*) fail=${PROPOSE_FAIL:-} ;; *) fail=${FOLLOW_FAIL:-} ;; esac ;;
+	*) fail=${REV_FAIL:-} ;;
+	esac
+	if [ "$(cat "$s/status-$3" 2>/dev/null)" = blocked ]; then
+		echo '{"error":{"code":"agent_blocked"}}'
+		exit 1
+	fi
+	if [ -n "$fail" ]; then
+		printf '%s' "$4" >"$s/pending-$3"
+		jq -n --arg c "$fail" '{error: {code: $c}}'
+		exit 1
+	fi
+	case $3 in impl-*) [ -z "${IMPL_SLEEP:-}" ] || { echo $$ >"$s/sleeper"; exec sleep "$IMPL_SLEEP"; } ;; esac
+	turn "$3" "$4"
+	said "$(cat "$s/status-$3" 2>/dev/null || echo idle)"
+	[ -z "${block:-}" ] || echo blocked >"$s/status-$block" ;;
+*) echo '{"result":{}}' ;;
+esac

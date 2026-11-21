@@ -13,7 +13,7 @@ agents:
 schema: default
 # Facts about this project given to every skill: the language, how tests
 # run, anything an agent cannot read from the code. Keep it short.
-context: "Go 1.26, standard library only; build with `go build -o bin/tend .`; the acceptance suite is `dev/test.sh` (drives the binary through its CLI with stand-ins for herdr, rex, gh and curl on PATH); tend shells out to git, gh, grove, herdr, rex and curl."
+context: "Go 1.26; build with `go build -o bin/tend .`; the acceptance tests are `go test ./...` (tend_test.go drives the built binary through its CLI with stand-ins in testdata/bin for herdr, rex, gh and curl on PATH; run one with `go test -run 'TestTend/^<scenario>$'`); tend shells out to git, gh, grove, herdr, rex and curl."
 # Extra lines for Grove's instructions: under documents, for one kind of
 # document, given when it is written; under skills, for one skill, given
 # with its guide. Such as

@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Jira stand-in, reached through curl. Issues are a JSON array in jira, each
+# {key, fields: {summary, description, labels, status}, comments: [{body}]}.
+# Search and comments come two to a page, so paging is always exercised. The
+# config on standard input must carry the credentials; the arguments never.
+# COMMENT_FAIL fails the first comment post, as when Jira is briefly down.
+set -euo pipefail
+s=$HERDR_STATE
+cfg=$(cat)
+grep -q '^user = "' <<<"$cfg" || { echo "no credentials on stdin" >&2; exit 2; }
+printf 'curl %s\n' "$*" >>"$s/log"
+method=GET data= url=${!#}
+while [ $# -gt 1 ]; do case $1 in -X) method=$2 ;; --data-binary) data=${2#@} ;; esac; shift; done
+path=${url#*://*/} path=/${path%%\?*} query=${url#*\?}
+[ "$query" != "$url" ] || query=
+q() { local v; v=$(tr '&' '\n' <<<"$query" | sed -n "s/^$1=//p"); v=${v//+/ }; printf '%b' "${v//%/\\x}"; }
+issue='.[] | select(.key == $k)'
+case "$method $path" in
+"GET /rest/api/3/search/jql")
+	p=$(q jql | sed -n 's/^project = "\([^"]*\)".*/\1/p') at=$(q nextPageToken)
+	jq --arg p "$p" --argjson at "${at:-0}" '[.[] | select((.key | startswith($p + "-")) and (.fields.labels | index("tend")) and .fields.status.statusCategory.key != "done")]
+		| {issues: (.[$at:$at + 2] | map(del(.comments))), isLast: (length <= $at + 2)} + (if length > $at + 2 then {nextPageToken: ($at + 2 | tostring)} else {} end)' "$s/jira" ;;
+"GET /rest/api/3/issue/"*/comment)
+	k=${path#/rest/api/3/issue/} k=${k%/comment} at=$(q startAt)
+	jq --arg k "$k" --argjson at "${at:-0}" "$issue"' | .comments | {comments: .[$at:$at + 2], startAt: $at, maxResults: 2, total: length}' "$s/jira" ;;
+"POST /rest/api/3/issue/"*/comment)
+	if [ -n "${COMMENT_FAIL:-}" ] && [ ! -e "$s/comment-failed" ]; then touch "$s/comment-failed"; echo '{"errorMessages":["down"]}'; exit 22; fi
+	k=${path#/rest/api/3/issue/} k=${k%/comment}
+	jq --arg k "$k" --slurpfile b "$data" 'map(if .key == $k then .comments += [$b[0]] else . end)' "$s/jira" >"$s/j.new" && mv "$s/j.new" "$s/jira"
+	echo '{}' ;;
+"PUT /rest/api/3/issue/"*)
+	k=${path#/rest/api/3/issue/}
+	jq --arg k "$k" --slurpfile b "$data" 'map(if .key == $k then .fields.labels -= [$b[0].update.labels[].remove] else . end)' "$s/jira" >"$s/j.new" && mv "$s/j.new" "$s/jira" ;;
+"GET /rest/api/3/issue/"*)
+	k=${path#/rest/api/3/issue/}
+	jq -e --arg k "$k" "$issue"' | del(.comments)' "$s/jira" || { echo '{"errorMessages":["Issue does not exist"]}'; exit 22; } ;;
+esac

@@ -13,8 +13,8 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # On macOS, where tend runs: dev/test.sh drives the binary with real Git and
-  # Grove and stand-ins for herdr, rex, gh and curl.
+  # On macOS, where tend runs: the Go tests drive the binary with real Git and
+  # Grove and stand-ins in testdata/bin for herdr, rex, gh and curl.
   check:
     runs-on: macos-latest
     timeout-minutes: 15
@@ -31,5 +31,5 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
       - run: go vet ./...
-      - run: dev/test.sh
+      - run: go test ./...
       - run: brew install shellcheck && shellcheck install.sh

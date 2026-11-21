@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# GitHub stand-in. "auth token --user A" gives tok-A, and every write records the
+# account whose token made it. One PR per head branch: pr-<branch> holds its body
+# and pr-<branch>.by its author. Reviews go to reviews (a JSON array, read back
+# through the caller's --jq), statuses to statuses as "<sha> <state> <account>".
+# CREATE_LOST opens the PR and then fails, as when GitHub acted but tend never
+# heard back. pr-<branch>.merged marks it merged; its head is origin's branch.
+set -euo pipefail
+s=$HERDR_STATE
+printf 'gh %s\n' "$*" >>"$s/log"
+by=${GH_TOKEN:-owner} by=${by#tok-}
+arg() { local flag=$1; shift; while [ $# -gt 1 ]; do [ "$1" != "$flag" ] || { echo "$2"; return; }; shift; done; }
+case "$1 $2" in
+"auth token") echo "tok-$(arg --user "$@")" ;;
+"pr list")
+	# Every PR, then narrowed as the caller asks: by head branch in any state, by
+	# author while open, or every open one.
+	for w in "$s"/pr-*.where; do
+		[ -e "$w" ] || continue
+		k=${w%.where}
+		[ -e "$k.merged" ] && st=MERGED || st=OPEN
+		rd=$(jq -r --arg h "$(git -C "$(sed -n 2p "$w")" rev-parse "$(sed -n 1p "$w")" 2>/dev/null)" 'if any(.[]?; .state == "CHANGES_REQUESTED" and .commit_id == $h) then "CHANGES_REQUESTED" else "" end' "$s/reviews" 2>/dev/null || true)
+		jq -n --arg b "$(sed -n 1p "$w")" --arg by "$(cat "$k.by")" --arg st "$st" --arg t "$(cat "$k.title" 2>/dev/null)" --arg u "https://example.test/pr/${k##*/pr-}" --arg rd "$rd" \
+			'{headRefName: $b, author: $by, state: $st, title: $t, url: $u, number: 1, reviewDecision: $rd}'
+	done | jq -s --arg h "$(arg --head "$@")" --arg a "$(arg --author "$@")" --arg st "$(arg --state "$@")" '
+		if $h != "" then map(select(.headRefName == $h)) elif $a != "" then map(select(.author == $a and .state == "OPEN")) elif $st == "all" then . else map(select(.state == "OPEN")) end' |
+		if q=$(arg --jq "$@") && [ -n "$q" ]; then jq -r "$q"; else cat; fi ;;
+"repo view") case "$*" in *defaultBranchRef*) echo main ;; *) echo o/r ;; esac ;;
+"issue list") jq '[.[] | select(.state == "OPEN" and (.labels | index("tend")))]' "$s/issues" | jq -r "$(arg --jq "$@")" ;;
+"issue view") jq --argjson n "$3" '.[] | select(.number == $n) | {title, body, url, state, labels: (.labels | map({name: .}))}' "$s/issues" ;;
+"issue comment")
+	[ -f "$s/comments" ] || echo '[]' >"$s/comments"
+	jq --argjson n "$3" --arg by "$by" --rawfile b /dev/stdin '. + [{issue: $n, body: $b, user: {login: $by}}]' "$s/comments" >"$s/c.new" && mv "$s/c.new" "$s/comments" ;;
+"issue edit")
+	[ -z "${EDIT_FAIL:-}" ] || [ -e "$s/edit-failed" ] || { touch "$s/edit-failed"; exit 1; }
+	jq --argjson n "$3" --arg l "$(arg --remove-label "$@")" 'map(if .number == $n then .labels -= [$l] else . end)' "$s/issues" >"$s/i.new" && mv "$s/i.new" "$s/issues" ;;
+"pr create")
+	b=$(arg --head "$@")
+	cat >"$s/pr-${b//\//_}"
+	echo "$by" >"$s/pr-${b//\//_}.by"
+	printf '%s\n%s\n' "$b" "$(git remote get-url origin)" >"$s/pr-${b//\//_}.where"
+	arg --title "$@" >"$s/pr-${b//\//_}.title"
+	[ -z "${CREATE_LOST:-}" ] || exit 1
+	echo "https://example.test/pr/${b//\//_}" ;;
+"pr ready")
+	[ -z "${DRAFT_FAIL:-}" ] || exit 1
+	if [ "${4:-}" = --undo ]; then touch "$s/pr-${3##*/}.draft"; else rm -f "$s/pr-${3##*/}.draft"; fi ;;
+"pr edit")
+	cat >"$s/pr-${3##*/}"
+	arg --title "$@" >"$s/pr-${3##*/}.title" ;;
+"pr comment")
+	[ -f "$s/comments" ] || echo '[]' >"$s/comments"
+	jq --arg n "${3##*/}" --arg by "$by" --rawfile b /dev/stdin '. + [{issue: $n, body: $b, user: {login: $by}}]' "$s/comments" >"$s/c.new" && mv "$s/c.new" "$s/comments" ;;
+"pr view")
+	k=$s/pr-${3##*/}
+	[ -f "$s/reviews" ] || echo '[]' >"$s/reviews"
+	{ read -r b; read -r o; } <"$k.where"
+	[ -e "$k.merged" ] && st=MERGED || st=OPEN
+	[ -e "$k.draft" ] && dr=true || dr=false
+	jq --arg st "$st" --argjson dr "$dr" --arg h "$(git -C "$o" rev-parse "$b" 2>/dev/null)" --arg b "$b" --rawfile body "$k" --arg t "$(cat "$k.title" 2>/dev/null)" \
+		'{state: $st, isDraft: $dr, headRefOid: $h, headRefName: $b, title: $t, body: $body, reviews: map({id: .node_id, state, commit: {oid: .commit_id}, author: {login: .user.login}})}' "$s/reviews" |
+		if q=$(arg --jq "$@") && [ -n "$q" ]; then jq -r "$q"; else cat; fi ;;
+api*)
+	[ -f "$s/reviews" ] || echo '[]' >"$s/reviews"
+	case $2 in
+	*/issues/*/comments)
+		[ -f "$s/comments" ] || echo '[]' >"$s/comments"
+		n=${2%/comments} n=${n##*/}
+		jq --arg n "$n" '[.[] | select((.issue | tostring) == $n)]' "$s/comments" | jq -r "$(arg --jq "$@")" ;;
+	*/reviews/*/comments)
+		id=${2%/comments} id=${id##*/}
+		jq --argjson id "$id" '[.[] | select(.id == $id)][0].comments // []' "$s/reviews" | jq -r "$(arg --jq "$@")" ;;
+	*/reviews)
+		if [ "${3:-}" = --input ]; then
+			jq --arg by "$by" --slurpfile r /dev/stdin '. + [$r[0] + {id: (length + 1), state: "COMMENTED", user: {login: $by}}]' "$s/reviews" >"$s/reviews.new" && mv "$s/reviews.new" "$s/reviews"
+		else
+			jq -r "$(arg --jq "$@")" "$s/reviews"
+		fi ;;
+	*/statuses/*) echo "${2##*/} $(printf '%s\n' "$@" | sed -n 's/^state=//p') $by" >>"$s/statuses" ;;
+	esac ;;
+esac

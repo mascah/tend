@@ -195,9 +195,11 @@ dev/fixture.sh ~/tmp/ledger
 bin/tend ~/tmp/ledger 261114-pr0t0
 ```
 
-`dev/test.sh` builds tend and runs the regressions: real Git and Grove, a
-stand-in for Herdr whose agents act at once. It starts no agent and needs no
-Grove checkout.
+`go test ./...` builds tend and runs its acceptance tests, in parallel:
+`tend_test.go` drives the binary with real Git and Grove and stand-ins in
+`testdata/bin` for Herdr, rex, `gh` and `curl`, whose agents act at once. It
+starts no agent and needs no Grove checkout, but needs `grove` and `jq` on
+`PATH`. Run one scenario by name with `go test -run 'TestTend/^publish$'`.
 
 ## How work reaches tend
 
