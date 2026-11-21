@@ -30,7 +30,7 @@ the stand-ins.
 Checks run on 2026-11-21: `gofmt -l .` and `go vet ./...` clean;
 `go test ./...` passed in 43.8 s, every `TestTend` and `TestFlows` subtest.
 
-Also changed: `testdata/bin/turn.sh` — adds `UNFINISHED`, an implementer turn that builds nothing, gives a project step `check-*` its
+Also changed: `testdata/bin/turn.sh` — adds `UNFINISHED`, an implementer turn that builds nothing, and `edit-*`, a project step that commits; lets the reviewer write a verdict of any `<name>-<head>.json`; gives a project step `check-*` its
 turn (`CHECK=success|failure|none`), and adds `REVIEW=actionable` for a
 reviewer that fails every head as actionable.
 Also changed: `testdata/bin/herdr` — adds `CHECK_FAIL`, and while
@@ -61,8 +61,9 @@ the first build of this branch, which stopped on every rerun. The old
 which the new engine rightly treats as possibly delivered. It was the only
 check in `dev/test.sh` that failed against the rewrite (`lock: after the
 holder is killed, tend takes over`), and the stand-in now models the
-working agent. A limit on a project's start step therefore counts only asks
-in flight.
+working agent. A limit counts every ask in the attempt: a finished
+implement ask moves to `implement-done`, and the asks of every review's
+`request-<id>` record count together for the request step's.
 Check: a step's fields are `agent` (`claude` or `codex`) or `continue`
 (a step), `prompt`, `result`, `limit` and `next`. A result is `commit`,
 `file <name>`, `verdict <name>` or `commit or file <name>`, and with none the
@@ -89,6 +90,26 @@ implementer (`impl-…`, or `prop-…` when proposing), a step continuing
 once its result is checked. In `build`, a step whose result is a verdict or
 a file only must leave HEAD and the tree as they were, or tend stops saying
 the agent changed the checkout.
+
+Check: an outside review by Codex found six faults in the first build,
+each now fixed with a scenario that failed before the fix.
+`TestFlows/flow-reviewer-writing`: a reviewer still writing its verdict on
+a rerun is waited for before its file is judged, where a half-written file
+was set aside and the reviewer prompted twice. `TestFlows/flow-cached-loop`:
+a step reached again at the same head with nothing asked or taken since
+stops for a person ("build reached implement again at … with nothing
+changed"). Before, a limited loop that met only cached results never reached
+its limit and held the lock for ever. `TestFlows/flow-continue-commit`: a
+step continuing a fresh step that committed goes to that step's agent,
+named for the head it was asked at, not a new one.
+`TestFlows/flow-verdict-name`: the printed verdict is the newest. Only
+`verdict-{head}.json` verdicts are published, as the README now says.
+`TestFlows/flow-start-limit`: limits count over the attempt, as above.
+`TestFlows/flow-plan-first`: whether the candidate is finished is checked
+when the walk goes to a step that does not commit, to `publish` or to the
+end, not after every commit step. So a step that commits before the
+implementation no longer stops the build, and a flow of `implement` then
+`publish` cannot publish an unfinished candidate.
 
 ### T-02 — The build flow is built in
 

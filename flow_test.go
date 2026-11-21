@@ -268,6 +268,93 @@ var flowScenarios = []scenario{
 		p = s.tendIn(nil, "flow", s.repo)
 		s.check("tend flow then says the flows are the project's", strings.Contains(p.out, "# build: tend/flow.yaml on origin/main"))
 	}},
+	{"flow-reviewer-writing", func(s *sc) { // review finding 1
+		s.project("main", false)
+		r := s.run("REV_FAIL=timeout")
+		s.check("a reviewer prompt that timed out stops", r.code == 3)
+		s.write(s.runDir()+"/verdict-"+s.head()+".json", `{"head": "`)
+		s.agent("working", "rev-")
+		r = s.run()
+		s.check("the rerun waits for the reviewer writing its verdict and passes", r.passed())
+		s.check("prompting it once in all", s.reviews() == 1)
+		s.check("and setting nothing aside", glob(s.runDir()+"/*.rejected-*") == s.runDir()+"/*.rejected-*")
+	}},
+	{"flow-cached-loop", func(s *sc) { // review finding 2
+		s.project("main", false)
+		s.commit("Back to the implementer", map[string]string{"tend/flow.yaml": buildFlow(s.t,
+			"        failure: publish\n", "        failure: implement\n",
+			"      result: commit\n      next:\n        ok: review\n    review:", "      result: commit\n      limit: 1\n      next:\n        ok: review\n        spent: end\n    review:")})
+		r := s.run("REVIEW=decision")
+		s.check("a loop that only meets cached results stops for a person", r.code == 3 && r.said(`build reached implement again at [0-9a-f]{7} with nothing changed`))
+	}},
+	{"flow-continue-commit", func(s *sc) { // review finding 3
+		s.project("main", false)
+		s.commit("Edit, then tidy", map[string]string{
+			"tend/flow.yaml": buildFlow(s.t, "      next:\n        ok: review\n    review:", `      next:
+        ok: edit
+    edit:
+      agent: claude
+      prompt: prompts/edit.md
+      result: commit
+      next:
+        ok: tidy
+    tidy:
+      continue: edit
+      prompt: prompts/tidy.md
+      result: commit
+      next:
+        ok: review
+    review:`),
+			"tend/prompts/edit.md": "Edit it.\n",
+			"tend/prompts/tidy.md": "Tidy it.\n",
+		})
+		r := s.run()
+		s.check("a flow continuing a step that committed passes", r.passed())
+		s.check("one edit agent is started", s.count(s.log(), `^agent start edit-`) == 1)
+		s.check("and tidy goes to it", s.count(s.log(), `^agent prompt edit-`) == 2 && sameAgent(s.log(), `(?m)^agent prompt (edit-[0-9a-f]+) `))
+	}},
+	{"flow-verdict-name", func(s *sc) { // review finding 4
+		s.project("main", false)
+		s.commit("Name the verdict", map[string]string{"tend/flow.yaml": buildFlow(s.t, "verdict verdict-{head}.json", "verdict review-{head}.json")})
+		r := s.run("REVIEW=repairable")
+		s.check("the printed verdict is the repaired head's", r.passed())
+	}},
+	{"flow-start-limit", func(s *sc) { // review finding 5
+		s.project("main", false)
+		s.commit("Implement once", map[string]string{"tend/flow.yaml": buildFlow(s.t, "      result: commit\n      next:\n        ok: review\n    review:", "      result: commit\n      limit: 1\n      next:\n        ok: review\n    review:")})
+		r := s.run("UNFINISHED=1")
+		s.check("an unfinished implementation stops", r.code == 3)
+		r = s.run()
+		s.check("and at its limit is not asked again", r.code == 3 && r.said(`implement was asked 1 times, its limit`) && s.prompts("/grove-implement") == 1)
+	}},
+	{"flow-plan-first", func(s *sc) { // review finding 6
+		s.project("main", false)
+		s.commit("Plan first", map[string]string{
+			"tend/flow.yaml": buildFlow(s.t, "  start: implement\n", "  start: plan\n", "  steps:\n", `  steps:
+    plan:
+      agent: claude
+      prompt: prompts/plan.md
+      result: commit
+      next:
+        ok: implement
+`, "    implement:\n      agent: claude\n", "    implement:\n      continue: plan\n"),
+			"tend/prompts/plan.md": "Plan it.\n",
+		})
+		r := s.run()
+		s.check("a step that commits before the implementation does not stop the build", r.passed())
+		s.check("plan and implement are each asked once", s.prompts("Plan it.") == 1 && s.prompts("/grove-implement") == 1)
+	}},
+}
+
+// Whether every match of re's first group in text names the same agent.
+func sameAgent(text, re string) bool {
+	m := regexp.MustCompile(re).FindAllStringSubmatch(text, -1)
+	for _, x := range m {
+		if x[1] != m[0][1] {
+			return false
+		}
+	}
+	return len(m) > 0
 }
 
 func TestFlows(t *testing.T) {

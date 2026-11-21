@@ -48,8 +48,8 @@ turn() { # name text
 		esac ;;
 	rev-*)
 		local v h
-		v=$(grep -oE '[^ ]*verdict-[0-9a-f]{40}\.json' <<<"$2" | head -1)
-		h=${v##*verdict-} h=${h%.json}
+		v=$(grep -oE '[^ ]*/[a-z]+-[0-9a-f]{40}\.json' <<<"$2" | head -1)
+		h=${v##*-} h=${h%.json}
 		case ${REVIEW:-success} in
 		success) jq -n --arg h "$h" '{head: $h, conclusion: "success", actionable: false, summary: "ok"}' ;;
 		noconclusion) jq -n --arg h "$h" '{head: $h, actionable: false, summary: "ok"}' ;;
@@ -63,6 +63,8 @@ turn() { # name text
 				jq -n --arg h "$h" '{head: $h, conclusion: "failure", actionable: true, summary: "a.txt:1 lacks the fix."}'
 			fi ;;
 		esac >"$v" ;;
+	edit-*) # a project's own step that commits
+		echo "edit: $2" >>a.txt && git commit -qam edit ;;
 	check-*) # a project's own step: the verdict its prompt names, shaped by $CHECK; none writes nothing
 		local v h
 		v=$(grep -oE '[^ ]*check-[0-9a-f]{40}\.json' <<<"$2" | head -1)

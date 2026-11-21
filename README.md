@@ -313,7 +313,8 @@ A step can say:
   `{notes}`, `{findings}` and the like are filled in.
 - `result`: `commit`, `file <name>`, `verdict <name>` (written in the run
   folder, in the reviewer's JSON shape) or `commit or file <name>`. With none,
-  the turn ending is the result.
+  the turn ending is the result. Only verdicts named `verdict-{head}.json`
+  are published as reviews of the pull request.
 - `limit`: how many times the step is asked in an attempt.
 - `next`: where each outcome goes, to a step, `end` or `person`. Outcomes are
   `ok`, a verdict's `success`, `failure` and `actionable`, and `spent` once

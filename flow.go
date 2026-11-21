@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strconv"
@@ -370,11 +371,25 @@ func fill(s string) string {
 // run, its record and result in the run folder saying whether it is done, so
 // a rerun after any stop carries on where the last one was. publish is tend's
 // own, given here.
+var prompted int // prompts sent in this run
+
 func walkFlow(publish func() string) {
 	used, reviewReq, lastV = map[string]int{}, nil, nil
 	at := fl.Start
+	been := map[string]bool{}
 	for {
 		s := fl.Steps[at]
+		// A step reached again at the same head with nothing asked or taken
+		// since would only give the same outcome again, for ever.
+		n := prompted
+		for _, u := range used {
+			n += u
+		}
+		state := fmt.Sprintf("%s %s %d", at, git("rev-parse", "HEAD"), n)
+		if been[state] {
+			stop("%s reached %s again at %s with nothing changed, so %s loops; a person decides", flowName, at, short(git("rev-parse", "HEAD")), flowFrom)
+		}
+		been[state] = true
 		var o string
 		if at == "publish" {
 			o = publish()
@@ -384,6 +399,11 @@ func walkFlow(publish func() string) {
 		to := s.Next[o]
 		switch to {
 		case "end":
+			if flowName == "build" {
+				if why := unbuilt(); why != "" {
+					stop("%s", why)
+				}
+			}
 			return
 		case "", "person":
 			why := at + " gave " + o
@@ -396,6 +416,14 @@ func walkFlow(publish func() string) {
 				stop("%s, and %s gives it nothing to go to, so a person decides", why, flowFrom)
 			}
 			stop("%s, and %s sends that to a person", why, flowFrom)
+		}
+		// The candidate is finished before anything but a commit step follows.
+		if flowName == "build" {
+			if r, _ := parseResult(fl.Steps[to].Result); to == "publish" || !r.commit {
+				if why := unbuilt(); why != "" {
+					stop("%s", why)
+				}
+			}
 		}
 		at = to
 	}
@@ -417,6 +445,23 @@ func recordOf(name string) string {
 
 func asks(rec string) []string { return strings.Fields(cat(rec)) }
 
+// How often a step was asked in the attempt, for its limit: its record's
+// asks, those of every review's record for requested changes, and the
+// finished asks of the implementation, which leave its record.
+func timesAsked(name, rec string) int {
+	n := len(asks(run + "/" + name + "-done"))
+	if reviewReq != nil && name == reqStep {
+		fs, _ := filepath.Glob(run + "/request-*")
+		for _, f := range fs {
+			if !strings.HasSuffix(f, ".tmp") {
+				n += len(asks(f))
+			}
+		}
+		return n
+	}
+	return n + len(asks(rec))
+}
+
 func setAsks(rec string, hs []string) {
 	if len(hs) == 0 {
 		os.Remove(rec)
@@ -434,14 +479,22 @@ func agentOf(name string) (string, string, string) {
 	for fl.Steps[root].Continue != "" {
 		root = fl.Steps[root].Continue
 	}
-	h := short(git("rev-parse", "HEAD"))
-	switch {
-	case root == fl.Start:
+	if root == fl.Start {
 		return impl, fl.Steps[root].Agent, root
-	case root == "review":
-		return "rev-" + h, fl.Steps[root].Agent, root
 	}
-	return root + "-" + h, fl.Steps[root].Agent, root
+	h := git("rev-parse", "HEAD")
+	if hs := asks(recordOf(root)); name != root && len(hs) > 0 {
+		h = hs[len(hs)-1] // continued: the agent asked at that head, whatever it committed since
+	}
+	return agentAt(root, h), fl.Steps[root].Agent, root
+}
+
+// The name of the fresh agent a step starts when asked at head h.
+func agentAt(root, h string) string {
+	if root == "review" {
+		return "rev-" + short(h)
+	}
+	return root + "-" + short(h)
 }
 
 // Start the agent unless its pane is there. A pane gone is a new session of
@@ -520,6 +573,7 @@ func promptStep(name, rec string) {
 	}
 	h := git("rev-parse", "HEAD")
 	setAsks(rec, append(asks(rec), h))
+	prompted++
 	if strings.HasPrefix(agent, "impl-") {
 		write(run+"/layout", layout()+"\n") // for contained()
 	}
@@ -555,13 +609,6 @@ func reach(name string, s *step) string {
 func reachAt(name string, s *step, r result, h, rec string) string {
 	f := run + "/" + fill(r.file+r.verdict)
 	vars["result"] = f
-	if r.verdict != "" && exists(f) && !valid(f, h) {
-		os.Rename(f, f+".rejected-"+strconv.FormatInt(time.Now().Unix(), 10))
-		say("set aside an invalid verdict %s for %s", f, short(h))
-		if hs := asks(rec); slices.Contains(hs, h) {
-			setAsks(rec, slices.DeleteFunc(hs, func(x string) bool { return x == h })) // asked again
-		}
-	}
 	got := func() string {
 		if r.file != "" {
 			if nonempty(f) {
@@ -574,8 +621,8 @@ func reachAt(name string, s *step, r result, h, rec string) string {
 		}
 		x := parse(cat(f))
 		lastV = x
-		if v == "" || strings.HasPrefix(r.verdict, "verdict-") {
-			v = f
+		if !strings.HasPrefix(fileName(v), "verdict-") || strings.HasPrefix(r.verdict, "verdict-") {
+			v = f // the newest, the reviewer's verdict-* first
 		}
 		switch {
 		case get(x, "conclusion") == "success":
@@ -584,9 +631,6 @@ func reachAt(name string, s *step, r result, h, rec string) string {
 			return "actionable"
 		}
 		return "failure"
-	}
-	if o := got(); o != "" {
-		return o
 	}
 	agent, _, _ := agentOf(name)
 	left := func() string { // the turn ended: the result, which leaves the branch as it was
@@ -605,15 +649,27 @@ func reachAt(name string, s *step, r result, h, rec string) string {
 		}
 		return o
 	}
-	if slices.Contains(asks(rec), h) {
-		if term.status(agent) == "working" {
-			say("%s is still working on an earlier prompt; waiting for it, not prompting again", agent)
-			await(agent)
-			return left()
+	// An agent still on its turn is waited for before its file is judged,
+	// which it may be writing.
+	if slices.Contains(asks(rec), h) && term.status(agent) == "working" {
+		say("%s is still working on an earlier prompt; waiting for it, not prompting again", agent)
+		await(agent)
+		return left()
+	}
+	if r.verdict != "" && exists(f) && !valid(f, h) {
+		os.Rename(f, f+".rejected-"+strconv.FormatInt(time.Now().Unix(), 10))
+		say("set aside an invalid verdict %s for %s", f, short(h))
+		if hs := asks(rec); slices.Contains(hs, h) {
+			setAsks(rec, slices.DeleteFunc(hs, func(x string) bool { return x == h })) // asked again
 		}
+	}
+	if o := got(); o != "" {
+		return o
+	}
+	if slices.Contains(asks(rec), h) {
 		stop("%s was asked at %s and left nothing: no %s, and %s is not working on it. Look at its pane, then write it and run tend again, or delete %s to have it asked once more", name, short(h), fileName(f), agent, rec)
 	}
-	if s.Limit > 0 && len(asks(rec)) >= s.Limit {
+	if s.Limit > 0 && timesAsked(name, rec) >= s.Limit {
 		return "spent"
 	}
 	promptStep(name, rec)
@@ -654,14 +710,13 @@ func reachInOrder(name string, s *step, r result, h, rec string) string {
 	left := func(a string, seen bool) string {
 		if implementing && seen {
 			hs := asks(rec)
+			done := run + "/" + name + "-done"
+			setAsks(done, append(asks(done), hs[used[rec]-1]))
 			setAsks(rec, slices.Delete(hs, used[rec]-1, used[rec]))
 			used[rec]--
 		}
-		if flowName == "build" && r.commit {
+		if implementing && !seen { // an ask that may still be in flight is not sent again
 			if why := unbuilt(); why != "" {
-				if implementing && seen {
-					stop("%s", why)
-				}
 				stop("%s. Look at %s's pane, then finish it and run tend again, or delete %s to have %s asked once more", why, agent, rec, name)
 			}
 		}
@@ -690,6 +745,9 @@ func reachInOrder(name string, s *step, r result, h, rec string) string {
 	if hs := asks(rec); used[rec] < len(hs) {
 		a := hs[used[rec]]
 		used[rec]++
+		if _, _, root := agentOf(name); root == name && root != fl.Start {
+			agent = agentAt(root, a) // asked at a, whatever it committed since
+		}
 		seen := term.status(agent) == "working"
 		if seen {
 			text1, next1 := doing(name, agent)
@@ -707,7 +765,7 @@ func reachInOrder(name string, s *step, r result, h, rec string) string {
 	if flowName == "build" && name == fl.Start && r.commit && unbuilt() == "" {
 		return "ok"
 	}
-	if s.Limit > 0 && len(asks(rec)) >= s.Limit {
+	if s.Limit > 0 && timesAsked(name, rec) >= s.Limit {
 		return "spent"
 	}
 	promptStep(name, rec)
