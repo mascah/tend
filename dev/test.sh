@@ -368,7 +368,7 @@ project() { # dir [target] [remote]
 	printf '# A change\n\n## Why\n\nBecause.\n\n## What changes\n\nA file.\n' >"$c/proposal.md"
 	printf '# Tasks\n\n- [ ] T-01 Add the file\n' >"$c/tasks.md"
 	git add -A && git commit -qm propose
-	printf 'title: "One"\ncreated: 2026-11-14T02:00:00Z\nchanges: [261015-c0000]\nplanned: %s\n' "$(git rev-parse HEAD)" >grove/cycles/261114-k0000-one.yaml
+	printf -- '---\ntitle: "One"\ncreated: 2026-11-14T02:00:00Z\nchanges: [261015-c0000]\nplanned: %s\n---\n' "$(git rev-parse HEAD)" >grove/cycles/261114-k0000-one.md
 	git add -A && git commit -qm plan
 	if [ "${3:-}" = remote ]; then
 		git clone -q --bare . "$d.git" && git remote add origin "$d.git" && git fetch -q origin && git branch -q -u "origin/$target"
@@ -1190,7 +1190,7 @@ check "saying so" said "asks to review new or changed hooks"
 check "and is sent no key" sh -c "! grep -q '^rex send-key' '$HERDR_STATE/rexlog'"
 
 # Cycles a person marked unattended when planning them.
-unattend() { (cd "$t/repo" && echo 'unattended: true' >>grove/cycles/261114-k0000-one.yaml && git commit -qam unattend && git push -q origin main); }
+unattend() { (cd "${1:-$t/repo}" && perl -pi -e 's/^planned: .*\n/$&unattended: true\n/' grove/cycles/261114-k0000-one.md && git commit -qam unattend && git push -q origin main); }
 watchrepo() { WATCH_ONCE=1 "$tend" watch "$t/repo" >/dev/null 2>"$t/watch${1:-}"; }
 
 scenario watch-unattended
@@ -1210,7 +1210,7 @@ scenario watch-unattended-merged
 project "$t/repo" main remote
 allow
 issues
-git clone -q "$t/repo.git" "$t/other" && (cd "$t/other" && echo 'unattended: true' >>grove/cycles/261114-k0000-one.yaml && git commit -qam unattend && git push -q origin main)
+git clone -q "$t/repo.git" "$t/other" && unattend "$t/other"
 watchrepo
 check "a cycle marked unattended on GitHub, not in the local checkout, is started" grep -q "starting unattended cycle 261114-k0000" "$t/watch"
 check "the local target is fast-forwarded to origin's" test "$(git -C "$t/repo" rev-parse main)" = "$(git -C "$t/repo.git" rev-parse main)"

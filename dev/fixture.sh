@@ -32,11 +32,13 @@ sed -n "/^  put \$c\/.grove.yaml/,/^  commit /p" "$top/dev/trials/c.sh" | awk -v
 find $c -type f -exec sed -i '' "s/@BASE@/$base/g" {} +
 g add -A && g commit -q -m "Propose an error for an unknown ID"
 mkdir -p grove/cycles
-cat > grove/cycles/261114-pr0t0-unknown-id.yaml <<EOC
+cat > grove/cycles/261114-pr0t0-unknown-id.md <<EOC
+---
 title: "Editing an unknown ID prints an error"
 created: 2026-11-14T02:00:00Z
 changes: [261015-c0000]
 planned: $(git rev-parse HEAD)
+---
 EOC
 g add -A && g commit -q -m "Plan a cycle of one"
 # Shared by every worktree: keep Claude Code's local settings out of git status.
