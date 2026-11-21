@@ -1335,6 +1335,33 @@ var scenarios = []scenario{
 		s.check("saying so", r.said("asks to review new or changed hooks"))
 		s.check("and is sent no key", !s.has(s.rexlog(), `^rex send-key`))
 	}},
+	{"rex-notice", func(s *sc) {
+		s.project("main", false)
+		r := s.rexrun("NOTICE=1", "TRUST_DIALOG=1")
+		s.check("under rex, a startup notice offering esc skip is skipped", r.passed())
+		first := map[string]string{} // each block's first key
+		re := regexp.MustCompile(`^rex send-key -s \S+ -b (\S+) (.*)$`)
+		for _, l := range strings.Split(s.rexlog(), "\n") {
+			if m := re.FindStringSubmatch(l); m != nil && first[m[1]] == "" {
+				first[m[1]] = m[2]
+			}
+		}
+		esc := 0
+		for _, k := range first {
+			if k == "esc" {
+				esc++
+			}
+		}
+		s.check("by Esc alone, the first key each agent is sent", esc > 0 && esc == len(first))
+		s.check("saying so for each agent", s.count(r.err, `skipped .*'s startup notice`) == esc)
+	}},
+	{"rex-unknown-screen", func(s *sc) {
+		s.project("main", false)
+		r := s.rexrun("TRUST_DIALOG=1", "TRUST_TEXT=Choose a theme")
+		s.check("under rex, an agent at a screen tend does not know stops for a person", r.code == 3)
+		s.check("saying it did not start", r.said("did not start"))
+		s.check("and is sent no key", !s.has(s.rexlog(), `^rex send-key`))
+	}},
 	{"watch-unattended", func(s *sc) {
 		s.project("main", true)
 		s.allow()

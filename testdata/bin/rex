@@ -8,6 +8,8 @@
 # working agent with a pending turn takes it when polled again. TRUST_DIALOG starts
 # agents at the trust dialog (TRUST_TEXT, its answer); TRUST_REFUSE has it refuse the first
 # answer, as Claude does keys sent before it takes focus, and report idle behind it;
+# NOTICE starts agents at Codex's "Update available" notice, before any trust dialog,
+# which Esc alone skips;
 # REX_STALL leaves a prompt untaken and pending.
 set -euo pipefail
 s=$HERDR_STATE
@@ -35,6 +37,7 @@ split)
 	touch "$s/agent-$n"
 	[ -z "${TRUST_DIALOG:-}" ] || { echo none >"$s/status-$n"; touch "$s/trust-$n"; }
 	[ -z "${TRUST_REFUSE:-}" ] || touch "$s/refuse-$n"
+	[ -z "${NOTICE:-}" ] || { echo none >"$s/status-$n"; touch "$s/notice-$n"; }
 	jq -n --arg b "$b" '{block_ids: [$b]}' ;;
 block)
 	case $2 in
@@ -62,7 +65,9 @@ block)
 send) n=$(name "$@"); printf '%s' "${!#}" | sed $'s/\e\\[20[01]~//g' >>"$s/typed-$n" ;;
 send-key)
 	n=$(name "$@")
-	if [ -e "$s/refuse-$n" ]; then
+	if [ -e "$s/notice-$n" ]; then
+		[ "${!#}" != esc ] || { rm "$s/notice-$n"; [ -e "$s/trust-$n" ] || rm "$s/status-$n"; bump "$n"; }
+	elif [ -e "$s/refuse-$n" ]; then
 		rm "$s/refuse-$n" "$s/status-$n"
 		bump "$n"
 	elif [ -e "$s/trust-$n" ]; then
@@ -77,5 +82,11 @@ send-key)
 		bump "$n"
 		[ -z "${block:-}" ] || echo blocked >"$s/status-$block"
 	fi ;;
-capture) [ ! -e "$s/trust-$(name "$@")" ] || echo "${TRUST_TEXT:-Yes, I trust this folder}" ;;
+capture)
+	n=$(name "$@")
+	if [ -e "$s/notice-$n" ]; then
+		printf '  Update available! 0.169.0 -> 0.170.0\n\n› 1. Update now\n  2. Skip\n  3. Skip until next version\n\n  enter continue · esc skip\n'
+	elif [ -e "$s/trust-$n" ]; then
+		echo "${TRUST_TEXT:-Yes, I trust this folder}"
+	fi ;;
 esac
