@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.0](https://github.com/mascah/tend/compare/v0.2.1...v0.3.0) (2026-11-21)
+
+
+### Features
+
+* draft a PR whose head failed review, and let the reviewer serve on localhost ([#8](https://github.com/mascah/tend/issues/8)) ([9b3feaf](https://github.com/mascah/tend/commit/9b3feaf9d9ff5ba2b6b6dc95828cd78ea8ae2e70))
+
+
+### Bug Fixes
+
+* answer a startup dialog again when Claude refuses the first answer ([#10](https://github.com/mascah/tend/issues/10)) ([450404a](https://github.com/mascah/tend/commit/450404a62c93f90a2b0eeac349f67cb316e89114))
+
 ## [0.2.1](https://github.com/mascah/tend/compare/v0.2.0...v0.2.1) (2026-11-18)
 
 
