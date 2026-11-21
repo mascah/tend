@@ -344,6 +344,26 @@ var flowScenarios = []scenario{
 		s.check("a step that commits before the implementation does not stop the build", r.passed())
 		s.check("plan and implement are each asked once", s.prompts("Plan it.") == 1 && s.prompts("/grove-implement") == 1)
 	}},
+	{"flow-plan-first-survivor", func(s *sc) { // review round 2
+		s.project("main", false)
+		s.commit("Plan first", map[string]string{
+			"tend/flow.yaml": buildFlow(s.t, "  start: implement\n", "  start: plan\n", "  steps:\n", `  steps:
+    plan:
+      agent: claude
+      prompt: prompts/plan.md
+      result: commit
+      next:
+        ok: implement
+`, "    implement:\n      agent: claude\n", "    implement:\n      continue: plan\n"),
+			"tend/prompts/plan.md": "Plan it.\n",
+		})
+		r := s.run("IMPL_FAIL=timeout")
+		s.check("an implement prompt that timed out after the plan stops", r.code == 3)
+		s.agent("working", "impl")
+		r = s.run()
+		s.check("the rerun waits for the implementer and passes", r.passed())
+		s.check("asking the plan once in all", s.prompts("Plan it.") == 1 && s.prompts("/grove-implement") == 1)
+	}},
 }
 
 // Whether every match of re's first group in text names the same agent.

@@ -49,7 +49,7 @@ stops on every rerun until a person supplies the result or deletes the
 record, as the flows spec says. This now includes a reviewer whose prompt
 timed out and which went idle with no verdict. Old tend prompted it again,
 but the attempts spec counts a timed-out prompt as possibly delivered and
-never resent. The built-in `implement` step is the exception, because the
+never resent. The `implement` step (or the first step, in a flow without one) is the exception, because the
 attempts spec says the implementation is asked whenever Git shows the branch
 unfinished. An implement ask whose turn tend saw end leaves its record, so a
 rerun asks it again, as old tend did, and only an ask that may still be in
@@ -109,7 +109,11 @@ named for the head it was asked at, not a new one.
 when the walk goes to a step that does not commit, to `publish` or to the
 end, not after every commit step. So a step that commits before the
 implementation no longer stops the build, and a flow of `implement` then
-`publish` cannot publish an unfinished candidate.
+`publish` cannot publish an unfinished candidate. A second round found that
+the exception for re-asking the implementation applied to the first step,
+not the implementation. It now applies to the step `implement`, or to the
+first step in a flow without one, so a `plan` step before it keeps its
+record: `TestFlows/flow-plan-first-survivor`.
 
 ### T-02 — The build flow is built in
 

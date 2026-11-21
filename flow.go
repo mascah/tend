@@ -676,6 +676,15 @@ func reachAt(name string, s *step, r result, h, rec string) string {
 	return left()
 }
 
+// The build's implementation step: implement, or the first step in a flow
+// without one.
+func implStep() string {
+	if _, ok := fl.Steps["implement"]; ok {
+		return "implement"
+	}
+	return fl.Start
+}
+
 func fileName(f string) string { return f[strings.LastIndex(f, "/")+1:] }
 
 func continued(root string) bool {
@@ -706,7 +715,7 @@ func reachInOrder(name string, s *step, r result, h, rec string) string {
 	// The build's implementation is asked whenever Git shows the branch
 	// unfinished, so an ask whose turn tend saw end leaves the record, which
 	// then holds only one that may still be in flight (killed, timed out).
-	implementing := flowName == "build" && name == fl.Start && r.commit
+	implementing := flowName == "build" && name == implStep() && r.commit
 	left := func(a string, seen bool) string {
 		if implementing && seen {
 			hs := asks(rec)
@@ -762,7 +771,7 @@ func reachInOrder(name string, s *step, r result, h, rec string) string {
 	}
 	// The implementation of a branch that already holds a finished candidate
 	// is never asked, judged from Git.
-	if flowName == "build" && name == fl.Start && r.commit && unbuilt() == "" {
+	if implementing && unbuilt() == "" {
 		return "ok"
 	}
 	if s.Limit > 0 && timesAsked(name, rec) >= s.Limit {
