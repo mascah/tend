@@ -50,6 +50,7 @@ turn() { # name text
 		success) jq -n --arg h "$h" '{head: $h, conclusion: "success", actionable: false, summary: "ok"}' ;;
 		noconclusion) jq -n --arg h "$h" '{head: $h, actionable: false, summary: "ok"}' ;;
 		decision) jq -n --arg h "$h" '{head: $h, conclusion: "failure", actionable: false, summary: "a.txt:1 needs an owner decision."}' ;;
+		actionable) jq -n --arg h "$h" '{head: $h, conclusion: "failure", actionable: true, summary: "a.txt:1 lacks the fix."}' ;;
 		repairable) # fails the first head it sees, passes the rest
 			if [ -e "$s/failed-once" ]; then
 				jq -n --arg h "$h" '{head: $h, conclusion: "success", actionable: false, summary: "ok"}'
@@ -58,5 +59,13 @@ turn() { # name text
 				jq -n --arg h "$h" '{head: $h, conclusion: "failure", actionable: true, summary: "a.txt:1 lacks the fix."}'
 			fi ;;
 		esac >"$v" ;;
+	check-*) # a project's own step: the verdict its prompt names, shaped by $CHECK; none writes nothing
+		local v h
+		v=$(grep -oE '[^ ]*check-[0-9a-f]{40}\.json' <<<"$2" | head -1)
+		h=${v##*check-} h=${h%.json}
+		case ${CHECK:-success} in
+		success) jq -n --arg h "$h" '{head: $h, conclusion: "success", actionable: false, summary: "checked"}' >"$v" ;;
+		failure) jq -n --arg h "$h" '{head: $h, conclusion: "failure", actionable: false, summary: "a.txt:1 is not checked."}' >"$v" ;;
+		esac ;;
 	esac
 }

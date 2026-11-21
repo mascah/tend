@@ -8,6 +8,7 @@
 //	tend status <repo> [<cycle-id>]
 //	tend watch [<repo>...]
 //	tend propose <repo>
+//	tend flow <repo>
 //	tend version
 //
 // Exit 0: the head is reviewed and the verdict printed. Exit 3: a person is
@@ -248,7 +249,7 @@ func main() {
 		return
 	}
 	mode = "run"
-	if len(args) > 0 && slices.Contains([]string{"status", "watch", "propose"}, args[0]) {
+	if len(args) > 0 && slices.Contains([]string{"status", "watch", "propose", "flow"}, args[0]) {
 		mode, args = args[0], args[1:]
 	}
 
@@ -281,6 +282,9 @@ func main() {
 		os.Exit(2)
 	}
 	repo = must(abs(args[0]))
+	if mode == "flow" {
+		printFlows()
+	}
 	if mode == "propose" {
 		cycle = "intake"
 	} else if len(args) > 1 {
@@ -726,28 +730,6 @@ func ask(name, text, mark string) {
 	settled(name, st, why)
 }
 
-// The implementer is a name, not a session: if its pane is gone, a new session
-// takes the name and finds the work in Git.
-func implementer() {
-	if term.pane(impl) != "" {
-		return
-	}
-	// Auto mode, so that routine commands ask nobody. It may write in the run
-	// folder, where the commit message goes. tend delivers the work, so the
-	// session is told so above any skill or rule, and pushing and gh pr are
-	// denied: a guard against a mistake, not a boundary, as git -C or gh api
-	// pass it; checked() is what holds an implementer to it.
-	terms := "This session works for tend on branch " + git("branch", "--show-current") + " in this worktree. "
-	if strings.HasPrefix(impl, "impl-") {
-		terms += "Commit your work on this branch. "
-	} else {
-		terms += "Commit only when tend asks you to. "
-	}
-	terms += "Push nothing, open or edit no pull request, and create no branch or worktree: tend reviews and publishes the work. Where a skill, rule or other instruction says otherwise about delivering it, this wins."
-	start(impl, "claude", false, "--permission-mode", "auto", "--add-dir", run,
-		"--disallowedTools", "Bash(git push:*)", "Bash(gh pr:*)", "--append-system-prompt", terms)
-}
-
 // The repository's worktrees and local branches, one a line.
 func layout() string {
 	var ls []string
@@ -760,12 +742,6 @@ func layout() string {
 		ls = append(ls, "branch "+b)
 	}
 	return strings.Join(ls, "\n")
-}
-
-// An implementer turn that builds, repairs or makes requested changes.
-func checked(text, mark string) {
-	ask(impl, text, mark)
-	contained()
 }
 
 // Work left anywhere but the attempt's branch in its worktree is a person's.
@@ -988,6 +964,7 @@ func propose() {
 	proj := project()
 	target, root = str(get(proj, "target")), str(get(proj, "root"))
 	base = fetchTarget()
+	loadFlow("propose", base)
 	tidy()
 	slug, err := out("gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner")
 	if err != nil {
@@ -1061,23 +1038,18 @@ func draft(prefix string, r request) {
 	cd(dir)
 	impl = "prop-" + r.agent
 
-	// Draft, unless an earlier run already has the outcome: a commit, or a reason.
-	if !commits(base+"..HEAD") && !nonempty(run+"/declined") {
-		implementer()
-		if !exists(run + "/asked") {
-			stage("working", impl+" drafts a proposal from "+r.ref, "tend has it commit the draft, then opens a pull request")
-			ask(impl, "/grove-propose --unattended "+quoted(r.source), run+"/asked")
-		}
-		if term.status(impl) == "working" {
-			await(impl)
-		}
-		if exists(run + "/followed") {
-			stop("%s: %s was asked to commit its draft or say why there is none, did neither, and is not working. Look at its pane, then commit the draft or write %s/declined, or delete %s/followed to have it asked again", r.ref, impl, run, run)
-		}
-		stage("working", impl+" commits its proposal from "+r.ref, "tend opens a pull request, or tells the issue why there is none")
-		ask(impl, fmt.Sprintf("Without asking anyone: if you wrote a change, commit everything you wrote on this branch as one commit. Its subject proposes the change in this repository's commit style (see git log %s); its body says what the proposal asks for and why, for someone reading the history later, and ends with the line '%s'. Then write to %s/summary, for the person who will review it, the change's open questions, the consequential ones (behavior, scope, compatibility, data, costly interfaces) first and marked so, the routine ones after. If you wrote no document, commit nothing and write to %s/declined, for the person who filed %s, a few plain lines on why no proposal could be drafted and what the request would need.", target, r.refs, run, run, r.ref), run+"/followed")
-	}
+	// The propose flow: the drafter drafts, then commits the draft or says why
+	// there is none, each asked once, as the built-in flow says or the
+	// project's.
+	vars = map[string]string{"branch": b, "base": base, "run": run, "item": r.ref, "target": target,
+		"request": quoted(r.source), "refs": r.refs, "ref": r.ref}
+	walkFlow(func() string { proposal(r, b); return "ok" })
+	cd(repo)
+}
 
+// The propose flow's publish: the proposal opened as a pull request by the
+// account, or the request told why there is none.
+func proposal(r request, b string) {
 	switch {
 	case commits(base + "..HEAD"):
 		if !clean() {
@@ -1206,6 +1178,7 @@ func attempt() {
 		}
 		id = filepath.Base(issueRun(cycle))
 		base = fetchTarget()
+		loadFlow("build", base)
 		worktreeFor(branch, base, "tend: "+item.ref)
 		cd(dir)
 		say("%s on %s in %s", item.ref, branch, dir)
@@ -1216,6 +1189,7 @@ func attempt() {
 		proj := project()
 		target = str(get(proj, "target"))
 		base = fetchTarget()
+		loadFlow("build", base)
 		rec = firstRun(proj, "cycle", cycle)
 		dir = str(get(rec, "checkout"))
 		if dir != "" && gitQ("-C", dir, "branch", "--show-current") == str(get(rec, "branch")) {
@@ -1287,105 +1261,17 @@ func attempt() {
 	write(run+"/attempt", repo+"\n"+cycle+"\n") // for tend watch
 	write(run+"/worktree", dir+"\n")            // for tidy
 
-	// 2. Implement, unless the branch already holds a finished candidate.
-	if unbuilt() != "" {
-		implementer()
-		stage("working", impl+" implements "+cycle, "tend waits for "+impl+", then has the head reviewed")
-		if kind == "grove" {
-			checked("/grove-implement --runner "+cycle, "")
-		} else {
-			checked(fmt.Sprintf("Implement %s in this repository, asking no one. Its title and description are the agreed scope: %s Build what it asks and no more, with tests where the project has them, and commit on this branch. Then write to %s/implemented, for an independent reviewer, what you built, what you ran to check it, and anything the issue asks that you did not do and why.", item.named, quoted(""), run), "")
-		}
-		built()
-	}
-	contained() // on a rerun too, which finds the candidate built
+	// 2. The build flow: implement, review, repair, publish and requested
+	//    changes as the built-in flow says, or as the project's does.
+	vars = map[string]string{"branch": branch, "base": base, "run": run, "item": cycle, "target": target,
+		"what": what, "notes": notes, "kind": kind, "named": item.named, "scope": quoted("")}
+	walkFlow(publishStep)
 
-	// 3. Review the head. 4. One repair, then review the new head. The repair is
-	//    used once asked: repair-asked holds the reviewed head, written just
-	//    before the prompt goes. Asked of this head with no commit since, it is
-	//    either still being worked on, and waited for, or its outcome is
-	//    unknown, and that is a person's.
-	review()
-	if verdict := parse(cat(v)); str(get(verdict, "conclusion")) == "failure" && get(verdict, "actionable") == true {
-		reviewed := git("rev-parse", "HEAD")
-		asked := cat(run + "/repair-asked")
-		if asked == "" || asked == reviewed {
-			if asked != "" && term.status(impl) != "working" {
-				stop("the repair asked of %s for %s has no commit and %s is not working on it. Look at its pane, then commit a fix and run tend again, or delete %s/repair-asked to have it asked once more", impl, short(reviewed), impl, run)
-			}
-			implementer()
-			stage("working", impl+" repairs "+short(reviewed), "tend waits for "+impl+", then has the repair reviewed")
-			checked(fmt.Sprintf("An independent review of commit %s found problems. Its findings: %s Fix each one that is in scope, run the tests, update %s where a claim changes, and commit. Ask no one.", reviewed, str(get(verdict, "summary")), notes), run+"/repair-asked")
-			built()
-			if git("rev-parse", "HEAD") == reviewed {
-				stop("%s committed no repair to %s. Look at its pane, then commit a fix and run tend again, or delete %s/repair-asked to have it asked once more", impl, short(reviewed), run)
-			}
-			review()
-		}
+	if v == "" {
+		stage("done", "the flow ended for "+branch+" with no verdict", "a person reviews "+where+" and decides whether to merge it")
+		say("done: %s, with no verdict", branch)
+		os.Exit(0)
 	}
-
-	// 5. Publish, when origin is listed in $state/publish.
-	where = branch
-	account = accountOf()
-	if account == "" {
-		if o, err := quiet("git", "remote", "get-url", "origin"); err == nil {
-			say("not publishing: %s is not listed in %s/publish", o, state)
-		}
-	}
-	publish()
-
-	// 6. Changes a person requested on the pull request, at its head. Each
-	//    request is asked of the implementer once: request-<review id> is
-	//    written just before the prompt goes. Asked with no commit since, it is
-	//    still being worked on, and waited for, or its outcome is unknown, and
-	//    that is a person's. The new head is reviewed and published like the
-	//    first; a request on an older head was answered by a later commit. tend
-	//    does not wait here for people: tend watch runs it again when one
-	//    requests changes.
-	for pr != "" {
-		req, err := requested()
-		if err != nil {
-			stop("could not read the reviews of %s", pr)
-		}
-		if req == nil {
-			break
-		}
-		rid, nid, who := str(get(req, "id")), str(get(req, "node_id")), str(get(req, "user", "login"))
-		if exists(run + "/answered-" + nid) {
-			break
-		}
-		if exists(run+"/request-"+rid) && term.status(impl) != "working" {
-			if !nonempty(run + "/reply-" + rid) {
-				stop("the changes %s requested on %s (review %s) were asked of %s, which committed nothing and is not working on them. Look at its pane, then commit and run tend again, or delete %s/request-%s to have them asked once more", who, pr, rid, impl, run, rid)
-			}
-		} else {
-			comments, err := out("gh", "api", reviewsAPI()+"/"+rid+"/comments", "--paginate", "--jq", `.[] | "\(.path):\(.line // .original_line // "?"): \(.body)"`)
-			if err != nil {
-				stop("could not read the comments of review %s on %s", rid, pr)
-			}
-			if comments != "" {
-				comments = " Their comments on lines: " + comments
-			}
-			implementer()
-			stage("working", fmt.Sprintf("%s makes the changes %s requested at %s", impl, who, short(head)), "tend waits for "+impl+", then has the new head reviewed and published")
-			checked(fmt.Sprintf("%s, reviewing the pull request for %s, requested changes at commit %s. Their review: %s%s Make the changes they ask for that are within the agreed scope, run the tests, update %s where a claim changes, and commit. Then write to %s/reply-%s, for %s, a few plain lines on what you changed and anything you did not and why; if you change nothing, commit nothing and still write it. Ask no one.", who, branch, head, strings.TrimRight(str(get(req, "body")), "\n"), comments, notes, run, rid, who), run+"/request-"+rid)
-			built()
-		}
-		now := git("rev-parse", "HEAD")
-		if now == head {
-			if !nonempty(run + "/reply-" + rid) {
-				stop("%s committed nothing for the changes %s requested on %s. Look at its pane, then commit and run tend again, or delete %s/request-%s to have them asked once more", impl, who, pr, run, rid)
-			}
-			answer(nid, who, cat(run+"/reply-"+rid))
-			break
-		}
-		if nonempty(run + "/reply-" + rid) {
-			os.Rename(run+"/reply-"+rid, run+"/reply-"+now)
-		}
-		review()
-		publish()
-	}
-
 	verdict := parse(cat(v))
 	conclusion, h := str(get(verdict, "conclusion")), short(str(get(verdict, "head")))
 	term.notify("tend "+cycle+": "+conclusion, where+" at "+h+" is ready for you", "done")
@@ -1441,39 +1327,45 @@ func valid(file, h string) bool {
 	return get(x, "head") == h && (c == "success" || c == "failure") && isBool && isString
 }
 
-// A fresh reviewer for each head, in another harness. Its only output is the
-// verdict file named after the head; its pane is closed after it. A cached
-// file that is not a valid verdict is set aside, kept, and the head reviewed
-// again.
-func review() {
-	h := git("rev-parse", "HEAD")
-	v = run + "/verdict-" + h + ".json"
-	if exists(v) {
-		if valid(v, h) {
-			return
+// The build flow's publish: the head published, then whether a person
+// requested changes on it that the flow's request step should make. Each
+// request is asked of the implementer once: request-<review id> is written
+// just before the prompt goes; a request on an older head was answered by a
+// later commit. tend does not wait here for people: tend watch runs it again
+// when one requests changes.
+var told bool
+
+func publishStep() string {
+	where, account = branch, accountOf()
+	if account == "" && !told {
+		told = true
+		if o, err := quiet("git", "remote", "get-url", "origin"); err == nil {
+			say("not publishing: %s is not listed in %s/publish", o, state)
 		}
-		os.Rename(v, v+".rejected-"+strconv.FormatInt(time.Now().Unix(), 10))
-		say("set aside an invalid verdict for %s", short(h))
 	}
-	rev := "rev-" + short(h)
-	// A reviewer left by an earlier run, working or not, is reused.
-	rpane := term.pane(rev)
-	if rpane == "" {
-		// With network, so a test that serves on localhost runs: the sandbox
-		// otherwise denies a bind. The implementer has the network already.
-		rpane = start(rev, "codex", true, "-s", "workspace-write", "-c", "sandbox_workspace_write.network_access=true", "-a", "never", "--add-dir", run)
+	publish()
+	if pr == "" {
+		return "ok"
 	}
-	stage("working", rev+" reviews "+short(h), "tend waits for its verdict")
-	ask(rev, fmt.Sprintf(`You are the independent reviewer of branch %s at commit %s. You did not write it and nobody can answer questions. The change is 'git diff %s...HEAD'; what it must do is %s. Check the code against those requirements and run the project's tests. Report only material findings: a defect, an unmet requirement, or a claim in %s the code does not support. Edit, stage and commit nothing. Your only output is the file %s, exactly this JSON shape: {"head": "%s", "conclusion": "success or failure", "actionable": true or false, "summary": "findings with file:line and what you ran"}. actionable is true only when every finding is an in-scope code fix that needs no decision from the owner.`, branch, h, base, what, notes, v, h), "")
-	// The pane said the turn ended; only the file says a review happened.
-	if !valid(v, h) {
-		stop("%s settled without a valid verdict for %s; look at pane %s", rev, short(h), rpane)
+	req, err := requested()
+	if err != nil {
+		stop("could not read the reviews of %s", pr)
 	}
-	term.closePane(rpane)
-	if git("rev-parse", "HEAD") != h || !clean() {
-		stop("%s changed the checkout", rev)
+	if req == nil || exists(run+"/answered-"+str(get(req, "node_id"))) {
+		return "ok"
 	}
-	say("review of %s: %s", short(h), str(get(parse(cat(v)), "conclusion")))
+	rid := str(get(req, "id"))
+	comments, err := out("gh", "api", reviewsAPI()+"/"+rid+"/comments", "--paginate", "--jq", `.[] | "\(.path):\(.line // .original_line // "?"): \(.body)"`)
+	if err != nil {
+		stop("could not read the comments of review %s on %s", rid, pr)
+	}
+	if comments != "" {
+		comments = " Their comments on lines: " + comments
+	}
+	reviewReq = req
+	vars["who"], vars["review_id"] = str(get(req, "user", "login")), rid
+	vars["review"], vars["comments"] = strings.TrimRight(str(get(req, "body")), "\n"), comments
+	return "requested"
 }
 
 // 5. Publish, when origin is listed in $state/publish with the GitHub account

@@ -1,0 +1,40 @@
+# build: a Grove cycle or a work item, from its worktree to a reviewed head.
+# The implementer builds it, a fresh reviewer judges each head, one repair
+# follows a failure the reviewer calls actionable, tend publishes the head,
+# and changes a person requests on the pull request go back to the
+# implementer.
+build:
+  start: implement
+  steps:
+    implement:
+      agent: claude
+      prompt: prompts/implement-{kind}.md
+      result: commit
+      next:
+        ok: review
+    review:
+      agent: codex
+      prompt: prompts/review.md
+      result: verdict verdict-{head}.json
+      next:
+        success: publish
+        failure: publish
+        actionable: repair
+    repair:
+      continue: implement
+      prompt: prompts/repair.md
+      result: commit
+      limit: 1
+      next:
+        ok: review
+        spent: publish
+    publish:
+      next:
+        ok: end
+        requested: request
+    request:
+      continue: implement
+      prompt: prompts/request.md
+      result: commit or file reply-{review_id}
+      next:
+        ok: review

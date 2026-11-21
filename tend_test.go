@@ -71,7 +71,7 @@ func newSc(t *testing.T) *sc {
 	return s
 }
 
-var dropped = regexp.MustCompile(`^(TEND_|HERDR_|REX_|JIRA_|GIT_|GH_|WATCH_|NO_NOTES|REVIEW|IMPL_|REPAIR_FAIL|REV_FAIL|BLOCK_AFTER_BUILD|CREATE_LOST|REQUEST_|PROPOSE_FAIL|FOLLOW_FAIL|DECLINE|EDIT_FAIL|CAP|TRUST_|DRAFT_FAIL|COMMENT_FAIL|STRAY|TIMEOUT_MS|KEEP)`)
+var dropped = regexp.MustCompile(`^(TEND_|HERDR_|REX_|JIRA_|GIT_|GH_|WATCH_|NO_NOTES|REVIEW|IMPL_|REPAIR_FAIL|REV_FAIL|BLOCK_AFTER_BUILD|CREATE_LOST|REQUEST_|PROPOSE_FAIL|FOLLOW_FAIL|DECLINE|EDIT_FAIL|CAP|TRUST_|DRAFT_FAIL|COMMENT_FAIL|STRAY|CHECK|TIMEOUT_MS|KEEP)`)
 
 // The environment every command of the scenario gets, then extra ("K=V").
 func (s *sc) env(extra ...string) []string {
@@ -1074,6 +1074,7 @@ var scenarios = []scenario{
 		r = s.run()
 		s.check("after the holder is killed, tend takes over", r.code == 0)
 		s.check("carrying on its attempt", r.said("carrying on attempt"))
+		s.check("waiting for the implementer, prompted once in all", s.count(s.log(), `^agent prompt impl-`) == 1)
 	}},
 	{"repair", func(s *sc) {
 		s.project("main", false)

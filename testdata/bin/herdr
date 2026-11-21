@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Herdr stand-in, its agents taking their turns from turn.sh.
-# IMPL_FAIL, REPAIR_FAIL and REV_FAIL fail that prompt with the code they hold,
+# IMPL_FAIL, REPAIR_FAIL, REV_FAIL and CHECK_FAIL fail that prompt with the code they hold,
 # leaving its turn pending; an agent whose status file says working then takes
 # that turn when waited for, as one that outlived tend would. IMPL_SLEEP holds
-# the implementer's prompt that long. As Herdr does, a blocked agent refuses a
-# prompt.
+# the implementer's prompt that long, the agent working on it meanwhile, so
+# its turn is taken when it is waited for after tend is killed. As Herdr
+# does, a blocked agent refuses a prompt.
 set -euo pipefail
 s=$HERDR_STATE
 printf '%s\n' "$*" >>"$s/log"
@@ -37,6 +38,7 @@ case "$1 $2" in
 	case $3 in
 	impl-*) case $4 in /grove-implement* | "Implement GitHub issue"* | "Implement Jira issue"*) fail=${IMPL_FAIL:-} ;; *"requested changes at commit"*) fail=${REQUEST_FAIL:-} ;; *) fail=${REPAIR_FAIL:-} ;; esac ;;
 	prop-*) case $4 in /grove-propose*) fail=${PROPOSE_FAIL:-} ;; *) fail=${FOLLOW_FAIL:-} ;; esac ;;
+	check-*) fail=${CHECK_FAIL:-} ;;
 	*) fail=${REV_FAIL:-} ;;
 	esac
 	if [ "$(cat "$s/status-$3" 2>/dev/null)" = blocked ]; then
@@ -48,7 +50,7 @@ case "$1 $2" in
 		jq -n --arg c "$fail" '{error: {code: $c}}'
 		exit 1
 	fi
-	case $3 in impl-*) [ -z "${IMPL_SLEEP:-}" ] || { echo $$ >"$s/sleeper"; exec sleep "$IMPL_SLEEP"; } ;; esac
+	case $3 in impl-*) [ -z "${IMPL_SLEEP:-}" ] || { echo working >"$s/status-$3"; printf '%s' "$4" >"$s/pending-$3"; echo $$ >"$s/sleeper"; exec sleep "$IMPL_SLEEP"; } ;; esac
 	turn "$3" "$4"
 	said "$(cat "$s/status-$3" 2>/dev/null || echo idle)"
 	[ -z "${block:-}" ] || echo blocked >"$s/status-$block" ;;
