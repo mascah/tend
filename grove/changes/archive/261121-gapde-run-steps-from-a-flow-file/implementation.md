@@ -30,7 +30,7 @@ the stand-ins.
 Checks run on 2026-11-21: `gofmt -l .` and `go vet ./...` clean;
 `go test ./...` passed in 43.8 s, every `TestTend` and `TestFlows` subtest.
 
-Also changed: `testdata/bin/turn.sh` — adds `UNFINISHED`, an implementer turn that builds nothing, and `edit-*`, a project step that commits; lets the reviewer write a verdict of any `<name>-<head>.json`; gives a project step `check-*` its
+Also changed: `testdata/bin/turn.sh` — adds `UNFINISHED`, an implementer turn that builds nothing, and `edit-*`, a project step that commits; gives `implement-*` the implementer's turn; lets the reviewer write a verdict of any `<name>-<head>.json`; gives a project step `check-*` its
 turn (`CHECK=success|failure|none`), and adds `REVIEW=actionable` for a
 reviewer that fails every head as actionable.
 Also changed: `testdata/bin/herdr` — adds `CHECK_FAIL`, and while
@@ -113,7 +113,11 @@ implementation no longer stops the build, and a flow of `implement` then
 the exception for re-asking the implementation applied to the first step,
 not the implementation. It now applies to the step `implement`, or to the
 first step in a flow without one, so a `plan` step before it keeps its
-record: `TestFlows/flow-plan-first-survivor`.
+record: `TestFlows/flow-plan-first-survivor`. A third round found that a
+step continuing an `implement` with its own agent, after a `plan`, started a
+new agent once the implementation's ask had moved to `implement-done`. A
+continuation's agent is now named from that file too:
+`TestFlows/flow-plan-then-fresh-implementer`.
 
 ### T-02 — The build flow is built in
 

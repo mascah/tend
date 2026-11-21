@@ -483,8 +483,10 @@ func agentOf(name string) (string, string, string) {
 		return impl, fl.Steps[root].Agent, root
 	}
 	h := git("rev-parse", "HEAD")
-	if hs := asks(recordOf(root)); name != root && len(hs) > 0 {
-		h = hs[len(hs)-1] // continued: the agent asked at that head, whatever it committed since
+	// Continued: the agent asked at that head, whatever it committed since;
+	// a finished implementation's ask is in <root>-done.
+	if hs := append(asks(run+"/"+root+"-done"), asks(recordOf(root))...); name != root && len(hs) > 0 {
+		h = hs[len(hs)-1]
 	}
 	return agentAt(root, h), fl.Steps[root].Agent, root
 }

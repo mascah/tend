@@ -1,6 +1,6 @@
 turn() { # name text
 	case $1 in
-	impl-*)
+	impl-* | implement-*)
 		case $2 in
 		/grove-implement*)
 			if [ -n "${UNFINISHED:-}" ]; then # a turn that ends with the cycle not built

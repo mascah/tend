@@ -344,6 +344,24 @@ var flowScenarios = []scenario{
 		s.check("a step that commits before the implementation does not stop the build", r.passed())
 		s.check("plan and implement are each asked once", s.prompts("Plan it.") == 1 && s.prompts("/grove-implement") == 1)
 	}},
+	{"flow-plan-then-fresh-implementer", func(s *sc) { // review round 3
+		s.project("main", false)
+		s.commit("Plan first", map[string]string{
+			"tend/flow.yaml": buildFlow(s.t, "  start: implement\n", "  start: plan\n", "  steps:\n", `  steps:
+    plan:
+      agent: claude
+      prompt: prompts/plan.md
+      result: commit
+      next:
+        ok: implement
+`),
+			"tend/prompts/plan.md": "Plan it.\n",
+		})
+		r := s.run("REVIEW=repairable")
+		s.check("a repaired build with its own implementer passes", r.passed())
+		s.check("one implementer agent is started", s.count(s.log(), `^agent start implement-`) == 1)
+		s.check("and the repair goes to it", sameAgent(s.log(), `(?m)^agent prompt (implement-[0-9a-f]+) `) && s.count(s.log(), `^agent prompt implement-[0-9a-f]+ An independent review`) == 1)
+	}},
 	{"flow-plan-first-survivor", func(s *sc) { // review round 2
 		s.project("main", false)
 		s.commit("Plan first", map[string]string{
