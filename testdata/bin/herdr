@@ -5,7 +5,10 @@
 # that turn when waited for, as one that outlived tend would. IMPL_SLEEP holds
 # the implementer's prompt that long, the agent working on it meanwhile, so
 # its turn is taken when it is waited for after tend is killed. As Herdr
-# does, a blocked agent refuses a prompt.
+# does, a blocked agent refuses a prompt. HOLD holds every prompt until the
+# file it names exists, the agent idle meanwhile, so another tend runs during
+# the turn. WORKTREE_HOLD holds a new worktree's creation, once made, likewise,
+# touching $WORKTREE_HOLD.made.
 set -euo pipefail
 s=$HERDR_STATE
 printf '%s\n' "$*" >>"$s/log"
@@ -19,6 +22,7 @@ case "$1 $2" in
 		shift
 	done
 	git -C "$repo" worktree add -q -b "$b" "$s/wt-$b" "$base" >/dev/null 2>&1
+	[ -z "${WORKTREE_HOLD:-}" ] || { touch "$WORKTREE_HOLD.made"; until [ -e "$WORKTREE_HOLD" ]; do sleep 0.1; done; }
 	jq -n --arg p "$s/wt-$b" '{result: {worktree: {path: $p}, workspace: {workspace_id: "w1"}}}' ;;
 "worktree list") echo '{"result":{"worktrees":[]}}' ;;
 "worktree open") echo '{"result":{"workspace":{"workspace_id":"w1"}}}' ;;
@@ -50,6 +54,7 @@ case "$1 $2" in
 		jq -n --arg c "$fail" '{error: {code: $c}}'
 		exit 1
 	fi
+	[ -z "${HOLD:-}" ] || until [ -e "$HOLD" ]; do sleep 0.1; done
 	case $3 in impl-*) [ -z "${IMPL_SLEEP:-}" ] || { echo working >"$s/status-$3"; printf '%s' "$4" >"$s/pending-$3"; echo $$ >"$s/sleeper"; exec sleep "$IMPL_SLEEP"; } ;; esac
 	turn "$3" "$4"
 	said "$(cat "$s/status-$3" 2>/dev/null || echo idle)"

@@ -167,6 +167,77 @@ func (s *sc) background(env ...string) *exec.Cmd {
 	return c
 }
 
+// A tend in the background with extra env and arguments, its output in
+// files; returned once the stand-ins' log has a line matching until.
+type bgTend struct {
+	s   *sc
+	c   *exec.Cmd
+	out string
+}
+
+func (s *sc) bg(env []string, until string, args ...string) *bgTend {
+	s.t.Helper()
+	f, err := os.CreateTemp(s.dir, "bg-")
+	if err != nil {
+		s.t.Fatal(err)
+	}
+	defer f.Close()
+	c := s.cmd(s.dir, env, tendBin, args...)
+	c.Stdout, c.Stderr = f, f
+	if err := c.Start(); err != nil {
+		s.t.Fatal(err)
+	}
+	b := &bgTend{s, c, f.Name()}
+	s.t.Cleanup(func() { c.Process.Kill(); c.Wait() })
+	s.waitFor(func() bool { return s.has(s.log(), until) }, until)
+	return b
+}
+
+// Its exit status and output, once it exits; its JSON is the output's last
+// lines from the first "{" on a line of its own.
+func (b *bgTend) wait() res {
+	err := b.c.Wait()
+	code := 0
+	if x, ok := err.(*exec.ExitError); ok {
+		code = x.ExitCode()
+	}
+	o := b.s.cat(b.out)
+	j := ""
+	if i := strings.LastIndex(o, "\n{\n"); i >= 0 {
+		j = o[i+1:]
+	}
+	return res{code, j, o}
+}
+
+// Waits up to 30 seconds for ok, failing the scenario after.
+func (s *sc) waitFor(ok func() bool, what string) {
+	s.t.Helper()
+	for range 300 {
+		if ok() {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	s.t.Fatalf("waited for %s", what)
+}
+
+// The file a held stand-in waits for, touched to release it.
+func (s *sc) hold() (string, func()) {
+	f := s.dir + fmt.Sprintf("/hold-%d", time.Now().UnixNano())
+	return f, func() { s.touch(f) }
+}
+
+// The worktrees of the repository, but its own checkout.
+func (s *sc) worktrees() []string {
+	var ws []string
+	for _, l := range strings.Split(s.git(s.repo, "worktree", "list", "--porcelain"), "\n") {
+		if p, ok := strings.CutPrefix(l, "worktree "); ok && !sameDir(p, s.repo) {
+			ws = append(ws, p)
+		}
+	}
+	return ws
+}
+
 // A bash script with the scenario's env, in dir, its stdout trimmed; a
 // failure ends the scenario. The setup helpers below are defined for it;
 // args are $0, $1, ...
@@ -215,14 +286,21 @@ project() { # dir [target] [remote]
 	fi
 	cd - >/dev/null
 }
-# An approved change in no cycle, committed, and pushed when there is origin.
-change() { # id title [depends-on]
+# An approved change in no cycle, created on the 16th or the day given,
+# committed, and pushed when there is origin. With a file, its one task plans
+# that file, and implementation.md has it done, so that it archives.
+change() { # id title [depends-on] [planned file] [day]
 	local c=grove/changes/$1-$(tr 'A-Z ' 'a-z-' <<<"$2")
 	mkdir -p "$c"
-	printf 'title: %s\ncreated: 2026-10-16T09:00:00Z\nschema: default\nbase: %s\n' "$2" "$(git rev-parse HEAD)" >"$c/.grove.yaml"
+	printf 'title: %s\ncreated: 2026-10-%sT09:00:00Z\nschema: default\nbase: %s\n' "$2" "${5:-16}" "$(git rev-parse HEAD)" >"$c/.grove.yaml"
 	[ -z "${3:-}" ] || printf 'depends_on: [%s]\n' "$3" >>"$c/.grove.yaml"
 	printf '# %s\n\n## Why\n\nBecause.\n' "$2" >"$c/proposal.md"
-	printf '# Tasks\n\n- [ ] T-01 Do it\n' >"$c/tasks.md"
+	if [ -n "${4:-}" ]; then
+		printf '## T-01 — Do it\n\nResult: done.\n\nFiles:\n- \x60%s\x60\n' "$4" >"$c/tasks.md"
+		printf '# Implementation\n\n## Tasks\n\n### T-01 — Do it\n\nStatus: done\n' >"$c/implementation.md"
+	else
+		printf '# Tasks\n\n- [ ] T-01 Do it\n' >"$c/tasks.md"
+	fi
 	git add -A && git commit -qm "$2"
 	if git remote get-url origin >/dev/null 2>&1; then git push -q origin HEAD; fi
 }
@@ -241,8 +319,8 @@ func (s *sc) project(target string, remote bool) {
 	s.bash(s.dir, fmt.Sprintf("project %q %q %q", s.repo, target, r))
 }
 func (s *sc) plain() { s.bash(s.dir, "plain") }
-func (s *sc) change(id, title, dep string) {
-	s.bash(s.repo, fmt.Sprintf("change %q %q %q", id, title, dep))
+func (s *sc) change(id, title, dep string, fileDay ...string) {
+	s.bash(s.repo, fmt.Sprintf("change %q %q %q", id, title, dep)+" "+strings.Join(fileDay, " "))
 }
 func (s *sc) crun(id string, env ...string) res { return s.tendIn(env, s.repo, id) } // tend <repo> <change-id>
 
@@ -1610,5 +1688,127 @@ var scenarios = []scenario{
 		s.check("under rex, a merged attempt's worktree is removed", !exists(wt))
 		s.check("its session killed", s.has(s.rexlog(), `^rex kill session:1`))
 		s.check("and forgotten", !nonempty(s.ts+"/rex-sessions"))
+	}},	{"usage", func(s *sc) {
+		r := s.tendIn(nil, s.dir)
+		s.check("tend with no work item says how to run it", r.code == 2 && r.said(`^usage: tend <repo> <id>$`))
+	}},
+	{"at-once-two-items", func(s *sc) {
+		s.project("main", true)
+		s.change("261016-c0001", "Another", "")
+		f, release := s.hold()
+		k := s.bg([]string{"HOLD=" + f}, `^agent prompt impl-`, s.repo, "261114-k0000")
+		r := s.crun("261016-c0001")
+		s.check("a tend on another work item runs while one is on its turn, and passes", r.passed())
+		s.check("claiming it in a worktree of its own", len(s.worktrees()) == 2 && s.changeRecords("261016-c0001") == 1)
+		release()
+		s.check("the first reaches its verdict too", k.wait().passed())
+		s.check("each implementer was prompted once", s.prompts("/grove-implement --runner 261114-k0000") == 1 && s.prompts("/grove-implement --runner 261016-c0001") == 1)
+	}},
+	{"at-once-intake", func(s *sc) {
+		s.project("main", true)
+		s.allow()
+		s.issues("1:tend")
+		f, release := s.hold()
+		k := s.bg([]string{"HOLD=" + f}, `^agent prompt impl-`, s.repo, "261114-k0000")
+		r := s.propose()
+		s.check("an intake pass runs beside a build", r.code == 0 && s.drafts() == 1 && exists(s.prOf("1")))
+		release()
+		s.check("and the build reaches its verdict", k.wait().passed())
+	}},
+	{"at-once-second-intake", func(s *sc) {
+		s.project("main", true)
+		s.allow()
+		s.issues("1:tend")
+		f, release := s.hold()
+		p := s.bg([]string{"HOLD=" + f}, `^agent prompt prop-`, "propose", s.repo)
+		r := s.propose()
+		s.check("a second intake pass for the repository is refused", r.code == 4)
+		s.check("naming the first pass's pid", r.said(fmt.Sprintf("pid %d", p.c.Process.Pid)))
+		release()
+		s.check("the first finishes", p.wait().code == 0 && s.drafts() == 1)
+	}},
+	{"at-once-together", func(s *sc) {
+		s.project("main", true)
+		s.change("261016-c0001", "Another", "")
+		s.change("261017-c0002", "Third", "")
+		var rs [2]res
+		done := make(chan bool)
+		for i, id := range []string{"261016-c0001", "261017-c0002"} {
+			go func() { rs[i] = s.crun(id); done <- true }()
+		}
+		<-done
+		<-done
+		s.check("two tends started together both reach a verdict", rs[0].passed() && rs[1].passed())
+		s.check("Grove holds one record for each", s.changeRecords("261016-c0001") == 1 && s.changeRecords("261017-c0002") == 1)
+		s.check("each in a worktree of its own", len(s.worktrees()) == 2)
+		s.check("with no tend-* branch left", s.git(s.repo, "branch", "--list", "tend-*") == "")
+	}},
+	{"at-once-refused", func(s *sc) {
+		s.project("main", true)
+		s.change("261016-c0001", "Another", "", "a.txt")
+		s.change("261017-c0002", "Third", "", "a.txt")
+		s.crun("261016-c0001", "IMPL_FAIL=stub_failure")
+		before := s.git(s.repo, "worktree", "list") + s.git(s.repo, "branch", "--list")
+		r := s.crun("261017-c0002")
+		s.check("a piece that overlaps one in flight stops for a person", r.code == 3)
+		s.check("with Grove's sentence", r.said(`261017-c0002 shares a\.txt with 261016-c0001`))
+		s.check("leaving the worktrees and branches as they were", s.git(s.repo, "worktree", "list")+s.git(s.repo, "branch", "--list") == before)
+	}},
+	{"at-once-tidy", func(s *sc) {
+		s.project("main", true)
+		s.allow()
+		s.change("261016-c0001", "Another", "")
+		s.run()
+		wt, b, p := s.worktree(), s.branch(), s.pr()
+		s.request()
+		f, release := s.hold()
+		k := s.bg([]string{"HOLD=" + f}, `^agent prompt impl-.*requested changes at commit`, s.repo, "261114-k0000")
+		s.touch(p + ".merged")
+		r := s.crun("261016-c0001")
+		s.check("a closed pull request's worktree stays while a tend is on it", isDir(wt) && s.git(s.repo, "branch", "--list", b) != "")
+		s.check("and tend says why", r.said(`left .*: a tend is on it`))
+		release()
+		k.wait()
+		s.crun("261016-c0001")
+		s.check("once that tend has exited, the next run removes them", !exists(wt) && s.git(s.repo, "branch", "--list", b) == "")
+	}},
+	{"at-once-during-turn", func(s *sc) {
+		s.project("main", true)
+		s.change("261016-c0001", "Another", "")
+		f, release := s.hold()
+		k := s.bg([]string{"HOLD=" + f}, `^agent prompt impl-`, s.repo, "261114-k0000")
+		s.crun("261016-c0001")
+		release()
+		r := k.wait()
+		s.check("another attempt started during the turn does not stop this one", r.passed() && !r.said("left work outside"))
+		s.check("whose head is reviewed", s.count(s.log(), `^agent prompt rev-`) == 2)
+	}},
+	{"at-once-stray", func(s *sc) {
+		s.project("main", true)
+		s.change("261016-c0001", "Another", "")
+		f, release := s.hold()
+		k := s.bg([]string{"HOLD=" + f, "STRAY=worktree"}, `^agent prompt impl-`, s.repo, "261114-k0000")
+		s.crun("261016-c0001")
+		release()
+		r := k.wait()
+		s.check("a stray worktree beside another attempt's still stops the attempt", r.code == 3)
+		s.check("naming the implementer's worktree", r.said(`it added the worktree .*stray-impl-`))
+		s.check("not the other attempt's", !r.said(`it added the worktree .*wt-tend-`))
+	}},
+	{"at-once-setting-up", func(s *sc) {
+		s.project("main", true)
+		s.change("261016-c0001", "Another", "")
+		f, release := s.hold()
+		k := s.bg([]string{"HOLD=" + f}, `^agent prompt impl-`, s.repo, "261114-k0000")
+		g, letGo := s.hold()
+		c := s.bg([]string{"WORKTREE_HOLD=" + g}, `^worktree create .*tend: 261016-c0001`, s.repo, "261016-c0001")
+		s.waitFor(func() bool { return exists(g + ".made") }, "the second worktree")
+		release()
+		time.Sleep(1500 * time.Millisecond)
+		s.check("a turn that ends while another attempt sets up waits for it", s.reviews() == 0)
+		letGo()
+		r := k.wait()
+		s.check("then its head is reviewed", r.passed() && !r.said("left work outside"))
+		s.check("and the other attempt passes", c.wait().passed())
 	}},
 }

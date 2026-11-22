@@ -12,8 +12,8 @@
 //	tend version
 //
 // Exit 0: the head is reviewed and the verdict printed. Exit 3: a person is
-// needed, and a Herdr notification says why. Exit 4: another tend holds this
-// runner. Progress is read again on every run from Git, Grove, GitHub, Herdr
+// needed, and a Herdr notification says why. Exit 4: another tend is on this
+// work item. Progress is read again on every run from Git, Grove, GitHub, Herdr
 // and the run folders under TEND_STATE (default ~/.local/state/tend), never
 // from the candidate. After exit 3, or a kill, the same line carries on: an
 // agent still working is waited for, never prompted again, and the one repair
@@ -45,7 +45,8 @@ var (
 	head, pr, account, where            string
 	issue, rec                          any
 	item                                request  // the work item, when not a Grove cycle
-	lock                                *os.File // held open: its flock is the runner's
+	lock                                *os.File // held open: its flock is the work item's
+	setup                               *os.File // held while this tend sets up
 	term                                terminal
 )
 
@@ -253,8 +254,6 @@ func main() {
 		mode, args = args[0], args[1:]
 	}
 
-	// ponytail: one lock for the runner, so one attempt at a time; lock per
-	// attempt when capacity grows.
 	state = os.Getenv("TEND_STATE")
 	if state == "" {
 		x := os.Getenv("XDG_STATE_HOME")
@@ -278,7 +277,7 @@ func main() {
 		watch(args)
 	}
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: tend <repo> <cycle-id>")
+		fmt.Fprintln(os.Stderr, "usage: tend <repo> <id>")
 		os.Exit(2)
 	}
 	repo = must(abs(args[0]))
@@ -291,7 +290,7 @@ func main() {
 		cycle = args[1]
 	}
 	if cycle == "" && mode != "status" {
-		fmt.Fprintln(os.Stderr, "usage: tend <repo> <cycle-id>")
+		fmt.Fprintln(os.Stderr, "usage: tend <repo> <id>")
 		os.Exit(2)
 	}
 	if mode == "status" {
@@ -304,6 +303,7 @@ func main() {
 	if mode == "propose" {
 		propose()
 	}
+	settingUp()
 	tidy()
 	attempt()
 }
@@ -481,6 +481,17 @@ func workState(proj any, w string) (known, open bool) {
 	return false, false
 }
 
+// Grove's sentence on why it would not claim work item w now, or "" when it
+// would or does not say.
+func unclaimable(proj any, w string) string {
+	for _, x := range append(list(get(proj, "cycles")), list(get(proj, "changes"))...) {
+		if str(get(x, "id")) == w && get(x, "claimable") == false {
+			return str(get(x, "verdict"))
+		}
+	}
+	return ""
+}
+
 // tend status <repo>: what waits for whom in the repository, read from Grove's
 // JSON, GitHub and this runner's run folders. Reads only.
 func overview() {
@@ -612,13 +623,8 @@ func status() {
 		run = state + "/runs/" + str(get(r, "id"))
 		fmt.Printf("attempt %s of %s: %s in %s\n", interp(get(r, "id")), cycle, interp(get(r, "branch")), interp(get(r, "checkout")))
 	}
-	held := false
-	if f, err := os.OpenFile(state+"/lock", os.O_WRONLY|os.O_APPEND, 0o644); err == nil {
-		held = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB) != nil
-		f.Close()
-	}
-	if held && strings.Contains(cat(state+"/lock"), "cycle "+cycle+" in "+repo) {
-		fmt.Printf("tend is on it: %s\n", cat(state+"/lock"))
+	if held(repo, cycle) {
+		fmt.Printf("tend is on it: %s\n", cat(lockFile(repo, cycle)))
 	} else if first := strings.SplitN(cat(run+"/status"), "\n", 2)[0]; regexp.MustCompile(`^[^ ]* working:`).MatchString(first) {
 		fmt.Println(first)
 		fmt.Println("next: tend stopped before this finished; run it again, and it waits for an agent still working rather than prompting it again")
@@ -632,30 +638,73 @@ func status() {
 	os.Exit(0)
 }
 
-// One controller on this runner. The lock is an flock on a descriptor no child
-// inherits, so it goes when tend exits or is killed, whatever children (an
-// agent's wait, a shell) outlive it. A lock just dropped is waited for briefly.
+// One tend for each work item of a repository, and one intake pass ("intake")
+// for each repository. A lock is an flock on a descriptor no child inherits,
+// so it goes when tend exits or is killed, whatever children (an agent's wait,
+// a shell) outlive it. A lock just dropped is waited for briefly.
 func takeLock() {
-	f, err := os.OpenFile(state+"/lock", os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
+	f := lockFile(repo, cycle)
+	os.MkdirAll(filepath.Dir(f), 0o755)
+	l, err := os.OpenFile(f, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
 	if err != nil {
-		stop("could not take the lock in %s", state)
+		stop("could not take the lock %s", f)
 	}
 	for i := 0; ; i++ {
-		err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		err = syscall.Flock(int(l.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
 		if err == nil {
 			break
 		}
 		if err != syscall.EWOULDBLOCK {
-			stop("could not take the lock in %s", state)
+			stop("could not take the lock %s", f)
 		}
 		if i == 10 {
-			say("another tend holds this runner: %s", cat(state+"/lock"))
+			say("another tend is on %s in %s: %s", cycle, repo, cat(f))
 			os.Exit(4)
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	lock = f
-	write(state+"/lock", fmt.Sprintf("pid %d, cycle %s in %s\n", os.Getpid(), cycle, repo))
+	lock = l
+	write(f, fmt.Sprintf("pid %d, %s in %s\n", os.Getpid(), cycle, repo))
+}
+
+// The lock file of work item w of repository r.
+func lockFile(r, w string) string {
+	return fmt.Sprintf("%s/locks/%d-%s", state, cksum([]byte(r)), strings.ReplaceAll(w, "/", "_"))
+}
+
+// Whether a tend other than this one holds the lock of work item w of
+// repository r; this tend's own reads as held too. Reads only.
+func held(r, w string) bool {
+	f, err := os.Open(lockFile(r, w))
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	return syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB) != nil
+}
+
+// While one tend fetches, tidies, makes its worktree and claims, other tends
+// on this TEND_STATE wait: settingUp until setUp. A tend records its worktree
+// before it lets the next go.
+func settingUp() {
+	f, err := os.OpenFile(state+"/setup", os.O_WRONLY|os.O_CREATE, 0o644)
+	if err != nil {
+		stop("could not take the setup lock in %s", state)
+	}
+	for err = syscall.EINTR; err == syscall.EINTR; {
+		err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX)
+	}
+	if err != nil {
+		stop("could not take the setup lock in %s", state)
+	}
+	setup = f
+}
+
+func setUp() {
+	if setup != nil {
+		setup.Close()
+		setup = nil
+	}
 }
 
 // ---- agents
@@ -766,10 +815,32 @@ func layout() string {
 
 // Work left anywhere but the attempt's branch in its worktree is a person's.
 // The repository's layout is recorded just before each implementer prompt
-// goes, and a rerun compares with the same record.
+// goes, and a rerun compares with the same record. What tend's other attempts
+// and intake passes made is theirs: the worktree each run or intake folder
+// records and the branch it is on, once any tend setting up has recorded its
+// own.
+// ponytail: tend cannot tell whether an implementer wrote into another
+// attempt's worktree; that attempt's own diff and review would show it.
 func contained() {
 	if !exists(run + "/layout") {
 		return
+	}
+	settingUp()
+	setUp()
+	var dirs, branches []string
+	fs, _ := filepath.Glob(state + "/runs/*/worktree")
+	more, _ := filepath.Glob(state + "/intake/*/worktree")
+	for _, f := range append(fs, more...) {
+		if d := cat(f); f != run+"/worktree" && exists(d) {
+			dirs = append(dirs, d)
+			branches = append(branches, gitQ("-C", d, "branch", "--show-current"))
+		}
+	}
+	theirs := func(l string) bool {
+		if p, found := strings.CutPrefix(l, "worktree "); found {
+			return slices.ContainsFunc(dirs, func(d string) bool { return sameDir(d, p) })
+		}
+		return slices.Contains(branches, strings.TrimPrefix(l, "branch "))
 	}
 	why := ""
 	if b := git("branch", "--show-current"); b != branch {
@@ -780,7 +851,7 @@ func contained() {
 		if why != "" {
 			break
 		}
-		if slices.Contains(was, l) {
+		if slices.Contains(was, l) || theirs(l) {
 			continue
 		}
 		if p, found := strings.CutPrefix(l, "worktree "); found {
@@ -921,6 +992,15 @@ func tidy() {
 			say("left %s: its implementer is working", d)
 			continue
 		}
+		on, w := repo, "intake" // an intake folder's worktree listed here is this repository's
+		if filepath.Dir(r) == state+"/runs" {
+			a := strings.Split(cat(r+"/attempt"), "\n")
+			on, w = a[0], a[min(1, len(a)-1)]
+		}
+		if !(sameDir(on, repo) && w == cycle) && held(on, w) {
+			say("left %s: a tend is on it", d)
+			continue
+		}
 		removeWorktree(d, b)
 		if !exists(d) {
 			os.Remove(f)
@@ -983,9 +1063,11 @@ func propose() {
 	token()
 	proj := project()
 	target, root = str(get(proj, "target")), str(get(proj, "root"))
+	settingUp()
 	base = fetchTarget()
 	loadFlow("propose", base)
 	tidy()
+	setUp()
 	slug, err := out("gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner")
 	if err != nil {
 		stop("gh cannot see %s's repository", repo)
@@ -1053,8 +1135,10 @@ func draft(prefix string, r request) {
 	}
 	id = cat(run + "/id")
 	issue = r.fields
+	settingUp()
 	worktreeFor(b, base, "tend: "+r.ref)
 	write(run+"/worktree", dir+"\n")
+	setUp()
 	cd(dir)
 	impl = "prop-" + r.agent
 
@@ -1218,7 +1302,10 @@ func attempt() {
 			cd(dir)
 			say("carrying on attempt %s in %s", str(get(rec, "id")), dir)
 		} else {
-			tmp := "tend-" + time.Now().Format("150405")
+			if why := unclaimable(proj, cycle); why != "" {
+				stop("%s", why)
+			}
+			tmp := fmt.Sprintf("tend-%s-%d", time.Now().Format("150405"), os.Getpid())
 			dir = term.worktree(tmp, base, "tend: "+cycle)
 			cd(dir)
 			if _, err := sh(nil, os.Stderr, false, "grove", "claim", cycle); err != nil {
@@ -1282,7 +1369,8 @@ func attempt() {
 		os.Rename(run+"/repaired", run+"/repair-asked")
 	}
 	write(run+"/attempt", repo+"\n"+cycle+"\n") // for tend watch
-	write(run+"/worktree", dir+"\n")            // for tidy
+	write(run+"/worktree", dir+"\n")            // for tidy and contained
+	setUp()
 
 	// 2. The build flow: implement, review, repair, publish and requested
 	//    changes as the built-in flow says, or as the project's does.
