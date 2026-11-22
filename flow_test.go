@@ -477,6 +477,7 @@ func sameAgent(text, re string) bool {
 }
 
 func TestFlows(t *testing.T) {
+	t.Parallel()
 	for _, x := range flowScenarios {
 		t.Run(x.name, func(t *testing.T) { x.fn(newSc(t)) })
 	}

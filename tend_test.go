@@ -31,12 +31,18 @@ var tendBin, standIns, binDir string
 func TestMain(m *testing.M) {
 	standIns, _ = filepath.Abs("testdata/bin")
 	// Every scenario starts hundreds of processes: by default half the cores
-	// run scenarios, so the machine stays usable; -parallel overrides it.
+	// run scenarios, so the machine stays usable, and on CI (CI set) twice as
+	// many scenarios as cores, as each spends much of its time waiting on the
+	// processes it starts; -parallel overrides it.
 	flag.Parse()
 	set := false
 	flag.Visit(func(f *flag.Flag) { set = set || f.Name == "test.parallel" })
 	if !set {
-		flag.Set("test.parallel", strconv.Itoa(max(1, runtime.NumCPU()/2)))
+		n := max(1, runtime.NumCPU()/2)
+		if os.Getenv("CI") != "" {
+			n = 2 * runtime.NumCPU()
+		}
+		flag.Set("test.parallel", strconv.Itoa(n))
 	}
 	d, err := os.MkdirTemp("", "tend-bin")
 	if err != nil {
@@ -665,6 +671,7 @@ type scenario struct {
 }
 
 func TestTend(t *testing.T) {
+	t.Parallel()
 	for _, x := range scenarios {
 		t.Run(x.name, func(t *testing.T) { x.fn(newSc(t)) })
 	}
@@ -1598,7 +1605,7 @@ var scenarios = []scenario{
 	}},
 	{"rex-unknown-screen", func(s *sc) {
 		s.project("main", false)
-		r := s.rexrun("TRUST_DIALOG=1", "TRUST_TEXT=Choose a theme")
+		r := s.rexrun("TRUST_DIALOG=1", "TRUST_TEXT=Choose a theme", "TIMEOUT_MS=1000") // its first report waited for that long
 		s.check("under rex, an agent at a screen tend does not know stops for a person", r.code == 3)
 		s.check("saying it did not start", r.said("did not start"))
 		s.check("and is sent no key", !s.has(s.rexlog(), `^rex send-key`))
@@ -2089,7 +2096,7 @@ var landScenarios = []scenario{
 		// Run again, a person merges the pull request while tend waits for a check.
 		s.ci("check pending")
 		reads := s.count(s.log(), `^gh api repos/.*/check-runs`)
-		b := s.bg([]string{"TIMEOUT_MS=20000"}, ``, s.repo, "261114-k0000")
+		b := s.bg([]string{"TIMEOUT_MS=4000"}, ``, s.repo, "261114-k0000")
 		s.waitFor(func() bool { return s.count(s.log(), `^gh api repos/.*/check-runs`) > reads }, "tend to wait for a check")
 		s.touch(s.pr() + ".merged")
 		r = b.wait()
@@ -2287,6 +2294,7 @@ var landScenarios = []scenario{
 }
 
 func TestLanding(t *testing.T) {
+	t.Parallel()
 	for _, x := range landScenarios {
 		t.Run(x.name, func(t *testing.T) { x.fn(newSc(t)) })
 	}

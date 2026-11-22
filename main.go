@@ -886,10 +886,23 @@ func setUp() {
 // choose nothing: never an update, never a model.
 // ponytail: trusts whatever repo the caller passed; the real tool should
 // answer only for repos the owner registered.
+var dialogs = []string{"Hooks can run outside the sandbox", "Yes, I trust this folder", "Yes, add it", "Trust and continue", "esc skip"}
+
+// The first of the dialogs tend knows that is on the agent's screen, or "".
+func dialogOn(name string) (string, string) {
+	screen := strings.Join(strings.Fields(term.read(name)), " ") // a hint or warning may wrap
+	for _, d := range dialogs {
+		if strings.Contains(screen, d) {
+			return d, screen
+		}
+	}
+	return "", screen
+}
+
 func start(name, kind string, fresh bool, args ...string) string {
 	p, err := term.start(name, kind, fresh, args)
 	for range 4 {
-		screen := strings.Join(strings.Fields(term.read(name)), " ") // a hint or warning may wrap
+		answered, screen := dialogOn(name)
 		switch {
 		case strings.Contains(screen, "Hooks can run outside the sandbox"):
 			stop("%s asks to review new or changed hooks, which run outside its sandbox once trusted; tend trusts none. Answer it in its pane, then run tend again", name)
@@ -912,10 +925,19 @@ func start(name, kind string, fresh bool, args ...string) string {
 			}
 			stop("%s did not start: %s", name, code)
 		}
-		// Codex comes out of its dialog as done, not idle.
-		err = nil
-		if _, why := term.wait(name, "60000", "idle", "done"); why != "" {
-			err = errors.New(why)
+		// Codex comes out of its dialog as done, not idle. Another dialog may
+		// follow at once, which no ready state comes before: it is answered
+		// without waiting for one.
+		err = errors.New("timeout")
+		for deadline := time.Now().Add(time.Minute); time.Now().Before(deadline); time.Sleep(500 * time.Millisecond) {
+			if st := term.status(name); st == "idle" || st == "done" {
+				err = nil
+				break
+			}
+			if d, _ := dialogOn(name); d != "" && d != answered {
+				err = nil
+				break
+			}
 		}
 	}
 	stop("%s did not start: its startup dialog would not take tend's answer", name)
@@ -1458,8 +1480,11 @@ func attempt() {
 		cd(repo)
 		proj := project()
 		target = str(get(proj, "target"))
+		was := gitQ("-C", repo, "rev-parse", target)
 		base = fetchTarget()
-		proj = project() // as the target now is, which the fetch may have moved
+		if gitQ("-C", repo, "rev-parse", target) != was {
+			proj = project() // as the target now is, which the fetch moved
+		}
 		loadFlow("build", base)
 		rec = itemRun(proj, cycle)
 		dir = str(get(rec, "checkout"))
@@ -2151,6 +2176,7 @@ func landStep() string {
 		switch {
 		case !ok("git", "merge-base", "--is-ancestor", base, "HEAD"):
 			say("GitHub refused to merge %s, as %s moved: %s", pr, target, why)
+			round = -1 // merged in at once
 		case regexp.MustCompile(`(?i)required status check.*(expected|pending|in progress)`).MatchString(why) && time.Now().Before(until):
 			say("GitHub refused to merge %s for a check it still waits for: %s", pr, why)
 		default:

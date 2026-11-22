@@ -134,7 +134,8 @@ func (r *rex) start(name, kind string, _ bool, args []string) (string, error) {
 		return "", errors.New("split_failed")
 	}
 	b := str(get(parse(s), "block_ids", 0))
-	for deadline := time.Now().Add(60 * time.Second); time.Now().Before(deadline); time.Sleep(500 * time.Millisecond) {
+	ms, _ := strconv.Atoi(timeout())
+	for deadline := time.Now().Add(min(time.Minute, time.Duration(ms)*time.Millisecond)); time.Now().Before(deadline); time.Sleep(500 * time.Millisecond) {
 		switch state7501(r.record(b)) {
 		case "idle", "done":
 			return b, nil

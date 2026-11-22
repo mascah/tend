@@ -13,7 +13,7 @@
 # REX_STALL leaves a prompt untaken and pending.
 set -euo pipefail
 s=$HERDR_STATE
-. "$(dirname "$0")/turn.sh"
+. "${0%/*}/turn.sh"
 args=()
 for a in "$@"; do case $a in --autostart=false | --json | --focus=false | --trim | --split=right) ;; *) args+=("$a") ;; esac; done
 set -- "${args[@]}"
