@@ -124,7 +124,9 @@ only. Every write is that account's, which also lets you approve its PRs:
   reviewed.
 
 The PR and the reviews are looked up on GitHub each run, never remembered, so
-a rerun after any interruption repeats neither. tend never merges.
+a rerun after any interruption repeats neither. tend merges only where the
+project's flow has a `land` step (see [Landing](#landing-merging-one-candidate-at-a-time));
+otherwise merging stays with people.
 
 When a person requests changes (GitHub's "Request changes") on the PR's head,
 the next run gives their review and line comments to the implementer's own
@@ -353,6 +355,81 @@ flow without it publishes nothing. tend refuses, exiting 3 before any agent
 starts, a file that is not YAML, holds a field it does not know, names a
 step, harness, prompt or outcome that does not exist, or loops with no
 limited step.
+
+`publish` gives `ok`, `requested` when a person with write access requested
+changes on the head, and, in a flow that names it, `approved` when the newest
+review on the head by such a person approves.
+
+### Landing: merging one candidate at a time
+
+`land` is tend's own too, and no built-in flow has it, so a project that adds
+none sees tend merge nothing. At `land`, tend takes a head that passed review
+whose pull request is open and, one landing at a time for each repository on
+this runner:
+
+1. merges the target into the branch when the head lacks the target's tip,
+   as a merge commit pushed without force. A clean merge keeps the verdict:
+   the merge commit gets `tend/review` as carried from the reviewed head,
+   with no new review and no new description. A conflict is aborted and
+   gives `conflict`;
+2. waits, for at most `TIMEOUT_MS`, for every check GitHub reports on the
+   head, check runs and commit statuses alike. Success, neutral and skipped
+   pass; any other finish gives `failed`, and the next step's prompt is
+   given the failed checks' names and links as `{checks}`. A head with no
+   check but `tend/review` stops for a person, so a project with no CI on
+   pull requests cannot land;
+3. squash-merges the pull request at exactly that head, as the publishing
+   account, its title and number the commit's subject and its description
+   the body. If the target moved it starts again from 1; if GitHub still
+   expects a required check, it goes back to waiting; any other refusal
+   stops for a person with GitHub's reason.
+
+One candidate lands for each CI run. tend ships `prompts/conflict.md` and
+`prompts/failed.md` for the steps that follow `conflict` and `failed`. A
+supervised flow sends `publish`'s `approved` to `land`, so a person with
+write access approves each head before it lands, and `tend watch` runs the
+attempt again when it sees the approval:
+
+```yaml
+    publish:
+      next: {ok: end, approved: land, requested: request}
+    land:
+      next: {ok: end, conflict: resolve, failed: fix}
+    resolve:
+      continue: implement
+      prompt: prompts/conflict.md
+      result: commit
+      limit: 1
+      next: {ok: review}
+    fix:
+      continue: implement
+      prompt: prompts/failed.md
+      result: commit
+      limit: 1
+      next: {ok: review}
+```
+
+An autonomous flow lands every head that passed review, with the same
+`land`, `resolve` and `fix` steps:
+
+```yaml
+    publish:
+      next: {ok: land, requested: request}
+```
+
+Set a branch rule on the target that requires the project's CI and
+`tend/review` and requires branches to be up to date before merging: tend
+checks the head itself, and the rule closes the moment between its check and
+GitHub's merge. The publishing account must be allowed to merge and must not
+be able to bypass the rule; for an account that administers the repository,
+turn on "Do not allow bypassing the above settings". A rule that dismisses
+approvals on new commits undoes an approval whenever tend merges the target
+in. tend reads an approval once, at `publish`: a supervised project that wants
+an approval withdrawn, or changes requested, while the candidate waits to
+hold the merge sets the rule to require an approving review, so that GitHub
+refuses and tend stops with its reason.
+
+### Watch's count
 
 The flow file also says how many attempts `tend watch` keeps going:
 

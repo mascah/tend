@@ -17,8 +17,9 @@ head is [review](../review/spec.md); opening proposal pull requests from
 requests is [intake](../intake/spec.md); the closing line and Jira link of an
 issue build are [work-items](../work-items/spec.md); `tend watch` running an
 attempt again when changes are requested is
-[watch-and-status](../watch-and-status/spec.md). tend never merges a pull
-request; merging stays with people.
+[watch-and-status](../watch-and-status/spec.md). tend merges a pull request
+only at a `land` step, as [landing](../landing/spec.md) says; in a flow
+without one, merging stays with people.
 
 ## Requirements
 
