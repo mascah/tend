@@ -156,7 +156,8 @@ Check: T-05's `README.md` and `grove/specs/publication/spec.md` changed on main 
 
 ## Reconciliation
 
-<!-- One line per change spec, once applied to its maintained spec:
-
-    - record-editing: applied to specs/record-editing/spec.md
--->
+- flows: applied to grove/specs/flows/spec.md
+- landing: applied to grove/specs/landing/spec.md, a new maintained spec
+- publication: applied to grove/specs/publication/spec.md
+- review: applied to grove/specs/review/spec.md
+- watch-and-status: applied to grove/specs/watch-and-status/spec.md
