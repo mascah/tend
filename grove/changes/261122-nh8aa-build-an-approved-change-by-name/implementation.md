@@ -76,11 +76,18 @@ Check: CI on Grove v0.14.0 is not seen until this branch's pull request runs.
 
 ## Scenarios
 
-<!-- Before finishing, one line per scenario of the change specs: the check
-that shows it and its result, or `unverified` and why:
-
-    - record-editing "Update the note on a legacy record": tests/test_cli.py test_edit_legacy, passed
--->
+- attempts "A change claimed by name": tend_test.go TestTend/change-claim, passed
+- attempts "A rerun after a stop": tend_test.go TestTend/change-resume, passed
+- attempts "A change that waits": tend_test.go TestTend/change-waits, passed
+- attempts "A member of a cycle": tend_test.go TestTend/change-in-cycle, passed
+- attempts "Its status": tend_test.go TestTend/change-claim ("status finds the attempt", "and what it recorded"), passed
+- attempts "Its pull request": tend_test.go TestTend/change-claim ("one pull request is opened, onto the target", "its description ends with the change"), passed
+- attempts "The change landed some other way": tend_test.go TestTend/change-tidy, passed
+- watch-and-status "A repository with work at every stage": tend_test.go TestTend/overview, passed
+- watch-and-status "A change that waits": tend_test.go TestTend/change-waits ("the overview gives its verdict"), passed
+- watch-and-status "An attempt at a change": tend_test.go TestTend/change-overview, passed
+- watch-and-status "A cycle done": tend_test.go TestTend/overview ("an attempt whose cycle is done is left out"), passed
+- watch-and-status "Jira requests": tend_test.go TestTend/jira-propose ("the overview lists a Jira request waiting, not the handled ones"), passed (unchanged by this change)
 
 ## Reconciliation
 
