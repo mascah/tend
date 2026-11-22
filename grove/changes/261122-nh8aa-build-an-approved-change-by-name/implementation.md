@@ -59,7 +59,20 @@ names `<change-id>`.
 
 ### T-02 — Grove 0.14.0 is the Grove tend needs
 
-Status: not started
+Status: done
+
+Evidence: `.github/workflows/ci.yml` installs Grove `v0.14.0`. `gh release
+view v0.14.0 -R mascah/grove` shows the release, with 5 assets. The tests ran
+locally against `grove 0.14.0`. In `README.md`, "What it asks of Grove" names
+`grove claim <change-id>` and Grove 0.14.0 or later. "Run it" lists
+`tend <repo> <change-id>` and says a cycle is needed only to build several
+changes together. "How work reaches tend" item 2 says the same. `tend watch`
+is still described as starting only cycles marked `unattended`, and "Not
+picked up" adds approved changes in no cycle. The README's intro, its status
+paragraphs and its "Is there an attempt?" row now name changes too, because
+they described cycles only.
+
+Check: CI on Grove v0.14.0 is not seen until this branch's pull request runs.
 
 ## Scenarios
 
