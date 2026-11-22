@@ -20,9 +20,10 @@ Nothing left to settle before it is built.
 
 ## 2. Grove: scheduling leaves merges
 
-Status: proposed in [Grove PR 182](https://github.com/mascah/grove/pull/182).
-Change 261122-7vht2 (named claims) depends on 261122-6ndwb (requirement
-reconciliation) and requires the [constitution amendment](https://github.com/mascah/grove/pull/181).
+Status: built, merged and released in Grove 0.14.0. Proposed in
+[Grove PR 182](https://github.com/mascah/grove/pull/182); change 261122-6ndwb
+(requirement reconciliation) built in PR 183 and 261122-7vht2 (named claims)
+in PR 185, after the [constitution amendment](https://github.com/mascah/grove/pull/181).
 
 Merging the proposal approves the change. A runner can claim it directly
 once every dependency is archived as finished on the target and its
@@ -38,25 +39,37 @@ resolved in the proposals.
 
 ## 3. tend: several pieces of work at once, and a merge train
 
-Status: not started. Needs steps 1 and 2.
+Status: proposed as five changes, none approved or built yet. The bugfix is
+in pull request #19 and the other four in the pull request that added this
+line.
 
 How many pieces run at once is a setting in the flow file. Finished
-candidates land through a merge train: each is tested by CI combined with the
-target and the candidates ahead of it. A candidate that fails in the train
-goes back to its implementer and its new head is reviewed again.
+candidates land through a merge train, one at a time: each is tested by CI
+combined with the target as the candidates ahead of it left it. A candidate
+that fails in the train goes back to its implementer and its new head is
+reviewed again.
 
-To settle first:
-- Who runs the train: GitHub's merge queue, or tend as a step. The merge
-  queue waits for every required check on the train's own commit, so
-  `tend/review` would have to be reported there too, and whether a repository
-  owned by a personal account can use it is not verified.
-- Whether the reviewer's verdict stays with the head it reviewed and is not
-  repeated for each position in the train. The direction document assumes so;
-  the owner has not confirmed it.
-- What the attempts spec says about the one-tend lock and about worktrees
-  that appear during a turn, both of which parallel work changes.
-- How automatic recovery resumes a surviving worker or retries a dead
-  one, and how a change parked for an owner stays out of automatic selection.
+The changes, in the order they are built:
+- 261122-fh9h2, a bugfix: requested changes count only from people with
+  write access.
+- 261122-nh8aa: `tend <repo> <change-id>` builds an approved change that no
+  cycle lists.
+- 261122-9vbmc: several attempts at once. A lock for each work item, and
+  `watch: {at_once: N}` in the flow file.
+- 261122-rpkqa: a `land` step that lands reviewed candidates one at a time.
+- 261122-hjhmn: watch runs again an attempt whose tend died, and a step
+  whose agent is gone is asked once more.
+
+Settled, as direction decisions 16 to 22 record:
+- tend runs the train as a step, one candidate at a time. GitHub documents
+  its merge queue only for repositories an organization owns.
+- The reviewer's verdict stays with the head it reviewed, and carries
+  across a clean merge of the target.
+- The lock is one tend per work item, and containment allows for what
+  tend's other attempts made.
+- A dead tend's attempt is run again by watch; a step is asked again only
+  when its agent is gone. A parked change stays in flight in Grove, so
+  nothing selects it again.
 
 ## 4. tend: the autonomous flow
 

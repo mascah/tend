@@ -99,11 +99,13 @@ point before the tend rewrite. Lines marked (inference) await confirmation.
    How many pieces run at once, and which first, is a setting in the flow file.
 9. **Several pieces of work run at once**, easily controlled by the person
    running it, and finished candidates land through a merge train: each is
-   tested by CI combined with the target and the candidates ahead of it, with
-   several tested at once. A candidate that fails in the train or no longer
-   merges goes back to its implementer, and its new head is reviewed again. The
-   reviewer's verdict stays with the head it reviewed and is not repeated for
-   each position in the train (inference).
+   tested by CI combined with the target and the candidates ahead of it. A
+   candidate that fails in the train or no longer merges goes back to its
+   implementer, and its new head is reviewed again. Amended 2026-11-21: the
+   train takes one candidate at a time, where this first said "with several
+   tested at once" (decision 16); and the owner confirmed that the reviewer's
+   verdict stays with the head it reviewed and is not repeated for each
+   position in the train (decision 17).
 10. **No Dolt or other database for now.** Revisit only if parallel work shows a
     need for a store with many writers and queries.
 11. **Order.** tend is rewritten around steps before the new project (a typing
@@ -142,15 +144,58 @@ point before the tend rewrite. Lines marked (inference) await confirmation.
     reconciliation can point back to it and wait for the owner's decision.
     This example illustrates the intended graph; the drafts predate it.
 
+Decisions 16 to 22 settle step 3. The owner made them in an explore on
+2026-11-21, each by choosing the option quoted or by "Yes" to the round
+before the proposals were written.
+
+16. **tend runs the train, one candidate at a time.** The owner chose "tend,
+    one at a time" over tend testing several at once and over GitHub's merge
+    queue. A `land` step a flow opts into merges the target into the front
+    candidate, waits for CI on that head, then squash-merges it. GitHub's
+    "branch must be up to date" rule is the guarantee. The ceiling is one
+    landing for each CI run. tend merges only in a project whose flow file
+    has the step. GitHub documents its merge queue only for repositories an
+    organization owns; tend and Grove are owned by a personal account.
+17. **The verdict carries across a clean merge of the target.** "Carried if
+    the merge is clean": tend checks the new head is exactly Git's merge of
+    the reviewed head and the target, and only CI judges the combination. Any
+    commit the implementer makes is a new head and is reviewed again.
+18. **A person's approval is an approving review.** In a supervised flow a
+    review that approves the head, from a person with write access, sends the
+    candidate to the train. An autonomous flow sends every head that passed
+    review.
+19. **The count is attempts being worked on**, on this runner, in that
+    repository: building, in review, repairing or in the train. An attempt
+    that waits for a person, or is reviewed and waits for a merge, frees its
+    slot. One setting, `watch: {at_once: N}` in the flow file, opts a project
+    in: watch then starts every piece Grove calls claimable, oldest first.
+    The person running watch can lower N for their machine and never raise
+    it. Without the setting watch behaves as before.
+20. **Containment allows for tend's other attempts.** A worktree or branch
+    another attempt or intake pass of the runner made is not the
+    implementer's doing; anything else new still stops the attempt. The lock
+    is one tend per work item, in place of one per runner.
+21. **A step is asked again with no person only when its agent is gone.**
+    Watch runs again an attempt whose tend died; a surviving agent is waited
+    for; a step whose agent has no pane is asked once more in a new session.
+    An agent that is idle, blocked or unknown with no result stays a
+    person's. Parking needs nothing new: a stopped attempt keeps its change
+    in flight, so nothing claims it again.
+22. **Requested changes count only from people with write access.** tend
+    acted on a change request from any GitHub account. The owner chose a
+    bugfix, built first; approvals follow the same rule.
+
 ## Implied order (inference)
 
 1. tend: rewrite around steps and a flow file, with Go tests. Built as
    change 261121-gapde.
 2. Grove: reconcile stale requirements, then allow independent approved
-   changes and optional cycles to be claimed by name. Proposed in PR 182.
-3. tend: parallel work and the merge train; the autonomous flow's new steps
-   (decompose a goal, check a proposal against decision 3, plan); the standing
-   agent. Each with its own tests.
+   changes and optional cycles to be claimed by name. Built and released in
+   Grove 0.14.0.
+3. tend: parallel work and the merge train, proposed as changes 261122-fh9h2,
+   261122-nh8aa, 261122-9vbmc, 261122-rpkqa and 261122-hjhmn; then the
+   autonomous flow's new steps (decompose a goal, check a proposal against
+   decision 3, plan); the standing agent. Each with its own tests.
 4. The typing app, as the first project in the autonomous mode.
 
 ## Step 2 review findings
@@ -211,15 +256,8 @@ remain options to evaluate against a concrete need.
   how a runner identifies the revision used for a particular decision, and
   the file format and reference syntax. Decision 14 settles the identity
   and authority.
-- How tend detects a lost worker, reattaches to a surviving session and
-  retries from a durable step. Automatic local recovery matters for
-  unattended work. Lease timing, takeover by another machine and the
-  choice of a shared store remain open.
-- Who runs the merge train. GitHub's merge queue needs CI to run on its
-  `merge_group` event and waits for every required check on the train's own
-  commit, so `tend/review` would have to be reported there too; whether it is
-  available to a repository owned by a personal account is not verified. The
-  alternative is tend running the train as a step, which means tend merges.
+- Lease timing, takeover by another machine and the choice of a shared
+  store. Recovery on one machine is settled by decision 21.
 - Where to keep broad goals and discovered requests before they become
   outcome pitches or changes, and how trackers expose their Grove links.
 - What a built pitch is: a throwaway to try, or the real change parked on an

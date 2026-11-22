@@ -1,0 +1,6 @@
+title: "Recover with no one there"
+created: 2026-11-22T06:48:52Z
+description: tend watch runs again an attempt whose tend died, and a step whose agent is gone is asked once more in a new session
+schema: default
+depends_on: [261122-rpkqa]
+base: 40ca101ace0c26ffa479c672b821fbdfd8a1ff96
