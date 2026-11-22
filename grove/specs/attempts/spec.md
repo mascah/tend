@@ -10,8 +10,8 @@ they differ, keep the rule and record the difference under "Known discrepancies"
 
 ## Boundaries
 
-This covers the command line and exit statuses of an attempt, the runner
-lock, finding or claiming the attempt of a Grove cycle or of a change in no
+This covers the command line and exit statuses of an attempt, the lock of
+each work item and the setting up tends take in turn, finding or claiming the attempt of a Grove cycle or of a change in no
 cycle, where its worktree starts, implementing until the branch holds a
 finished candidate, recovery after a stop or kill, and the run folder and its `status` record. These hold for
 every attempt, whatever its work item. Reviewing the head and the one repair
@@ -33,7 +33,7 @@ whatever the verdict's conclusion, printing the verdict JSON on standard
 output and notifying that the branch or pull request is ready; exit 3 when a
 person is needed, saying why on standard error, recording it in `status` as
 `needs-you` and notifying through the terminal; exit 4 when another tend holds
-the runner; and exit 2 with `usage: tend <repo> <cycle-id>` when no
+the work item's lock; and exit 2 with `usage: tend <repo> <id>` when no
 repository or work item is given.
 
 #### Scenario: A cycle reaches a verdict
@@ -53,18 +53,21 @@ repository or work item is given.
 #### Scenario: No work item named
 
 - WHEN the owner runs `tend <repo>`
-- THEN tend prints `usage: tend <repo> <cycle-id>` and exits 2
+- THEN tend prints `usage: tend <repo> <id>` and exits 2
 
-### Requirement: One tend per runner
+### Requirement: One tend for each work item
 
-While a tend holds the lock in TEND_STATE, the system shall refuse another
-`tend <repo> <item>` or `tend propose <repo>` using that TEND_STATE, after
-waiting about two seconds for the lock to come free, naming the holder's pid,
-work item and repository, prompting no agent and exiting 4; and the lock
-shall be released when its holder exits or is killed, whatever agents outlive
-it.
+While a tend holds the lock of a work item of a repository in TEND_STATE, the
+system shall refuse another `tend <repo> <item>` on that work item in that
+repository using that TEND_STATE, after waiting about two seconds for the
+lock to come free, naming the holder's pid, work item and repository,
+prompting no agent and exiting 4; it shall likewise allow one `tend propose`
+pass for a repository at a time; a tend on another work item or another
+repository, and an intake pass beside attempts, shall run at the same time;
+and a lock shall be released when its holder exits or is killed, whatever
+agents outlive it.
 
-#### Scenario: A second tend while one runs
+#### Scenario: A second tend on the same work item
 
 - GIVEN a tend whose implementer is still on its turn
 - WHEN the owner runs tend on the same cycle again
@@ -77,13 +80,80 @@ it.
 - WHEN the owner runs tend on the cycle again
 - THEN it takes the lock, says it is carrying on the attempt, and exits 0
 
+#### Scenario: Two work items at once
+
+- GIVEN a tend on cycle K whose implementer is still on its turn, and
+  approved change C in no cycle, which shares no planned file with K
+- WHEN the owner runs `tend <repo> <C's ID>`
+- THEN it claims C in a worktree of its own, both attempts reach a verdict,
+  and each implementer was prompted once
+
+#### Scenario: Intake beside a build
+
+- GIVEN a tend on cycle K whose implementer is still on its turn, and issue
+  #1 labelled `tend`
+- WHEN the owner runs `tend propose <repo>`
+- THEN the proposal is drafted and its pull request opens, and K's attempt
+  reaches its verdict
+
+#### Scenario: A second intake pass
+
+- GIVEN a `tend propose <repo>` whose drafter is still on its turn
+- WHEN the owner runs `tend propose <repo>` again
+- THEN it exits 4 naming the first pass's pid
+
+### Requirement: Attempts set up one at a time
+
+While one tend fetches the target, tidies finished worktrees, makes its
+worktree and claims, the system shall have any other tend using that
+TEND_STATE wait before doing the same, so that tends started together each
+end with a worktree, a branch and a record of their own; a tend shall record
+its worktree in its run folder, and an intake pass a request's worktree in
+its intake folder, before it lets the next go; and a tend shall wait for one
+that is setting up before it checks what "Work stays on the attempt's branch"
+says.
+
+#### Scenario: Two started together
+
+- GIVEN approved changes A and B in no cycle that share no planned file
+- WHEN the owner starts `tend <repo> <A's ID>` and `tend <repo> <B's ID>` in
+  the same second
+- THEN Grove holds one record for each, each attempt has its own worktree,
+  both reach a verdict, and the repository has no `tend-*` branch afterwards
+
+#### Scenario: A turn ends while another attempt sets up
+
+- GIVEN a tend on cycle K whose implementer's turn ends while a tend on
+  change C has made its worktree and is still claiming
+- WHEN K's tend checks the repository
+- THEN it waits for C's tend to finish setting up, K's head is reviewed, and
+  tend does not stop for C's worktree or branch
+
+### Requirement: A refused claim leaves nothing behind
+
+If a piece has no attempt to carry on and `grove changes --json` says Grove
+would not claim it, or Grove refuses its claim, then the system shall stop
+for a person with Grove's sentence and leave no worktree or branch it made
+for the claim.
+
+#### Scenario: A piece that overlaps one in flight
+
+- GIVEN change A is in flight and names `a.txt`, and approved change B, in no
+  cycle, names `a.txt`
+- WHEN the owner runs `tend <repo> <B's ID>`
+- THEN tend exits 3, standard error holds Grove's sentence that B shares
+  `a.txt` with A, and the repository has the worktrees and branches it had
+  before
+
 ### Requirement: Carry on the attempt or claim the cycle
 
 When tend runs on a Grove cycle, the system shall carry on the newest attempt
 record for the cycle in `grove changes --json` whose checkout still holds its
 branch, and otherwise make a new worktree, run `grove claim <cycle-id>` inside
-it and delete the temporary `tend-HHMMSS` branch the worktree was made with,
-stopping for a person if the claim is refused; with or without origin.
+it and delete the temporary `tend-HHMMSS-<pid>` branch the worktree was made
+with, named for the time and tend's process so that tends setting up in the
+same second each make their own, stopping for a person if the claim is
+refused; with or without origin.
 
 #### Scenario: A rerun after a stop
 
@@ -222,8 +292,11 @@ When an implementer turn that builds, repairs or makes requested changes
 ends, and on every run before the head is reviewed, if the attempt's
 worktree is on a branch other than the attempt's, or the repository has a
 worktree, or a local branch holding commits the target lacks, that it did
-not have just before the implementer was last prompted, the system shall
-stop for a person naming what it found, and review and publish nothing.
+not have just before the implementer was last prompted and that no other
+attempt or intake pass of this runner made, the system shall stop for a
+person naming what it found, and review and publish nothing. What another
+attempt or intake pass made is the worktree its run or intake folder records
+and the branch that worktree is on.
 
 #### Scenario: The implementer adds a worktree
 
@@ -244,6 +317,22 @@ stop for a person naming what it found, and review and publish nothing.
   head
 - WHEN the owner runs tend on the cycle
 - THEN tend exits 3 naming the branch, and no reviewer is prompted
+
+#### Scenario: Another attempt starts during the turn
+
+- GIVEN a tend on cycle K whose implementer is on its turn, during which the
+  owner runs tend on change C, which makes its worktree and branch and
+  commits on it
+- WHEN K's implementer's turn ends
+- THEN K's head is reviewed, and tend does not stop for C's worktree or
+  branch
+
+#### Scenario: A stray worktree beside another attempt's
+
+- GIVEN K's implementer adds a worktree of its own during a turn in which
+  an attempt at change C also starts
+- WHEN K's implementer's turn ends
+- THEN tend exits 3 naming the implementer's worktree and not C's
 
 ### Requirement: Recover without prompting twice
 
@@ -327,3 +416,4 @@ None.
 - Written when tend adopted Grove (2026-11-16).
 - [261117-bez30](../../changes/archive/261117-bez30-the-implementer-leaves-delivery-to-tend/) The implementer leaves delivery to tend
 - [261122-nh8aa](../../changes/archive/261122-nh8aa-build-an-approved-change-by-name/) Build an approved change by name
+- [261122-9vbmc](../../changes/archive/261122-9vbmc-several-attempts-at-once/) Several attempts at once

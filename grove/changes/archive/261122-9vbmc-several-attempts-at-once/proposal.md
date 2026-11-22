@@ -54,6 +54,11 @@ stops for a person frees its slot, so work that does not overlap it goes on.
   intake pass, in place of the runner's one lock; what exit 4 means; and the
   usage line, which becomes `usage: tend <repo> <id>`.
 - Tends that start together setting up one at a time.
+- The temporary branch a new worktree is made with, named for the time and
+  tend's process (`tend-HHMMSS-<pid>`) in place of the time alone, so that
+  tends setting up in the same second each make their own worktree. Added in
+  implementation, on 2026-11-22: two tends started in the same second made
+  the same `tend-HHMMSS` worktree.
 - A claim Grove refuses leaving no worktree or branch behind.
 - The containment rule allowing for what tend's other attempts and intake
   passes made, and waiting for one that is setting up.

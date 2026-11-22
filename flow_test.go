@@ -13,6 +13,9 @@ func faultOf(text string) string {
 	if why := decode(text, &ff); why != "" {
 		return why
 	}
+	if why := ff.Watch.fault(); why != "" {
+		return why
+	}
 	for name, f := range ff.named() {
 		if *f != nil {
 			if why := (*f).fault(name, func(p string) bool { return strings.HasPrefix(p, "p") }); why != "" {
@@ -261,12 +264,37 @@ var flowScenarios = []scenario{
 		s.project("main", true)
 		p := s.tendIn(nil, "flow", s.repo)
 		s.check("tend flow prints the flows in effect", p.code == 0 && strings.Contains(p.out, "# build: built in") && strings.Contains(p.out, "# propose: built in"))
+		s.check("with no watch in a repository without the setting", !strings.Contains(p.out, "watch"))
 		s.commit("Start our own flow", map[string]string{"tend/flow.yaml": p.out})
 		s.check("saved as the project's file, it is valid", faultOf(p.out) == "")
 		r := s.run("REVIEW=repairable")
 		s.check("and attempts behave as before", r.passed() && s.prompts("An independent review") == 1 && s.reviews() == 2)
 		p = s.tendIn(nil, "flow", s.repo)
 		s.check("tend flow then says the flows are the project's", strings.Contains(p.out, "# build: tend/flow.yaml on origin/main"))
+		s.check("and still prints no watch", !strings.Contains(p.out, "watch"))
+	}},
+	{"flow-watch-count", func(s *sc) {
+		s.project("main", true)
+		s.commit("Keep two going", map[string]string{"tend/flow.yaml": "watch:\n  at_once: 2\n"})
+		p := s.tendIn(nil, "flow", s.repo)
+		s.check("tend flow prints the count", p.code == 0 && strings.Contains(p.out, "\nwatch:\n  at_once: 2\n"))
+		s.check("and both built-in flows", strings.Contains(p.out, "# build: built in") && strings.Contains(p.out, "# propose: built in"))
+		s.check("which saved again is valid", faultOf(p.out) == "")
+		s.check("and the cycle is built as the built-in flow says", s.run().passed() && s.reviews() == 1)
+	}},
+	{"flow-watch-zero", func(s *sc) {
+		s.project("main", true)
+		s.commit("Keep none going", map[string]string{"tend/flow.yaml": "watch:\n  at_once: 0\n"})
+		r := s.run()
+		s.check("a count of 0 stops as not valid, naming the file and at_once", r.code == 3 && r.said(`^tend: tend/flow\.yaml gives watch an at_once of 0, where at_once is a whole number of at least 1$`))
+		s.check("and starts no agent", s.agentStarts() == 0)
+		for text, want := range map[string]string{
+			"watch:\n  at_once: two\n":             "an at_once of two",
+			"watch:\n  at_once: 2\n  first: old\n": "field first not found in watch",
+			"watch: {}\n":                          "gives watch no at_once",
+		} {
+			s.check("not valid: "+want, strings.Contains(faultOf(text), want))
+		}
 	}},
 	{"flow-reviewer-writing", func(s *sc) { // review finding 1
 		s.project("main", false)

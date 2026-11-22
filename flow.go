@@ -40,8 +40,40 @@ type flow struct {
 }
 
 type flowFile struct {
-	Build   *flow `yaml:"build,omitempty"`
-	Propose *flow `yaml:"propose,omitempty"`
+	Watch   *watchSetting `yaml:"watch,omitempty"`
+	Build   *flow         `yaml:"build,omitempty"`
+	Propose *flow         `yaml:"propose,omitempty"`
+}
+
+// How many attempts tend watch keeps going in the repository: with it, watch
+// starts what Grove calls claimable; without, it starts only cycles marked
+// unattended.
+type watchSetting struct {
+	AtOnce any `yaml:"at_once"` // a whole number of at least 1, checked by fault
+}
+
+// Why the setting is not valid, said after the file's name, or "".
+func (w *watchSetting) fault() string {
+	if w == nil {
+		return ""
+	}
+	if n, isInt := w.AtOnce.(int); !isInt || n < 1 {
+		if w.AtOnce == nil {
+			return "gives watch no at_once, where at_once is a whole number of at least 1"
+		}
+		return fmt.Sprintf("gives watch an at_once of %v, where at_once is a whole number of at least 1", w.AtOnce)
+	}
+	return ""
+}
+
+// The count, or -1 for none.
+func (w *watchSetting) count() int {
+	if w != nil {
+		if n, isInt := w.AtOnce.(int); isInt {
+			return n
+		}
+	}
+	return -1
 }
 
 func (ff *flowFile) named() map[string]**flow {
@@ -238,7 +270,7 @@ func decode(s string, ff *flowFile) string {
 		msg := strings.Join(strings.Fields(strings.TrimPrefix(err.Error(), "yaml: ")), " ")
 		return "is not a flow file tend can read: " + strings.NewReplacer("unmarshal errors: ", "",
 			"in type main.step", "in a step", "in type main.flowFile", "at the top, where a flow is build or propose",
-			"in type main.flow", "in a flow").Replace(msg)
+			"in type main.flow", "in a flow", "in type main.watchSetting", "in watch").Replace(msg)
 	}
 	return ""
 }
@@ -265,6 +297,9 @@ func flowsAt(rev string) (flowFile, map[string]string) {
 	if rev != "" && ok("git", "-C", repo, "cat-file", "-e", rev+":"+flowPath) {
 		s, _ := quiet("git", "-C", repo, "show", rev+":"+flowPath)
 		if why := decode(s, &ff); why != "" {
+			stop("%s %s", flowPath, why)
+		}
+		if why := ff.Watch.fault(); why != "" {
 			stop("%s %s", flowPath, why)
 		}
 		has := func(p string) bool { _, ok := promptText(rev, p); return ok }
@@ -296,6 +331,23 @@ func flowsAt(rev string) (flowFile, map[string]string) {
 	return ff, from
 }
 
+// The count tend watch keeps going at rev, the target as origin holds it, or
+// -1 for none; and why the flow file is not valid, or "". Stops nothing.
+func watchCount(rev string) (int, string) {
+	if !ok("git", "-C", repo, "cat-file", "-e", rev+":"+flowPath) {
+		return -1, ""
+	}
+	s, _ := quiet("git", "-C", repo, "show", rev+":"+flowPath)
+	var ff flowFile
+	if why := decode(s, &ff); why != "" {
+		return -1, flowPath + " " + why
+	}
+	if why := ff.Watch.fault(); why != "" {
+		return -1, flowPath + " " + why
+	}
+	return ff.Watch.count(), ""
+}
+
 // tend flow <repo>: the flows the repository's attempts would run, as a flow
 // file, each said to be the project's or tend's own. Reads only.
 func printFlows() {
@@ -318,6 +370,9 @@ func printFlows() {
 	}
 	ff, from := flowsAt(rev)
 	fmt.Printf("# The flows tend runs in %s, read from %s. Saved as %s, with\n# the prompt files it names under tend/ where yours differ from tend's own,\n# it is what attempts run.\n", repo, rev, flowPath)
+	if ff.Watch != nil {
+		fmt.Printf("\n# watch: %s on %s\nwatch:\n  at_once: %d\n", flowPath, rev, ff.Watch.count())
+	}
 	for _, name := range []string{"build", "propose"} {
 		fmt.Printf("\n# %s: %s\n", name, from[name])
 		if from[name] == "built in" {
