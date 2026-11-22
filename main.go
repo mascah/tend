@@ -662,7 +662,7 @@ func takeLock() {
 func start(name, kind string, fresh bool, args ...string) string {
 	p, err := term.start(name, kind, fresh, args)
 	for range 4 {
-		screen := term.read(name)
+		screen := strings.Join(strings.Fields(term.read(name)), " ") // a hint or warning may wrap
 		switch {
 		case strings.Contains(screen, "Hooks can run outside the sandbox"):
 			stop("%s asks to review new or changed hooks, which run outside its sandbox once trusted; tend trusts none. Answer it in its pane, then run tend again", name)

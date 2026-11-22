@@ -1335,6 +1335,13 @@ var scenarios = []scenario{
 		s.check("saying so", r.said("asks to review new or changed hooks"))
 		s.check("and is sent no key", !s.has(s.rexlog(), `^rex send-key`))
 	}},
+	{"rex-hooks-wrapped", func(s *sc) {
+		s.project("main", false)
+		r := s.rexrun("TRUST_DIALOG=1", "TRUST_TEXT=Hooks can run outside the\nsandbox after you trust them.\n  enter continue · esc\nskip")
+		s.check("a hooks review wrapped in a narrow pane still stops for a person", r.code == 3)
+		s.check("saying so", r.said("asks to review new or changed hooks"))
+		s.check("and is sent no key, not even Esc", !s.has(s.rexlog(), `^rex send-key`))
+	}},
 	{"rex-notice", func(s *sc) {
 		s.project("main", false)
 		r := s.rexrun("NOTICE=1", "TRUST_DIALOG=1")
