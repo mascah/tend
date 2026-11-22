@@ -120,11 +120,14 @@ nothing (a request it judges out of scope, say), its reply goes on the PR as a
 comment and the request is not asked again; request changes again to have it
 tried. After the new head, the implementer rewrites the commit message and
 tend puts it on the PR, unless a person has edited the title or description
-since tend set them. Plain comments are not acted on.
+since tend set them. Plain comments are not acted on, nor is a request from
+anyone without write access: tend acts only on a review whose author GitHub
+gives as owner, member or collaborator (in an organization's repository, a
+member with read access only still counts), and says whose request it left.
 
 `tend watch` runs in a pane of its own and does that without you: every
 `WATCH_SECONDS` (default 300) it runs tend on each attempt whose PR is open
-with a change request on its head, and `tend propose` on each repository it
+with a change request on its head from a person with write access, and `tend propose` on each repository it
 was given. In each of those repositories it then starts the oldest cycle that
 Grove would claim and whose plan marks it `unattended`: marking a cycle so when
 you plan it is how you let it be built with no one there. An attempt or request
@@ -222,7 +225,8 @@ With `tend watch <repo>...` running, each pass (every `WATCH_SECONDS`, default
    not marked `unattended` is built only when someone runs
    `tend <repo> <cycle-id>`.
 3. **Requested changes.** On an implementation pull request, GitHub's
-   "Request changes" (not a plain comment) goes to the implementer. Either it
+   "Request changes" (not a plain comment) by an owner, member or
+   collaborator goes to the implementer; anyone else's is left. Either it
    commits, the new head is reviewed, and the description is written again
    unless a person has edited it; or it makes no change and its reply goes on
    the pull request, and that review is not asked again. Request changes again

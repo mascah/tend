@@ -348,12 +348,17 @@ func (s *sc) reviewed(h string) int {
 	return n
 }
 
-// A teammate requests changes on the PR's head, with a comment on a line.
-func (s *sc) request() {
+// A teammate, a collaborator, requests changes on the PR's head, with a
+// comment on a line.
+func (s *sc) request() { s.requestAs("teammate", "COLLABORATOR", "CHANGES_REQUESTED") }
+
+// A review in that state on the PR's head by login, whom GitHub gives that
+// author association.
+func (s *sc) requestAs(login, association, state string) {
 	rs := s.reviewList()
 	n := 900 + len(rs)
-	rs = append(rs, map[string]any{"id": n, "node_id": fmt.Sprintf("PRR_%d", n), "state": "CHANGES_REQUESTED", "commit_id": s.head(),
-		"user": map[string]any{"login": "teammate"}, "body": "Say it plainly.",
+	rs = append(rs, map[string]any{"id": n, "node_id": fmt.Sprintf("PRR_%d", n), "state": state, "commit_id": s.head(),
+		"user": map[string]any{"login": login}, "author_association": association, "body": "Say it plainly.",
 		"comments": []any{map[string]any{"path": "a.txt", "line": 1, "body": "Plainer."}}})
 	s.writeJSON(s.st+"/reviews", rs)
 }
@@ -769,6 +774,31 @@ var scenarios = []scenario{
 		s.touch(s.pr() + ".merged")
 		s.run()
 		s.check("a request on a merged pull request is not acted on", s.prompts("teammate") == 0)
+	}},
+	{"request-stranger", func(s *sc) {
+		s.project("main", true)
+		s.allow()
+		s.run()
+		s.requestAs("stranger", "NONE", "CHANGES_REQUESTED")
+		w := s.watch()
+		s.check("watch runs nothing for a stranger's change request", s.count(w.err, `running tend`) == 0 && s.prompts("stranger") == 0)
+		r := s.run()
+		s.check("a stranger's change request exits 0", r.code == 0)
+		s.check("is not asked", s.prompts("stranger") == 0)
+		m, _ := filepath.Glob(s.ts + "/runs/*/request-*")
+		s.check("and no request mark is written", len(m) == 0)
+		s.check("tend says whose request it left", r.said("left the change request of stranger on https://example.test/pr/"))
+	}},
+	{"request-stranger-after", func(s *sc) {
+		s.project("main", true)
+		s.allow()
+		s.run()
+		s.request()
+		s.requestAs("stranger", "CONTRIBUTOR", "CHANGES_REQUESTED")
+		s.requestAs("passer-by", "NONE", "COMMENTED")
+		s.run()
+		s.check("a teammate's request before a stranger's later review is asked once", s.prompts("teammate") == 1)
+		s.check("the stranger's is not", s.prompts("stranger") == 0)
 	}},
 	{"watch", func(s *sc) {
 		s.project("main", true)

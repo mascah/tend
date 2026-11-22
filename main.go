@@ -353,7 +353,7 @@ func watch(repos []string) {
 				continue
 			}
 			s, _ := quiet("gh", "pr", "view", cat(d+"/pr"), "--json", "state,headRefOid,reviews", "--jq",
-				`select(.state == "OPEN") | .headRefOid as $h | [.reviews[] | select(.state == "CHANGES_REQUESTED" and .commit.oid == $h)] | last | .id // empty`)
+				`select(.state == "OPEN") | .headRefOid as $h | [.reviews[] | select(.state == "CHANGES_REQUESTED" and .commit.oid == $h and `+writer("authorAssociation")+`)] | last | .id // empty`)
 			if s == "" || exists(d+"/answered-"+s) {
 				continue
 			}
@@ -1579,13 +1579,27 @@ func redescribe(d string) {
 	write(run+"/described", head+"\n")
 }
 
-// The newest change request on the open PR's head, or nothing.
+// A change request counts only from a person with write access: an author
+// GitHub gives, in the review's field, the association owner, member or
+// collaborator. tend and tend watch both decide by it. In a repository an
+// organization owns, a member with read access only still counts.
+func writer(field string) string {
+	return fmt.Sprintf(`(.%s | IN("OWNER", "MEMBER", "COLLABORATOR"))`, field)
+}
+
+// The newest change request on the open PR's head by a person with write
+// access, or nothing; it says whose requests on that head it leaves.
 func requested() (any, error) {
 	s, err := out("gh", "pr", "view", pr, "--json", "state", "--jq", ".state")
 	if err != nil || s != "OPEN" {
 		return nil, nil
 	}
-	s, err = out("gh", "api", reviewsAPI(), "--paginate", "--jq", fmt.Sprintf(`[.[] | select(.state == "CHANGES_REQUESTED" and .commit_id == "%s")] | last // empty`, head))
+	s, err = out("gh", "api", reviewsAPI(), "--paginate", "--jq", fmt.Sprintf(`.[] | select(.state == "CHANGES_REQUESTED" and .commit_id == "%s" and (%s | not)) | .user.login`, head, writer("author_association")))
+	if who := strings.Fields(s); err == nil && len(who) > 0 {
+		slices.Sort(who)
+		say("left the change request of %s on %s: GitHub does not give them write access", strings.Join(slices.Compact(who), ", "), pr)
+	}
+	s, err = out("gh", "api", reviewsAPI(), "--paginate", "--jq", fmt.Sprintf(`[.[] | select(.state == "CHANGES_REQUESTED" and .commit_id == "%s" and %s)] | last // empty`, head, writer("author_association")))
 	if err != nil || s == "" {
 		return nil, err
 	}
