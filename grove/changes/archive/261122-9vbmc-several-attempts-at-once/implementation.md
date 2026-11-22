@@ -154,7 +154,6 @@ Check: that interrupting an agent in its pane parks its attempt was not seen wit
 
 ## Reconciliation
 
-<!-- One line per change spec, once applied to its maintained spec:
-
-    - record-editing: applied to specs/record-editing/spec.md
--->
+- attempts: applied to grove/specs/attempts/spec.md, its Boundaries now naming the lock of each work item in place of the runner lock
+- flows: applied to grove/specs/flows/spec.md
+- watch-and-status: applied to grove/specs/watch-and-status/spec.md, its Purpose now defining an attempt being worked on, as the change spec's preamble does
