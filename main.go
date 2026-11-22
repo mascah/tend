@@ -1,11 +1,11 @@
 // tend takes one agreed work item through coding agents and brings back a
-// reviewed branch: a Grove cycle, or a GitHub issue of a repository without
-// Grove. Claude implements in a Herdr pane, Codex reviews the head, one repair
+// reviewed branch: a Grove cycle or a change in no cycle, or a GitHub issue of
+// a repository without Grove. Claude implements in a Herdr pane, Codex reviews the head, one repair
 // if the review asks, and with a listed origin a pull request as a bot account.
 //
-//	tend <repo> <cycle-id>
+//	tend <repo> <cycle-id> | <change-id>
 //	tend <repo> issue-<n>
-//	tend status <repo> [<cycle-id>]
+//	tend status <repo> [<cycle-id> | <change-id>]
 //	tend watch [<repo>...]
 //	tend propose <repo>
 //	tend flow <repo>
@@ -454,13 +454,31 @@ func firstRun(proj any, key, val string) any {
 	return nil
 }
 
-func cycleOpen(proj any, c string) bool {
-	for _, y := range list(get(proj, "cycles")) {
-		if str(get(y, "id")) == c && get(y, "done") != true {
-			return true
+// The newest record of an attempt at Grove work item w: a cycle's, or a
+// change's in no cycle, which names the change alone and no cycle.
+func itemRun(proj any, w string) any {
+	for _, r := range list(get(proj, "runs")) {
+		if c := str(get(r, "cycle")); c == w || c == "" && slices.Equal(list(get(r, "changes")), []any{w}) {
+			return r
 		}
 	}
-	return false
+	return nil
+}
+
+// Whether Grove knows work item w, a cycle or a change, and whether it is not
+// done: a cycle not done, a change not archived.
+func workState(proj any, w string) (known, open bool) {
+	for _, y := range list(get(proj, "cycles")) {
+		if str(get(y, "id")) == w {
+			return true, get(y, "done") != true
+		}
+	}
+	for _, c := range list(get(proj, "changes")) {
+		if str(get(c, "id")) == w {
+			return true, str(get(c, "state")) != "archived"
+		}
+	}
+	return false, false
 }
 
 // tend status <repo>: what waits for whom in the repository, read from Grove's
@@ -471,14 +489,10 @@ func overview() {
 	if err != nil { // a repository without Grove
 		proj = map[string]any{}
 	}
-	fmt.Println("Approved changes without a cycle (plan one: /grove-plan):")
+	fmt.Println("Approved changes in no cycle:")
 	for _, c := range list(get(proj, "changes")) {
 		if str(get(c, "state")) == "approved" && get(c, "cycle") == nil {
-			ready := ""
-			if r := get(c, "ready"); r == nil || r == false {
-				ready = ", not ready"
-			}
-			fmt.Printf("  %s %s%s\n", interp(get(c, "id")), interp(get(c, "title")), ready)
+			fmt.Printf("  %s %s: %s\n", interp(get(c, "id")), interp(get(c, "title")), interp(get(c, "verdict")))
 		}
 	}
 	fmt.Println("Cycles not done:")
@@ -487,14 +501,14 @@ func overview() {
 			fmt.Printf("  %s %s: %s\n", interp(get(y, "id")), interp(get(y, "title")), interp(get(y, "verdict")))
 		}
 	}
-	fmt.Println("Attempts on this runner, for cycles not done and issues:")
+	fmt.Println("Attempts on this runner, for cycles and changes not done and issues:")
 	ds := runDirs()
 	for _, d := range ds {
 		a := strings.Split(cat(d+"/attempt"), "\n")
 		if a[0] != repo || !exists(d+"/status") || len(a) < 2 {
 			continue
 		}
-		if !isItem(a[1]) && !cycleOpen(proj, a[1]) {
+		if _, open := workState(proj, a[1]); !isItem(a[1]) && !open {
 			continue
 		}
 		line := strings.SplitN(cat(d+"/status"), "\n", 2)[0]
@@ -577,7 +591,7 @@ func issueRun(c string) string {
 	return fmt.Sprintf("%s/runs/%s-%d", state, c, cksum([]byte(repo)))
 }
 
-// tend status <repo> <cycle>: the newest attempt at it, what it last recorded
+// tend status <repo> <cycle or change>: the newest attempt at it, what it last recorded
 // and whether a tend is on it now. Reads only; takes no lock, prompts nobody.
 func status() {
 	if isItem(cycle) {
@@ -590,13 +604,13 @@ func status() {
 	} else {
 		cd(repo)
 		s := must(out("grove", "changes", "--json"))
-		r := firstRun(parse(s), "cycle", cycle)
+		r := itemRun(parse(s), cycle)
 		if r == nil {
 			fmt.Printf("no attempt at %s\n", cycle)
 			os.Exit(0)
 		}
 		run = state + "/runs/" + str(get(r, "id"))
-		fmt.Printf("attempt %s of %s: %s in %s\n", interp(get(r, "id")), interp(get(r, "cycle")), interp(get(r, "branch")), interp(get(r, "checkout")))
+		fmt.Printf("attempt %s of %s: %s in %s\n", interp(get(r, "id")), cycle, interp(get(r, "branch")), interp(get(r, "checkout")))
 	}
 	held := false
 	if f, err := os.OpenFile(state+"/lock", os.O_WRONLY|os.O_APPEND, 0o644); err == nil {
@@ -865,7 +879,7 @@ func removeWorktree(d, b string) {
 
 // Worktrees tend made for this repository whose pull request is merged or
 // closed, removed when their head is the pull request's, so nothing is lost;
-// and those of attempts with no pull request whose cycle is done, when their
+// and those of attempts with no pull request whose cycle or change is done, when their
 // branch has no commit the target lacks. Never one with a worktree inside it
 // or whose implementer is working. A run folder names its worktree in
 // worktree, deleted once it is gone.
@@ -914,7 +928,7 @@ func tidy() {
 	}
 }
 
-// The branch of an attempt with no pull request whose Grove cycle is done
+// The branch of an attempt with no pull request whose Grove cycle or change is done
 // and whose branch the local target already holds, as when its work reached
 // the target some other way; or nothing.
 func superseded(d, r string) string {
@@ -923,7 +937,7 @@ func superseded(d, r string) string {
 		return ""
 	}
 	g, err := groveIn(repo)
-	if err != nil || cycleOpen(g, a[1]) || !slices.ContainsFunc(list(get(g, "cycles")), func(y any) bool { return str(get(y, "id")) == a[1] }) {
+	if known, open := workState(g, a[1]); err != nil || !known || open {
 		return ""
 	}
 	if !ok("git", "-C", d, "merge-base", "--is-ancestor", "HEAD", str(get(g, "target"))) {
@@ -1098,7 +1112,7 @@ func proposal(r request, b string) {
 			if q == "" {
 				q = "The drafter wrote no summary of open questions; see the proposal."
 			}
-			body := fmt.Sprintf("**Proposal drafted from %s with no one in the session**\n\n%s\n\nMerging approves the change with any question still open, and its implementation may then choose those answers within Grove's rules. Answer the consequential ones before merging, by revising the proposal on `%s` (`/grove-propose %s`). Once merged, the change waits for a cycle: `/grove-plan`.", r.from, q, b, strings.Join(ids, " "))
+			body := fmt.Sprintf("**Proposal drafted from %s with no one in the session**\n\n%s\n\nMerging approves the change with any question still open, and its implementation may then choose those answers within Grove's rules. Answer the consequential ones before merging, by revising the proposal on `%s` (`/grove-propose %s`). Once merged, the change can be built by its ID, `tend <repo> <change-id>`, or planned into a cycle with others: `/grove-plan`.", r.from, q, b, strings.Join(ids, " "))
 			if postJSON(reviewsAPI(), map[string]any{"commit_id": head, "event": "COMMENT", "body": body}) != nil {
 				stop("could not post the summary on %s", pr)
 			}
@@ -1132,7 +1146,8 @@ func proposal(r request, b string) {
 
 // 1. The attempt, and what the work item says it must do. Two kinds:
 //
-// A Grove cycle. The newest record for it, if its checkout still holds its
+// A Grove cycle, or an approved change no cycle lists, built as a cycle of that
+// one change. The newest record for it, if its checkout still holds its
 // branch; otherwise a new worktree and a claim made inside it, so the
 // attempt's branch is the worktree's. Grove holds approval, eligibility and
 // the scope; the build is done when each change is archived on the branch.
@@ -1196,7 +1211,7 @@ func attempt() {
 		target = str(get(proj, "target"))
 		base = fetchTarget()
 		loadFlow("build", base)
-		rec = firstRun(proj, "cycle", cycle)
+		rec = itemRun(proj, cycle)
 		dir = str(get(rec, "checkout"))
 		if dir != "" && gitQ("-C", dir, "branch", "--show-current") == str(get(rec, "branch")) {
 			term.open(dir)
@@ -1207,6 +1222,8 @@ func attempt() {
 			dir = term.worktree(tmp, base, "tend: "+cycle)
 			cd(dir)
 			if _, err := sh(nil, os.Stderr, false, "grove", "claim", cycle); err != nil {
+				cd(repo)
+				removeWorktree(dir, tmp) // nothing in it yet; a rerun makes its own
 				stop("grove claim refused %s", cycle)
 			}
 			b := git("branch", "--show-current")

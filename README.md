@@ -2,7 +2,7 @@
 
 A small loop that takes agreed work through coding agents and brings back a
 reviewed branch. Today it does one pass for one [Grove](https://github.com/mascah/grove)
-cycle:
+cycle, or one approved change no cycle lists:
 
 ```text
 grove claim
@@ -32,17 +32,25 @@ curl -fsSL https://raw.githubusercontent.com/mascah/tend/main/install.sh | sh
 curl -fsSL https://raw.githubusercontent.com/mascah/tend/main/install.sh | sh -s -- v0.1.0
 ```
 
-Or build it with Go 1.26 (`go build -o bin/tend .`). It needs `grove`, `git` and
-`gh` on PATH, Herdr or rex, and Claude Code and Codex signed in. Run it inside
-a Herdr pane or a rex terminal:
+Or build it with Go 1.26 (`go build -o bin/tend .`). It needs `grove` (0.14.0
+or later), `git` and `gh` on PATH, Herdr or rex, and Claude Code and Codex
+signed in. Run it inside a Herdr pane or a rex terminal:
 
 ```sh
+bin/tend <repo> <change-id>
 bin/tend <repo> <cycle-id>
 bin/tend <repo> issue-<n>
-bin/tend status <repo> [<cycle-id>]
+bin/tend status <repo> [<change-id> | <cycle-id>]
 bin/tend watch [<repo>...]
 bin/tend propose <repo>
 ```
+
+An approved change is built with `tend <repo> <change-id>`, as a cycle of
+that one change: tend claims it by name (`grove claim <change-id>`), and
+carries on, reports and publishes it as it does a cycle. A cycle is needed
+only to build several changes together. A change a cycle lists is built with
+its cycle, and a change that waits on another is refused; either way tend
+stops with Grove's sentence.
 
 The agents run in Herdr, or in rex when tend runs in rex (not in Herdr);
 `TEND_TERMINAL=herdr` or `rex` chooses. In rex each worktree gets a session,
@@ -84,9 +92,9 @@ After exit 3, or a kill, the same line carries on, with or without `origin`:
   once more. A repair refused before sending, such as by a blocked
   implementer, is not used.
 
-`tend status` says which attempt the cycle has, whether a tend is on it now,
-what it last recorded and the next action, including "run it again" when
-tend was killed. It reads only, so it works while tend runs.
+`tend status` says which attempt the change or cycle has, whether a tend is
+on it now, what it last recorded and the next action, including "run it
+again" when tend was killed. It reads only, so it works while tend runs.
 
 With `origin`, tend publishes only if a line of `TEND_STATE/publish` names that
 URL and the GitHub account to publish as, `<origin-url> <account>`; otherwise
@@ -133,8 +141,8 @@ Grove would claim and whose plan marks it `unattended`: marking a cycle so when
 you plan it is how you let it be built with no one there. An attempt or request
 waiting for you is left alone until you have run tend on it.
 
-`tend status <repo>`, without a cycle, says what waits for whom: approved
-changes without a cycle (plan one), cycles not done with Grove's verdict,
+`tend status <repo>`, without a work item, says what waits for whom: approved
+changes in no cycle and cycles not done, each with Grove's verdict,
 this runner's attempts for them, proposals and implementations to review
 (and which have changes requested), and labelled requests not yet drafted.
 
@@ -161,7 +169,7 @@ request from the issue's branch, in any state, means the issue is handled;
 at most `CAP` (default 5) proposal pull requests stay open. Labelling an issue
 hands its text to an agent running in auto mode, so only people who may label
 (triage access) can send requests. Approving the proposal (merging it) and
-planning its cycle stay with people.
+starting its build stay with people.
 
 New work branches from the target as origin has it, fetched first. Once a pull
 request is merged or closed, the next `tend propose` or run in that repository
@@ -219,10 +227,12 @@ With `tend watch <repo>...` running, each pass (every `WATCH_SECONDS`, default
    again. At most `CAP` (default 5) proposals stay open per repository, and a
    request with a proposal pull request in any state is not drafted again.
 2. **An approved change becomes a build.** Merging the proposal approves the
-   change. Plan a cycle for it (`/grove-plan`) and mark it `unattended: true`,
-   and tend claims it, has Claude implement it and Codex review it, repairs
-   once if the review asks, and opens the implementation pull request. A cycle
-   not marked `unattended` is built only when someone runs
+   change. Run `tend <repo> <change-id>`, and tend claims it, has Claude
+   implement it and Codex review it, repairs once if the review asks, and
+   opens the implementation pull request. A cycle is needed only to build
+   several changes together, or for watch to start the build without you:
+   plan one (`/grove-plan`) and mark it `unattended: true`. A cycle not
+   marked `unattended` is built only when someone runs
    `tend <repo> <cycle-id>`.
 3. **Requested changes.** On an implementation pull request, GitHub's
    "Request changes" (not a plain comment) by an owner, member or
@@ -235,9 +245,9 @@ With `tend watch <repo>...` running, each pass (every `WATCH_SECONDS`, default
    its worktree, branch and terminal workspace.
 
 Not picked up: plain comments, on any pull request, and comments on proposals
-(revising a proposal is a person's); issues without the label; cycles not
-marked `unattended`; a proposal closed without merging, which is never drafted
-again. In a repository without Grove, an issue labelled `tend-build` is built
+(revising a proposal is a person's); issues without the label; approved
+changes in no cycle, and cycles not marked `unattended`; a proposal closed
+without merging, which is never drafted again. In a repository without Grove, an issue labelled `tend-build` is built
 only by `tend <repo> issue-<n>` (or `<KEY>`).
 
 To see where things stand: `tend status <repo>` says what waits for whom;
@@ -249,7 +259,7 @@ notifies.
 
 | Question | Read from |
 | --- | --- |
-| Is there an attempt? | The newest record for the cycle in `grove changes --json` (from `origin/grove/runs`, or the local `grove/runs` without `origin`), whose `checkout` still holds its `branch`. |
+| Is there an attempt? | The newest record for the cycle, or naming the change alone and no cycle, in `grove changes --json` (from `origin/grove/runs`, or the local `grove/runs` without `origin`), whose `checkout` still holds its `branch`. |
 | Is it built? | Every change of the record is under `changes/archive/` on that branch, and the tree is clean. |
 | Is the head reviewed? | `runs/<attempt>/verdict-<head>.json` names that head and has a `success` or `failure` conclusion, a boolean `actionable` and a `summary`. A cached file that does not is kept as `.rejected-<time>` and the head is reviewed again. |
 | Was the repair used? | `runs/<attempt>/repair-asked` exists (a prototype's `repaired` is read as asked). |
@@ -340,8 +350,11 @@ Its command line and skills, and it never reads Grove's Markdown:
 
 - `grove changes --json`, for the document root, the target branch and the
   attempt records, and as the sign that a repository uses Grove;
-- `grove claim <cycle-id>`, to take the cycle and record the attempt;
-- `/grove-implement --runner <cycle-id>`, as the implementer's prompt, so
+- `grove claim <cycle-id>` or `grove claim <change-id>`, to take the cycle,
+  or an approved change no cycle lists, and record the attempt (a change by
+  name needs Grove 0.14.0 or later, which tend needs);
+- `/grove-implement --runner <cycle-id>` or `<change-id>`, as the
+  implementer's prompt, so
   the project's `rules.delivery` lines are left out: tend delivers the work
   (Grove 0.12.0 or later);
 - `grove review`, whose summary goes in the head's published review;

@@ -28,9 +28,10 @@ turn() { # name text
 			fi ;;
 		*squash-merged*) # a new message for a later head, naming what was asked
 			m=$(grep -oE '[^ ]*/message-[0-9a-f]{40}' <<<"$2" | head -1)
+			e=$(grep -oE "End with the line '[^']*'" <<<"$2" | head -1) e=${e#*\'} e=${e%\'} # the trailer asked for
 			case $2 in
-			*"earlier head"*) printf 'Add the file, plainer\n\nThe project needed a plain file.\n\nGrove: 261015-c0000\n' >"$m" ;;
-			*) printf 'Add the file\n\nThe project needed a file.\n\nGrove: 261015-c0000\n' >"$m" ;;
+			*"earlier head"*) printf 'Add the file, plainer\n\nThe project needed a plain file.\n\n%s\n' "$e" >"$m" ;;
+			*) printf 'Add the file\n\nThe project needed a file.\n\n%s\n' "$e" >"$m" ;;
 			esac ;;
 		*) echo fix >>a.txt && git commit -qam repair ;;
 		esac ;;
