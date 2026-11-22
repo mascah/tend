@@ -24,6 +24,8 @@ fails with the `main.go` and `rex.go` changes stashed. The README's "What it
 does to your agents" says tend skips such a notice by Esc alone and stops at
 any other screen. `go vet ./...` and `go test ./...` pass.
 
+After review: `start` and `rex.start` now collapse the screen's whitespace before matching, so a hint or warning that wraps in a narrow pane is still recognised. A wrapped hooks review that also shows `esc skip` would otherwise have been sent Esc. `rex-hooks-wrapped` covers it and fails without the fix.
+
 Also changed: `rex.go` — `rex.start` stops waiting for a first report at a screen tend answers. Without `esc skip` there, it would wait out the full 60 seconds at a notice before `start` saw it.
 
 Check: `main.go`, `testdata/bin/rex`, `testdata/bin/turn.sh`, `tend_test.go` and `README.md` changed on main after base 0a4e821, when 261121-gapde (Go tests and stand-ins in `testdata/bin`), #13 (`rex.start` returns early at a dialog) and #15 (flows) landed. The tests are built on `tend_test.go` and the stand-ins as they are now. #13's early return needed `esc skip` added (see `rex.go` above). `turn.sh` needed no change. `grove check` flagged those files as changed since the base, so the change was re-based on this branch to d54c96c. Only `base` changed: the maintained terminals spec and the tasks were the same.
