@@ -71,7 +71,7 @@ func newSc(t *testing.T) *sc {
 	return s
 }
 
-var dropped = regexp.MustCompile(`^(TEND_|HERDR_|REX_|JIRA_|GIT_|GH_|WATCH_|NO_NOTES|REVIEW|IMPL_|REPAIR_FAIL|REV_FAIL|BLOCK_AFTER_BUILD|CREATE_LOST|REQUEST_|PROPOSE_FAIL|FOLLOW_FAIL|DECLINE|EDIT_FAIL|CAP|TRUST_|DRAFT_FAIL|COMMENT_FAIL|STRAY|CHECK|UNFINISHED|TIMEOUT_MS|KEEP)`)
+var dropped = regexp.MustCompile(`^(TEND_|HERDR_|REX_|JIRA_|GIT_|GH_|WATCH_|NO_NOTES|REVIEW|IMPL_|REPAIR_FAIL|REV_FAIL|BLOCK_AFTER_BUILD|CREATE_LOST|REQUEST_|PROPOSE_FAIL|FOLLOW_FAIL|DECLINE|EDIT_FAIL|CAP|TRUST_|DRAFT_FAIL|COMMENT_FAIL|STRAY|CHECK|UNFINISHED|TIMEOUT_MS|KEEP|AT_ONCE|HOLD|WORKTREE_HOLD)`)
 
 // The environment every command of the scenario gets, then extra ("K=V").
 func (s *sc) env(extra ...string) []string {
@@ -225,6 +225,15 @@ func (s *sc) waitFor(ok func() bool, what string) {
 func (s *sc) hold() (string, func()) {
 	f := s.dir + fmt.Sprintf("/hold-%d", time.Now().UnixNano())
 	return f, func() { s.touch(f) }
+}
+
+// A project whose target's flow file sets watch.at_once to n, listed for
+// publication, with no requests.
+func (s *sc) atOnce(n int) {
+	s.project("main", true)
+	s.allow()
+	s.issues()
+	s.commit("Keep some going", map[string]string{"tend/flow.yaml": fmt.Sprintf("watch:\n  at_once: %d\n", n)})
 }
 
 // The worktrees of the repository, but its own checkout.
@@ -1811,5 +1820,105 @@ var scenarios = []scenario{
 		r := k.wait()
 		s.check("then its head is reviewed", r.passed() && !r.said("left work outside"))
 		s.check("and the other attempt passes", c.wait().passed())
+	}},
+	{"watch-at-once-two", func(s *sc) {
+		s.atOnce(2)
+		s.change("261016-c0001", "Another", "")
+		s.change("261017-c0002", "Third", "", "", "17")
+		w := s.watchrepo()
+		s.check("watch starts each of two claimable changes", w.said(`starting 261016-c0001 in `) && w.said(`starting 261017-c0002 in `))
+		s.check("each claimed, built and reviewed", s.changeRecords("261016-c0001") == 1 && s.changeRecords("261017-c0002") == 1 && s.reviews() == 2)
+		s.check("each in its own worktree", len(s.worktrees()) == 2 && s.records() == 0)
+	}},
+	{"watch-at-once-one", func(s *sc) {
+		s.atOnce(1)
+		s.change("261016-c0001", "Another", "")
+		s.change("261017-c0002", "Third", "", "", "17")
+		w := s.watchrepo()
+		s.check("a count of 1 starts the oldest only", w.said(`starting 261016-c0001`) && !w.said(`starting 261017-c0002`))
+		s.check("which is reviewed", s.changeRecords("261016-c0001") == 1 && s.changeRecords("261017-c0002") == 0 && s.reviews() == 1)
+		w = s.watchrepo()
+		s.check("and the next pass starts the next", w.said(`starting 261017-c0002`) && s.changeRecords("261017-c0002") == 1)
+	}},
+	{"watch-at-once-overlap", func(s *sc) {
+		s.atOnce(2)
+		s.change("261016-c0001", "Another", "", "a.txt")
+		s.change("261017-c0002", "Third", "", "a.txt", "17")
+		w := s.watchrepo()
+		s.check("of two that overlap, the first is built", s.changeRecords("261016-c0001") == 1 && w.said(`starting 261016-c0001`))
+		s.check("and no worktree is made for the second", !w.said(`starting 261017-c0002`) && !s.has(s.log(), `^worktree create .*tend: 261017-c0002`) && s.changeRecords("261017-c0002") == 0)
+		s.bash(s.repo, `grove archive 261016-c0001 >/dev/null && git add -A && git commit -qm landed && git push -q origin main`)
+		w = s.watchrepo()
+		s.check("once the target holds the first archived, the second is started", w.said(`starting 261017-c0002`) && s.changeRecords("261017-c0002") == 1)
+	}},
+	{"watch-at-once-needs-you", func(s *sc) {
+		s.atOnce(1)
+		s.change("261016-c0001", "Another", "")
+		s.change("261017-c0002", "Third", "", "", "17")
+		s.crun("261016-c0001", "IMPL_FAIL=stub_failure")
+		w := s.watchrepo()
+		s.check("an attempt that needs a person frees its slot", w.said(`starting 261017-c0002`) && s.changeRecords("261017-c0002") == 1)
+		s.check("and is left alone", !w.said(`261016-c0001`) && s.prompts("/grove-implement --runner 261016-c0001") == 1)
+	}},
+	{"watch-at-once-by-hand", func(s *sc) {
+		s.atOnce(1)
+		s.change("261016-c0001", "Another", "")
+		f, release := s.hold()
+		a := s.bg([]string{"HOLD=" + f}, `^agent prompt impl-`, s.repo, "261016-c0001")
+		w := s.watchrepo()
+		s.check("a tend run by hand counts", s.count(w.err, `starting`) == 0 && s.records() == 0)
+		release()
+		a.wait()
+	}},
+	{"watch-at-once-cycle", func(s *sc) {
+		s.atOnce(1)
+		w := s.watchrepo()
+		s.check("a claimable cycle not marked unattended is started", w.said(`starting 261114-k0000 in `) && s.records() == 1 && s.reviews() == 1)
+	}},
+	{"watch-at-once-requested", func(s *sc) {
+		s.atOnce(1)
+		s.run()
+		s.request()
+		s.change("261016-c0001", "Another", "")
+		w := s.watchrepo()
+		s.check("an attempt with changes requested goes first", w.said(`changes requested on .*; running tend on 261114-k0000`) && s.prompts("teammate") == 1)
+		s.check("and nothing else starts in that pass", !w.said(`starting`) && s.changeRecords("261016-c0001") == 0)
+	}},
+	{"watch-at-once-no-setting", func(s *sc) {
+		s.project("main", true)
+		s.allow()
+		s.issues()
+		s.change("261016-c0001", "Another", "")
+		w := s.watchrepo()
+		s.check("without the setting, watch starts no change and no cycle not marked", s.count(w.err, `starting`) == 0 && s.records() == 0 && s.changeRecords("261016-c0001") == 0)
+	}},
+	{"watch-at-once-lower", func(s *sc) {
+		s.atOnce(2)
+		s.change("261016-c0001", "Another", "")
+		s.change("261017-c0002", "Third", "", "", "17")
+		w := s.watchrepo("AT_ONCE=1")
+		s.check("a lower number on this machine starts one", s.count(w.err, `starting`) == 1)
+	}},
+	{"watch-at-once-higher", func(s *sc) {
+		s.atOnce(1)
+		s.change("261016-c0001", "Another", "")
+		s.change("261017-c0002", "Third", "", "", "17")
+		w := s.watchrepo("AT_ONCE=5")
+		s.check("a higher number on this machine still starts one", s.count(w.err, `starting`) == 1)
+	}},
+	{"watch-at-once-zero", func(s *sc) {
+		s.atOnce(2)
+		s.change("261016-c0001", "Another", "")
+		w := s.watchrepo("AT_ONCE=0")
+		s.check("AT_ONCE=0 starts nothing", s.count(w.err, `starting`) == 0 && s.changeRecords("261016-c0001") == 0)
+	}},
+	{"watch-at-once-raised", func(s *sc) {
+		s.atOnce(1)
+		s.change("261016-c0001", "Another", "")
+		s.change("261017-c0002", "Third", "", "", "17")
+		s.crun("261016-c0001", "IMPL_FAIL=stub_failure")
+		s.bash(s.worktree(), `mkdir -p tend && printf 'watch:\n  at_once: 5\n' >tend/flow.yaml && git add -A && git commit -qm "Raise the count"`)
+		w := s.watchrepo()
+		s.check("a count an implementer commits is not watch's", s.count(w.err, `starting`) == 1)
 	}},
 }

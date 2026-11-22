@@ -314,7 +314,8 @@ func main() {
 // would claim that its plan marks unattended is started: marking it is the
 // person's approval to build it with no one there. An attempt or request
 // waiting for a person (needs-you) is left alone until a person has run tend
-// on it; a claimed cycle is Grove's to refuse.
+// on it; a claimed cycle is Grove's to refuse. A repository whose flow file
+// sets watch.at_once is kept going under that count instead (keep).
 func watch(repos []string) {
 	self := must(os.Executable())
 	again := func(a ...string) {
@@ -322,7 +323,21 @@ func watch(repos []string) {
 		c.Stdout, c.Stderr = os.Stdout, os.Stderr
 		c.Run()
 	}
+	var started []chan struct{}
+	begin := func(a ...string) chan struct{} {
+		c := exec.Command(self, a...)
+		c.Stdout, c.Stderr = os.Stdout, os.Stderr
+		done := make(chan struct{})
+		if c.Start() != nil {
+			close(done)
+			return done
+		}
+		go func() { c.Wait(); close(done) }()
+		started = append(started, done)
+		return done
+	}
 	for {
+		counted := map[string]bool{} // repositories kept under a count
 		for _, r := range repos {
 			r, err := abs(r)
 			if err != nil {
@@ -334,37 +349,50 @@ func watch(repos []string) {
 			if err != nil {
 				continue
 			}
+			n := -1
 			if g, err := groveIn(r); err == nil {
-				syncTarget(r, str(get(g, "target")))
+				t := str(get(g, "target"))
+				syncTarget(r, t)
+				repo = r
+				rev := t
+				if _, err := quiet("git", "-C", r, "remote", "get-url", "origin"); err == nil {
+					rev = "origin/" + t
+				}
+				var why string
+				if n, why = watchCount(rev); why != "" {
+					say("starting nothing in %s: %s", r, why)
+					n = 0
+				}
+				if a, err := strconv.Atoi(os.Getenv("AT_ONCE")); err == nil && a >= 0 && n >= 0 {
+					n = min(n, a)
+				}
+			}
+			if n >= 0 {
+				counted[r] = true
+				keep(r, n, begin)
 			}
 			s := strings.ReplaceAll(strings.TrimSpace(string(b)), "/", "_")
 			waits, _ := filepath.Glob(state + "/intake/" + s + "-*/status")
 			if !slices.ContainsFunc(waits, needsYou) {
 				again("propose", r)
 			}
-			if c := unattended(r); c != "" {
+			if c := unattended(r); n < 0 && c != "" {
 				say("starting unattended cycle %s in %s", c, r)
 				again(r, c)
 			}
 		}
-		ds := runDirs()
-		for _, d := range ds {
-			if !exists(d+"/pr") || !exists(d+"/attempt") || needsYou(d+"/status") {
-				continue
-			}
-			s, _ := quiet("gh", "pr", "view", cat(d+"/pr"), "--json", "state,headRefOid,reviews", "--jq",
-				`select(.state == "OPEN") | .headRefOid as $h | [.reviews[] | select(.state == "CHANGES_REQUESTED" and .commit.oid == $h and `+writer("authorAssociation")+`)] | last | .id // empty`)
-			if s == "" || exists(d+"/answered-"+s) {
-				continue
-			}
+		for _, d := range runDirs() {
 			a := strings.SplitN(cat(d+"/attempt"), "\n", 3)
-			if len(a) < 2 {
+			if counted[a[0]] || !rerun(d) {
 				continue
 			}
 			say("changes requested on %s; running tend on %s", cat(d+"/pr"), a[1])
 			again(a[0], a[1])
 		}
 		if os.Getenv("WATCH_ONCE") != "" {
+			for _, d := range started {
+				<-d
+			}
 			os.Exit(0)
 		}
 		secs, err := strconv.Atoi(os.Getenv("WATCH_SECONDS"))
@@ -372,6 +400,78 @@ func watch(repos []string) {
 			secs = 300
 		}
 		time.Sleep(time.Duration(secs) * time.Second)
+	}
+}
+
+// Whether tend watch runs tend again on the attempt of run folder d: its pull
+// request is open with a change request on its head, from a person with write
+// access, not yet answered, and it waits for no person.
+func rerun(d string) bool {
+	if !exists(d+"/pr") || !exists(d+"/attempt") || needsYou(d+"/status") || len(strings.Split(cat(d+"/attempt"), "\n")) < 2 {
+		return false
+	}
+	s, _ := quiet("gh", "pr", "view", cat(d+"/pr"), "--json", "state,headRefOid,reviews", "--jq",
+		`select(.state == "OPEN") | .headRefOid as $h | [.reviews[] | select(.state == "CHANGES_REQUESTED" and .commit.oid == $h and `+writer("authorAssociation")+`)] | last | .id // empty`)
+	return s != "" && !exists(d+"/answered-"+s)
+}
+
+// tend watch under a count: of repository r's attempts on this runner, at most
+// n being worked on, a tend holding its lock, whoever started it. Attempts to
+// run again go first, then each cycle not done and change in no cycle that
+// Grove calls claimable, oldest created first, each started in the background
+// and its claim seen to land before the next is chosen, so that one which
+// overlaps it is not started to be refused.
+// ponytail: run folders go oldest first by name, which a Grove attempt's
+// date-first ID makes so; an issue build's folder sorts after them.
+func keep(r string, n int, begin func(...string) chan struct{}) {
+	busy := 0
+	ls, _ := filepath.Glob(lockFile(r, "*"))
+	for _, l := range ls {
+		if w := strings.TrimPrefix(l, lockFile(r, "")); w != "intake" && held(r, w) {
+			busy++
+		}
+	}
+	free := n - busy
+	for _, d := range runDirs() {
+		a := strings.SplitN(cat(d+"/attempt"), "\n", 3)
+		if free <= 0 {
+			return
+		}
+		if !sameDir(a[0], r) || !rerun(d) || held(a[0], a[1]) {
+			continue
+		}
+		say("changes requested on %s; running tend on %s", cat(d+"/pr"), a[1])
+		begin(a[0], a[1])
+		free--
+	}
+	tried := map[string]bool{}
+	for ; free > 0; free-- {
+		g, _ := groveIn(r)
+		next, when := "", ""
+		for _, x := range append(list(get(g, "cycles")), list(get(g, "changes"))...) {
+			w := str(get(x, "id"))
+			if get(x, "claimable") == true && get(x, "done") != true && get(x, "cycle") == nil && !tried[w] && !held(r, w) &&
+				(next == "" || str(get(x, "created")) < when) {
+				next, when = w, str(get(x, "created"))
+			}
+		}
+		if next == "" {
+			return
+		}
+		tried[next] = true
+		say("starting %s in %s", next, r)
+		done := begin(r, next)
+	landing:
+		for {
+			select {
+			case <-done:
+				break landing
+			case <-time.After(200 * time.Millisecond):
+				if g, _ := groveIn(r); unclaimable(g, next) != "" {
+					break landing
+				}
+			}
+		}
 	}
 }
 
