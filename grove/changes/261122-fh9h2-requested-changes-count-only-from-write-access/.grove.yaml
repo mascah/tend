@@ -1,0 +1,5 @@
+title: "Requested changes count only from people with write access"
+created: 2026-11-22T06:48:53Z
+description: tend and tend watch act on a change request only when GitHub gives its author as owner, member or collaborator, where today any account's request reaches the implementer as a prompt
+schema: bugfix
+base: 40ca101ace0c26ffa479c672b821fbdfd8a1ff96
