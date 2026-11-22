@@ -2036,8 +2036,8 @@ func (s *sc) merges() int       { return s.count(s.log(), `^gh api -X PUT repos/
 
 // The heads GitHub was asked to merge pull requests at, oldest first.
 func (s *sc) mergedAt() []string { return strings.Fields(s.cat(s.st + "/merge-requests")) }
-func (s *sc) merged() bool      { return exists(s.pr() + ".merged") }
-func (s *sc) approve(h string)  { s.reviewOn(h, "teammate", "COLLABORATOR", "APPROVED") }
+func (s *sc) merged() bool       { return exists(s.pr() + ".merged") }
+func (s *sc) approve(h string)   { s.reviewOn(h, "teammate", "COLLABORATOR", "APPROVED") }
 
 // The parents of commit c in the worktree, c first.
 func (s *sc) parents(c string) []string {
