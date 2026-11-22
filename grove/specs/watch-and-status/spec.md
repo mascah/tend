@@ -58,27 +58,43 @@ taking no lock, prompting no one and exiting 0.
 ### Requirement: What waits for whom
 
 When a person runs `tend status <repo>` without a work item, the system shall
-print, each under its heading: approved changes without a cycle, marked `not
-ready` where Grove says so; cycles not done, with Grove's verdict; this
-runner's attempts in that repository at cycles not done and at issues, with
-their last recorded stage; open proposal pull requests (from `tend/issue-` or
-`tend/jira-`); open implementation pull requests (from `grove/` or
-`tend/build-`), marked where changes are requested; and requests labelled
-`tend`, on GitHub and in mapped Jira projects, with no proposal pull request
-in any state; saying GitHub is not readable when `gh` fails there, and
-exiting 0.
+print, each under its heading: approved changes in no cycle, each with
+Grove's verdict on whether `grove claim` would claim it; cycles not done,
+with Grove's verdict; this runner's attempts in that repository at cycles and
+changes not done and at issues, with their last recorded stage; open proposal
+pull requests (from `tend/issue-` or `tend/jira-`); open implementation pull
+requests (from `grove/` or `tend/build-`), marked where changes are
+requested; and requests labelled `tend`, on GitHub and in mapped Jira
+projects, with no proposal pull request in any state; saying GitHub is not
+readable when `gh` fails there, and exiting 0.
 
 #### Scenario: A repository with work at every stage
 
-- GIVEN approved change `261016-c0001` without a cycle, cycle `261114-k0000`
+- GIVEN approved change `261016-c0001` in no cycle, cycle `261114-k0000`
   claimed and published with changes requested on its head, issue #1 drafted
   as a proposal and issue #2 labelled `tend` and not yet drafted
 - WHEN a person runs `tend status <repo>`
-- THEN it lists `261016-c0001 Another`, `261114-k0000 One: claimed by
+- THEN it lists `261016-c0001 Another` with Grove's verdict under "Approved
+  changes in no cycle", `261114-k0000 One: 261114-k0000 is in flight in
   attempt…`, the attempt `(261114-k0000): done: success…`, the proposal
-  `Propose a thing` under "Proposals to review", `Add the file` with "changes
-  requested" under "Implementations to review", and `#2 Request 2` but not
-  `#1` under "Requests waiting for tend propose"
+  `Propose a thing` under "Proposals to review", `Add the file` with
+  "changes requested" under "Implementations to review", and `#2 Request 2`
+  but not `#1` under "Requests waiting for tend propose"
+
+#### Scenario: A change that waits
+
+- GIVEN approved changes A and B in no cycle, B with `depends_on: [A]`, and A
+  not archived
+- WHEN a person runs `tend status <repo>`
+- THEN B's line holds Grove's verdict that it waits on A
+
+#### Scenario: An attempt at a change
+
+- GIVEN tend took `261016-c0001`, a change in no cycle, to a verdict
+- WHEN a person runs `tend status <repo>`, then runs it again once the target
+  holds the change archived
+- THEN the first lists the attempt `(261016-c0001): done: success…`, and the
+  second no longer lists it
 
 #### Scenario: A cycle done
 
@@ -221,3 +237,4 @@ None.
 - Written when tend adopted Grove (2026-11-16).
 - [261117-bez30](../../changes/archive/261117-bez30-the-implementer-leaves-delivery-to-tend/) The implementer leaves delivery to tend
 - [261122-fh9h2](../../changes/archive/261122-fh9h2-requested-changes-count-only-from-write-access/) Requested changes count only from people with write access
+- [261122-nh8aa](../../changes/archive/261122-nh8aa-build-an-approved-change-by-name/) Build an approved change by name

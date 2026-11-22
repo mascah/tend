@@ -91,7 +91,5 @@ Check: CI on Grove v0.14.0 is not seen until this branch's pull request runs.
 
 ## Reconciliation
 
-<!-- One line per change spec, once applied to its maintained spec:
-
-    - record-editing: applied to specs/record-editing/spec.md
--->
+- attempts: applied to grove/specs/attempts/spec.md
+- watch-and-status: applied to grove/specs/watch-and-status/spec.md
