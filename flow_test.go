@@ -289,7 +289,7 @@ var flowScenarios = []scenario{
 		s.check("a count of 0 stops as not valid, naming the file and at_once", r.code == 3 && r.said(`^tend: tend/flow\.yaml gives watch an at_once of 0, where at_once is a whole number of at least 1$`))
 		s.check("and starts no agent", s.agentStarts() == 0)
 		for text, want := range map[string]string{
-			"watch:\n  at_once: two\n":            "an at_once of two",
+			"watch:\n  at_once: two\n":             "an at_once of two",
 			"watch:\n  at_once: 2\n  first: old\n": "field first not found in watch",
 			"watch: {}\n":                          "gives watch no at_once",
 		} {
@@ -428,4 +428,3 @@ func TestFlows(t *testing.T) {
 		t.Run(x.name, func(t *testing.T) { x.fn(newSc(t)) })
 	}
 }
-

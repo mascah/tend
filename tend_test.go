@@ -1688,7 +1688,8 @@ var scenarios = []scenario{
 		s.check("under rex, a merged attempt's worktree is removed", !exists(wt))
 		s.check("its session killed", s.has(s.rexlog(), `^rex kill session:1`))
 		s.check("and forgotten", !nonempty(s.ts+"/rex-sessions"))
-	}},	{"usage", func(s *sc) {
+	}},
+	{"usage", func(s *sc) {
 		r := s.tendIn(nil, s.dir)
 		s.check("tend with no work item says how to run it", r.code == 2 && r.said(`^usage: tend <repo> <id>$`))
 	}},
