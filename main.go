@@ -349,27 +349,10 @@ func watch(repos []string) {
 			if err != nil {
 				continue
 			}
-			n := -1
-			if g, err := groveIn(r); err == nil {
-				t := str(get(g, "target"))
-				syncTarget(r, t)
-				repo = r
-				rev := t
-				if _, err := quiet("git", "-C", r, "remote", "get-url", "origin"); err == nil {
-					rev = "origin/" + t
-				}
-				var why string
-				if n, why = watchCount(rev); why != "" {
-					say("starting nothing in %s: %s", r, why)
-					n = 0
-				}
-				if a, err := strconv.Atoi(os.Getenv("AT_ONCE")); err == nil && a >= 0 && n >= 0 {
-					n = min(n, a)
-				}
-			}
+			n := countIn(r, true)
 			if n >= 0 {
-				counted[r] = true
-				keep(r, n, begin)
+				counted[lockFile(r, "")] = true // by the repository's identity, however a run folder spells its path
+				keep(r, n, begin, true)
 			}
 			s := strings.ReplaceAll(strings.TrimSpace(string(b)), "/", "_")
 			waits, _ := filepath.Glob(state + "/intake/" + s + "-*/status")
@@ -383,7 +366,19 @@ func watch(repos []string) {
 		}
 		for _, d := range runDirs() {
 			a := strings.SplitN(cat(d+"/attempt"), "\n", 3)
-			if counted[a[0]] || !rerun(d) {
+			if a[0] == "" {
+				continue
+			}
+			k := lockFile(a[0], "")
+			if _, seen := counted[k]; !seen { // a repository not named: its count, if any, holds its reruns
+				if n := countIn(a[0], false); n >= 0 {
+					counted[k] = true
+					keep(a[0], n, begin, false)
+				} else {
+					counted[k] = false
+				}
+			}
+			if counted[k] || !rerun(d) {
 				continue
 			}
 			say("changes requested on %s; running tend on %s", cat(d+"/pr"), a[1])
@@ -403,6 +398,34 @@ func watch(repos []string) {
 	}
 }
 
+// The count tend watch keeps going in repository r, AT_ONCE lowering it, or -1
+// for none; 0 where the flow file is not valid, saying why. sync first
+// fast-forwards its target to origin's.
+func countIn(r string, sync bool) int {
+	g, err := groveIn(r)
+	if err != nil {
+		return -1
+	}
+	t := str(get(g, "target"))
+	if sync {
+		syncTarget(r, t)
+	}
+	repo = r
+	rev := t
+	if _, err := quiet("git", "-C", r, "remote", "get-url", "origin"); err == nil {
+		rev = "origin/" + t
+	}
+	n, why := watchCount(rev)
+	if why != "" {
+		say("starting nothing in %s: %s", r, why)
+		n = 0
+	}
+	if a, err := strconv.Atoi(os.Getenv("AT_ONCE")); err == nil && a >= 0 && n >= 0 {
+		n = min(n, a)
+	}
+	return n
+}
+
 // Whether tend watch runs tend again on the attempt of run folder d: its pull
 // request is open with a change request on its head, from a person with write
 // access, not yet answered, and it waits for no person.
@@ -420,10 +443,11 @@ func rerun(d string) bool {
 // run again go first, then each cycle not done and change in no cycle that
 // Grove calls claimable, oldest created first, each started in the background
 // and its claim seen to land before the next is chosen, so that one which
-// overlaps it is not started to be refused.
+// overlaps it is not started to be refused. Without starts, as for a
+// repository watch was not given, it only runs attempts again.
 // ponytail: run folders go oldest first by name, which a Grove attempt's
 // date-first ID makes so; an issue build's folder sorts after them.
-func keep(r string, n int, begin func(...string) chan struct{}) {
+func keep(r string, n int, begin func(...string) chan struct{}, starts bool) {
 	busy := 0
 	ls, _ := filepath.Glob(lockFile(r, "*"))
 	for _, l := range ls {
@@ -437,7 +461,7 @@ func keep(r string, n int, begin func(...string) chan struct{}) {
 		if free <= 0 {
 			return
 		}
-		if !sameDir(a[0], r) || !rerun(d) || held(a[0], a[1]) {
+		if len(a) < 2 || lockFile(a[0], "") != lockFile(r, "") || !rerun(d) || held(a[0], a[1]) {
 			continue
 		}
 		say("changes requested on %s; running tend on %s", cat(d+"/pr"), a[1])
@@ -445,7 +469,7 @@ func keep(r string, n int, begin func(...string) chan struct{}) {
 		free--
 	}
 	tried := map[string]bool{}
-	for ; free > 0; free-- {
+	for ; starts && free > 0; free-- {
 		g, _ := groveIn(r)
 		next, when := "", ""
 		for _, x := range append(list(get(g, "cycles")), list(get(g, "changes"))...) {
@@ -769,6 +793,14 @@ func takeLock() {
 
 // The lock file of work item w of repository r.
 func lockFile(r, w string) string {
+	// One lock however the repository is reached: a symlink, a subfolder or a
+	// linked worktree all share its common Git directory.
+	if g, err := quiet("git", "-C", r, "rev-parse", "--path-format=absolute", "--git-common-dir"); err == nil {
+		r = g
+	}
+	if p, err := filepath.EvalSymlinks(r); err == nil {
+		r = p
+	}
 	return fmt.Sprintf("%s/locks/%d-%s", state, cksum([]byte(r)), strings.ReplaceAll(w, "/", "_"))
 }
 
@@ -925,8 +957,7 @@ func contained() {
 	if !exists(run + "/layout") {
 		return
 	}
-	settingUp()
-	setUp()
+	settingUp() // until the layout is compared, so no tend makes a worktree meanwhile
 	var dirs, branches []string
 	fs, _ := filepath.Glob(state + "/runs/*/worktree")
 	more, _ := filepath.Glob(state + "/intake/*/worktree")
@@ -960,6 +991,7 @@ func contained() {
 			why = "it made the branch " + b + ", with commits"
 		}
 	}
+	setUp()
 	if why != "" {
 		stop("%s left work outside %s: %s. tend reviews and publishes nothing; move the work onto %s and remove the rest, then run tend again", impl, branch, why, branch)
 	}
@@ -1394,6 +1426,7 @@ func attempt() {
 		proj := project()
 		target = str(get(proj, "target"))
 		base = fetchTarget()
+		proj = project() // as the target now is, which the fetch may have moved
 		loadFlow("build", base)
 		rec = itemRun(proj, cycle)
 		dir = str(get(rec, "checkout"))

@@ -1921,4 +1921,44 @@ var scenarios = []scenario{
 		w := s.watchrepo()
 		s.check("a count an implementer commits is not watch's", s.count(w.err, `starting`) == 1)
 	}},
+	{"at-once-alias", func(s *sc) {
+		s.project("main", true)
+		f, release := s.hold()
+		k := s.bg([]string{"HOLD=" + f}, `^agent prompt impl-`, s.repo, "261114-k0000")
+		os.Symlink(s.repo, s.dir+"/alias")
+		r := s.tendIn(nil, s.dir+"/alias", "261114-k0000")
+		s.check("the same work item through another spelling of the path is refused", r.code == 4 && r.said(fmt.Sprintf("pid %d", k.c.Process.Pid)))
+		for _, p := range []string{s.repo + "/grove", s.worktree()} {
+			r = s.tendIn(nil, p, "261114-k0000")
+			s.check("and through a subfolder or a linked worktree: "+p, r.code == 4)
+		}
+		release()
+		k.wait()
+	}},
+	{"at-once-dependency-landed", func(s *sc) {
+		s.project("main", true)
+		s.change("261016-c0001", "Another", "")
+		s.change("261017-c0002", "Third", "261016-c0001")
+		s.bash(s.dir, `git clone -q "$t/repo.git" "$t/other" && cd "$t/other" && grove archive 261016-c0001 >/dev/null && git add -A && git commit -qm landed && git push -q origin main`)
+		r := s.crun("261017-c0002")
+		s.check("a change whose dependency landed on origin is claimed, though the local target was behind", r.passed() && s.changeRecords("261017-c0002") == 1)
+	}},
+	{"watch-at-once-unnamed", func(s *sc) {
+		s.atOnce(1)
+		s.run()
+		s.request()
+		w := s.watch("AT_ONCE=0")
+		s.check("watch given no repository still holds an attempt's rerun to its count", !w.said(`running tend`) && s.prompts("teammate") == 0)
+		w = s.watch()
+		s.check("and runs it within the count", w.said(`running tend on 261114-k0000`) && s.prompts("teammate") == 1)
+	}},
+	{"watch-at-once-subfolder", func(s *sc) {
+		s.atOnce(1)
+		s.tendIn(nil, s.repo+"/grove", "261114-k0000")
+		s.request()
+		s.change("261016-c0001", "Another", "")
+		w := s.watchrepo()
+		s.check("an attempt started through a subfolder is its repository's, and its rerun goes first", w.said(`running tend on 261114-k0000`) && s.prompts("teammate") == 1)
+		s.check("so nothing new starts in that pass", !w.said(`starting`))
+	}},
 }
