@@ -442,8 +442,17 @@ func rerun(d string) string {
 		return ""
 	}
 	p := cat(d + "/pr")
+	// An approval holds for a head carried from the approved one: carried-<head>
+	// names the head it came from, written once tend found it so in Git.
+	from := map[string]string{}
+	ms, _ := filepath.Glob(d + "/carried-*")
+	for _, m := range ms {
+		from[strings.TrimPrefix(filepath.Base(m), "carried-")] = cat(m)
+	}
+	c, _ := json.Marshal(from)
 	s, _ := quiet("gh", "pr", "view", p, "--json", "state,headRefOid,reviews", "--jq",
-		`select(.state == "OPEN") | .headRefOid as $h | [.reviews[] | select((.state == "CHANGES_REQUESTED" or .state == "APPROVED") and .commit.oid == $h and `+writer("authorAssociation")+`)] | (map(select(.state == "CHANGES_REQUESTED")) | last | .id // ""), (last | .state // "")`)
+		string(c)+` as $c | select(.state == "OPEN") | .headRefOid as $h | [.reviews[] | select((.state == "CHANGES_REQUESTED" or .state == "APPROVED") and `+writer("authorAssociation")+`)] |
+		(map(select(.state == "CHANGES_REQUESTED" and .commit.oid == $h)) | last | .id // ""), (map(select(.commit.oid == $h or .commit.oid == $c[$h])) | last | .state // "")`)
 	ls := strings.Split(s, "\n")
 	switch {
 	case ls[0] != "" && !exists(d+"/answered-"+ls[0]):
@@ -2000,7 +2009,7 @@ func checksOn(h string) [][]string {
 	if err != nil {
 		stop("could not read the check runs on %s", short(h))
 	}
-	sts, err := out("gh", "api", "repos/{owner}/{repo}/commits/"+h+"/status", "--jq",
+	sts, err := out("gh", "api", "repos/{owner}/{repo}/commits/"+h+"/status", "--paginate", "--jq",
 		`.statuses[] | [.context, (if .state == "pending" then "pending" elif .state == "success" then "pass" else "fail" end), .target_url // ""] | @tsv`)
 	if err != nil {
 		stop("could not read the statuses on %s", short(h))
@@ -2073,7 +2082,7 @@ func landStep() string {
 		if round > 0 {
 			time.Sleep(poll)
 		}
-		s, err := out("gh", "pr", "view", pr, "--json", "state,headRefOid,number,title,body")
+		s, err := out("gh", "pr", "view", pr, "--json", "state,headRefOid,baseRefName,number,title,body")
 		if err != nil {
 			stop("could not read %s", pr)
 		}
@@ -2086,6 +2095,9 @@ func landStep() string {
 		case "OPEN":
 		default:
 			stop("%s is closed, so tend lands nothing", pr)
+		}
+		if b := str(get(x, "baseRefName")); b != target {
+			stop("%s merges into %s, not %s, so tend lands nothing", pr, b, target)
 		}
 		h = git("rev-parse", "HEAD")
 		if o := str(get(x, "headRefOid")); o != h {
@@ -2119,15 +2131,22 @@ func landStep() string {
 			continue
 		}
 		stage("working", fmt.Sprintf("landing %s at %s", pr, short(h)), "GitHub squash-merges it")
-		body := str(get(x, "body"))
-		why, err := sh(&body, nil, true, "gh", "pr", "merge", pr, "--squash", "--match-head-commit", h,
-			"--subject", fmt.Sprintf("%s (#%s)", str(get(x, "title")), str(get(x, "number"))), "--body-file", "-")
-		if err == nil {
+		// GitHub's merge itself, never gh pr merge, which may queue the pull
+		// request or defer the merge and refuses a blocked one in words of its own.
+		req, _ := json.Marshal(map[string]any{"sha": h, "merge_method": "squash",
+			"commit_title": fmt.Sprintf("%s (#%s)", str(get(x, "title")), str(get(x, "number"))), "commit_message": str(get(x, "body"))})
+		var refused bytes.Buffer
+		in := string(req)
+		m, err := sh(&in, &refused, false, "gh", "api", "-X", "PUT", "repos/{owner}/{repo}/pulls/"+str(get(x, "number"))+"/merge", "--input", "-", "--jq", ".merged")
+		if err == nil && m == "true" {
 			landed = pr
 			say("landed %s at %s", pr, short(h))
 			return "ok"
 		}
-		why = strings.Join(strings.Fields(why), " ")
+		why := strings.Join(strings.Fields(refused.String()), " ")
+		if err == nil {
+			stop("GitHub did not merge %s: it answered merged %s", pr, m)
+		}
 		fetchTarget()
 		switch {
 		case !ok("git", "merge-base", "--is-ancestor", base, "HEAD"):

@@ -39,8 +39,11 @@ the pull request, the head and the fetched target afresh: it merges the
 target in with `git merge --no-ff` and a plain push (a conflict is aborted
 and gives `conflict`), reads check runs and commit statuses through
 `gh api .../commits/<sha>/check-runs` and `.../status`, and once all pass
-runs `gh pr merge --squash --match-head-commit <head> --subject "<title> (#<n>)" --body-file -`
-as the publishing account. A refusal after which the target lacks in the
+asks GitHub's REST merge (`PUT repos/{owner}/{repo}/pulls/<n>/merge`, `sha`
+the head, `merge_method` squash, `commit_title` "<title> (#<n>)",
+`commit_message` the description) as the publishing account, landed only on
+`merged: true`. A pull request whose base is not the target, or whose head is
+not the branch's, stops for a person. A refusal after which the target lacks in the
 head starts again; one naming a required check expected, pending or in
 progress waits within the same deadline; any other stops quoting GitHub.
 `status` says `done: landed <pr>`. `testdata/bin/gh` gains check runs from a
@@ -52,7 +55,8 @@ Check: the open question, how long `land` waits for a first check, is built as t
 Check: "A person merged it first" is shown by a merge made while the rerun waits for a check. A rerun started after the merge never reaches `land`: the run's tidy removes the attempt's own merged worktree first, as watch-and-status's "a tend's own lock shall not keep it from tidying" says (see Found).
 Check: whether GitHub refused because the target or head moved is judged from Git after a fresh fetch, not from GitHub's wording; only the required-check case reads the message, matched as `required status check … expected|pending|in progress`, which could not be checked against a live GitHub.
 Check: a pull request whose head differs from the attempt's branch stops for a person, rather than starting again from the merge, as the requirement "Land only a head that passed review" asks the head to be the pull request's.
-Check: no real GitHub call was made; `gh pr merge` flags, the check-runs and status endpoints and GitHub's refusal texts are as documented, seen only through the stand-in.
+Check: no real GitHub call was made; the REST merge, the check-runs and status endpoints and GitHub's refusal texts are as documented, seen only through the stand-in.
+Check: from a Codex review of the diff, land merges through GitHub's REST merge rather than `gh pr merge`, which may queue the pull request or enable a deferred merge and still exit 0, and which refuses a blocked pull request in words of its own ("the base branch policy prohibits the merge") that hide a late required check; land also stops when the pull request's base is not the target, and pages the combined status.
 Check: T-02's `main.go`, `flow.go`, `testdata/bin/gh` and `tend_test.go` changed on main since base; built on them as they are now.
 Also changed: `testdata/bin/turn.sh` — the implementer stand-in answers tend's conflict prompt by recording how the branch was left, then merging the target keeping its own side.
 Found: `tend <repo> <id>` run again after a person merged the attempt's pull request exits 3 saying the work item is in flight: tidy removes the attempt's worktree, then the attempt claims again and Grove refuses; seen debugging the scenario land-no-ci.
@@ -94,7 +98,7 @@ approved run lands), `land-check-fails` (a new head waits for a new
 approval), `approve-stranger`, `approve-built-in`, `approve-watch`,
 `approve-needs-you`, passed.
 
-Check: watch knows a flow acts on approvals from the `approves` mark the attempt's last run wrote, not by reading the target's flow file, and looks for an approval on the pull request's head only, not on heads it is carried from; a flow changed since that run is seen at the attempt's next run.
+Check: watch knows a flow acts on approvals from the `approves` mark the attempt's last run wrote, not by reading the target's flow file, and accepts an approval on the pull request's head or on the head named in its `carried-<head>` mark, which tend writes once Git shows the head carried, so an attempt killed mid-landing is run again; a flow changed since that run is seen at the attempt's next run.
 Check: watch under a count runs approved attempts with requested ones, inside the count and before new pieces, by the same code; no scenario shows the count with an approval.
 Check: T-04's files changed on main since base; built on them as they are now.
 
@@ -139,7 +143,7 @@ Check: T-05's `README.md` and `grove/specs/publication/spec.md` changed on main 
 - landing "The target moved while the checks ran": TestLanding/land-moved-before-merge, passed
 - landing "A required check reports late": TestLanding/land-late-check, passed
 - landing "A description a person edited": TestLanding/land-edited-description, passed
-- landing "GitHub refuses for a rule": TestLanding/land-refused, passed
+- landing "GitHub refuses for a rule": TestLanding/land-refused, passed; a retargeted pull request: TestLanding/land-retargeted, passed
 - landing "A teammate approves": TestLanding/land-target-moved, passed
 - landing "A stranger approves": TestLanding/approve-stranger, passed
 - landing "A new head after the approval": TestLanding/land-check-fails, passed

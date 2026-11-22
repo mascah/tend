@@ -2032,7 +2032,10 @@ func (s *sc) ci(checks string) { s.write(s.st+"/ci", checks+"\n") }
 
 // What origin's target holds: its newest commit's subject and body.
 func (s *sc) landedMsg() string { return s.git(s.repo+".git", "log", "-1", "--format=%B", "main") }
-func (s *sc) merges() int       { return s.count(s.log(), `^gh pr merge `) }
+func (s *sc) merges() int       { return s.count(s.log(), `^gh api -X PUT repos/.*/pulls/1/merge `) }
+
+// The heads GitHub was asked to merge pull requests at, oldest first.
+func (s *sc) mergedAt() []string { return strings.Fields(s.cat(s.st + "/merge-requests")) }
 func (s *sc) merged() bool      { return exists(s.pr() + ".merged") }
 func (s *sc) approve(h string)  { s.reviewOn(h, "teammate", "COLLABORATOR", "APPROVED") }
 
@@ -2051,7 +2054,7 @@ var landScenarios = []scenario{
 		s.check("the target gains its squash commit, titled with the pull request's title and number", strings.HasPrefix(s.landedMsg(), "Add the file (#1)\n\nThe project needed a file."))
 		s.check("whose body ends with the trailer", strings.HasSuffix(s.landedMsg(), "Grove: 261015-c0000"))
 		s.check("merged by the publishing account", s.cat(s.pr()+".merged-by") == "the-bot")
-		s.check("at exactly the reviewed head", s.has(s.log(), `^gh pr merge .* --squash --match-head-commit `+s.head()+` `))
+		s.check("at exactly the reviewed head", slices.Equal(s.mergedAt(), []string{s.head()}))
 		s.check("the target did not move, so no merge commit is made", s.git(s.worktree(), "rev-list", "--merges", "origin/main..HEAD") == "")
 		s.check("status says done and that it landed", s.has(s.status(), `^[^ ]* done: landed https://example.test/pr/`))
 		s.check("no agent was asked to merge it: the implementer, its message and one reviewer", s.count(s.log(), `^agent prompt `) == 3)
@@ -2103,7 +2106,7 @@ var landScenarios = []scenario{
 		s.check("once a teammate approves, the next run lands it", r.passed() && s.merged())
 		m := s.head()
 		s.check("the branch's head is a merge of the reviewed head and the target's tip", slices.Equal(s.parents(m), []string{m, reviewed, theirs}))
-		s.check("origin's branch was at it", s.has(s.log(), `^gh pr merge .* --match-head-commit `+m+` `))
+		s.check("origin's branch was at it", slices.Equal(s.mergedAt(), []string{m}))
 		s.check("pushed by no force", !s.has(s.log(), `push.*(--force|-f |\+HEAD)`))
 		s.check("the merge commit has tend/review success, set by the account", s.has(s.cat(s.st+"/statuses"), `^`+m+` success the-bot$`))
 		s.check("described as carried from the reviewed head", s.has(s.cat(s.st+"/descriptions"), `^`+m+` Carried from `+reviewed[:7]))
@@ -2122,8 +2125,9 @@ var landScenarios = []scenario{
 		m := s.git(s.repo+".git", "rev-parse", s.branch())
 		s.check("killed while waiting, the merge commit is pushed", m != reviewed && s.parents(m)[1] == reviewed)
 		s.ci("check success")
-		r := s.run()
-		s.check("the rerun lands it", r.passed() && s.merged())
+		w := s.watch()
+		s.check("watch runs it again on the approval of the head it was carried from", w.said(`was approved; running tend on 261114-k0000`))
+		s.check("and the rerun lands it", s.merged())
 		s.check("prompting no reviewer", s.reviews() == 1)
 		s.check("asking the implementer for no message", s.prompts("Branch") == 1)
 		s.check("and leaving the title and description as they were", s.cat(s.pr()+".title") == "Add the file" && s.count(s.log(), `^gh pr edit`) == 0)
@@ -2186,7 +2190,7 @@ var landScenarios = []scenario{
 		s.check("a target that moves before the merge is merged in again, and the candidate lands", r.passed() && s.merged())
 		s.check("GitHub was asked twice", s.merges() == 2)
 		m := s.head()
-		s.check("the second time at the new merge commit", len(s.parents(m)) == 3 && s.has(s.log(), `^gh pr merge .* --match-head-commit `+m+` `))
+		s.check("the second time at the new merge commit", len(s.parents(m)) == 3 && len(s.mergedAt()) == 2 && s.mergedAt()[1] == m)
 		s.check("whose checks were waited for", s.has(s.log(), `^gh api repos/.*/commits/`+m+`/check-runs`))
 		s.check("and the target holds both", s.git(s.repo+".git", "show", "main:b.txt") == "theirs" && strings.HasPrefix(s.landedMsg(), "Add the file (#1)"))
 	}},
@@ -2204,6 +2208,15 @@ var landScenarios = []scenario{
 		s.run()
 		s.check("a description a person edited is the commit's body", s.landedMsg() == "Add the file (#1)\n\nTheir own words.")
 	}},
+	{"land-retargeted", func(s *sc) {
+		s.lands(true, "check success")
+		s.run()
+		s.write(s.pr()+".base", "release\n")
+		s.approve(s.head())
+		r := s.run()
+		s.check("a pull request a person retargeted stops for a person", r.code == 3 && r.said(`merges into release, not main, so tend lands nothing`))
+		s.check("merging nothing", !s.merged() && s.merges() == 0)
+	}},
 	{"land-refused", func(s *sc) {
 		s.lands(false, "check success")
 		r := s.run("REQUIRE_APPROVAL=1")
@@ -2214,7 +2227,7 @@ var landScenarios = []scenario{
 		s.lands(false, "check success")
 		s.change("261016-c0001", "Another", "")
 		f, release := s.hold()
-		a := s.bg([]string{"MERGE_HOLD=" + f}, `^gh pr merge `, s.repo, "261114-k0000")
+		a := s.bg([]string{"MERGE_HOLD=" + f}, `^gh api -X PUT repos/.*/merge `, s.repo, "261114-k0000")
 		b := s.bg(nil, `^agent prompt impl-[^ ]* /grove-implement --runner 261016-c0001`, s.repo, "261016-c0001")
 		s.waitFor(func() bool {
 			return strings.Contains(s.tendIn(nil, "status", s.repo, "261016-c0001").out, "waits to land")
@@ -2228,10 +2241,8 @@ var landScenarios = []scenario{
 		h := s.git(s.repo+".git", "rev-parse", "main^{tree}")
 		s.check("the second's branch gained a merge of the target holding the first's commit", s.merges() == 2 && s.has(s.log(), `^gh api repos/.*/statuses/`) && h != "")
 		var merge string // the second's, which merges last
-		for _, l := range strings.Split(s.log(), "\n") {
-			if m := regexp.MustCompile(`^gh pr merge .*--match-head-commit ([0-9a-f]{40})`).FindStringSubmatch(l); m != nil {
-				merge = m[1]
-			}
+		if hs := s.mergedAt(); len(hs) == 2 {
+			merge = hs[1]
 		}
 		s.check("whose second parent holds the first", merge != "" && s.gitOK(s.repo+".git", "merge-base", "--is-ancestor", first, merge) && len(strings.Fields(s.git(s.repo+".git", "rev-list", "--parents", "-n", "1", merge))) == 3)
 	}},
