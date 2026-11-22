@@ -214,11 +214,13 @@ dev/fixture.sh ~/tmp/ledger
 bin/tend ~/tmp/ledger 261114-pr0t0
 ```
 
-`go test ./...` builds tend and runs its acceptance tests, in parallel:
+`go test ./...` builds tend and runs its acceptance tests, on half the cores
+unless `-parallel` says otherwise:
 `tend_test.go` drives the binary with real Git and Grove and stand-ins in
 `testdata/bin` for Herdr, rex, `gh` and `curl`, whose agents act at once. It
 starts no agent and needs no Grove checkout, but needs `grove` and `jq` on
-`PATH`. Run one scenario by name with `go test -run 'TestTend/^publish$'`.
+`PATH` (past a mise shim, the `grove` it falls back to). Run one scenario by
+name with `go test -run 'TestTend/^publish$'`.
 
 ## How work reaches tend
 

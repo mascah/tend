@@ -11,11 +11,13 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -24,26 +26,42 @@ import (
 	"time"
 )
 
-var tendBin, standIns string
+var tendBin, standIns, binDir string
 
 func TestMain(m *testing.M) {
 	standIns, _ = filepath.Abs("testdata/bin")
+	// Every scenario starts hundreds of processes: by default half the cores
+	// run scenarios, so the machine stays usable; -parallel overrides it.
+	flag.Parse()
+	set := false
+	flag.Visit(func(f *flag.Flag) { set = set || f.Name == "test.parallel" })
+	if !set {
+		flag.Set("test.parallel", strconv.Itoa(max(1, runtime.NumCPU()/2)))
+	}
+	d, err := os.MkdirTemp("", "tend-bin")
+	if err != nil {
+		panic(err)
+	}
+	binDir = d
+	// grove as a mise shim costs a second process on each of thousands of
+	// calls: the scenarios get the grove that the shim falls back to.
+	for _, p := range filepath.SplitList(os.Getenv("PATH")) {
+		if g := p + "/grove"; !strings.Contains(p, "mise/shims") && exists(g) {
+			os.Symlink(g, d+"/grove")
+			break
+		}
+	}
 	tendBin = os.Getenv("TEND")
 	if tendBin == "" {
-		d, err := os.MkdirTemp("", "tend-bin")
-		if err != nil {
-			panic(err)
-		}
 		tendBin = d + "/tend"
 		if b, err := exec.Command("go", "build", "-o", tendBin, ".").CombinedOutput(); err != nil {
 			fmt.Fprintf(os.Stderr, "go build: %v\n%s", err, b)
 			os.Exit(1)
 		}
-		code := m.Run()
-		os.RemoveAll(d)
-		os.Exit(code)
 	}
-	os.Exit(m.Run())
+	code := m.Run()
+	os.RemoveAll(d)
+	os.Exit(code)
 }
 
 // ---- a scenario: its own folder, repository and stand-in state
@@ -81,7 +99,7 @@ func (s *sc) env(extra ...string) []string {
 			e = append(e, kv)
 		}
 	}
-	e = append(e, "PATH="+standIns+":"+os.Getenv("PATH"),
+	e = append(e, "PATH="+standIns+":"+binDir+":"+os.Getenv("PATH"),
 		"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com", "GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com",
 		"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1", "TEND_TERMINAL=herdr",
 		"HERDR_STATE="+s.st, "TEND_STATE="+s.ts, "JIRA_EMAIL=owner@example.test", "JIRA_API_TOKEN=tok-secret-1", "t="+s.dir)

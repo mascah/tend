@@ -34,6 +34,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -484,16 +485,19 @@ func keep(r string, n int, begin func(...string) chan struct{}, starts bool) {
 		}
 		tried[next] = true
 		say("starting %s in %s", next, r)
+		before := runDirs()
 		done := begin(r, next)
-	landing:
-		for {
+		// Its claim has landed once its run folder names it: tend makes that
+		// folder only after Grove shows the claim.
+		for landed := false; !landed; {
 			select {
 			case <-done:
-				break landing
+				landed = true
 			case <-time.After(200 * time.Millisecond):
-				if g, _ := groveIn(r); unclaimable(g, next) != "" {
-					break landing
-				}
+				landed = slices.ContainsFunc(runDirs(), func(d string) bool {
+					a := strings.Split(cat(d+"/attempt"), "\n")
+					return !slices.Contains(before, d) && len(a) > 1 && a[1] == next
+				})
 			}
 		}
 	}
@@ -1087,6 +1091,7 @@ func removeWorktree(d, b string) {
 // or whose implementer is working. A run folder names its worktree in
 // worktree, deleted once it is gone.
 func tidy() {
+	g := sync.OnceValues(func() (any, error) { return groveIn(repo) }) // one read for every folder
 	var listed []string
 	for _, line := range strings.Split(git("-C", repo, "worktree", "list", "--porcelain"), "\n") {
 		if p, found := strings.CutPrefix(line, "worktree "); found {
@@ -1112,7 +1117,7 @@ func tidy() {
 				continue
 			}
 			b = pb
-		} else if b = superseded(d, r); b == "" {
+		} else if b = superseded(d, r, g); b == "" {
 			continue
 		}
 		real, _ := filepath.EvalSymlinks(d)
@@ -1143,12 +1148,12 @@ func tidy() {
 // The branch of an attempt with no pull request whose Grove cycle or change is done
 // and whose branch the local target already holds, as when its work reached
 // the target some other way; or nothing.
-func superseded(d, r string) string {
+func superseded(d, r string, grove func() (any, error)) string {
 	a := strings.Split(cat(r+"/attempt"), "\n")
 	if filepath.Dir(r) != state+"/runs" || len(a) < 2 || !sameDir(a[0], repo) || isItem(a[1]) {
 		return ""
 	}
-	g, err := groveIn(repo)
+	g, err := grove()
 	if known, open := workState(g, a[1]); err != nil || !known || open {
 		return ""
 	}
@@ -1433,6 +1438,7 @@ func attempt() {
 		if dir != "" && gitQ("-C", dir, "branch", "--show-current") == str(get(rec, "branch")) {
 			term.open(dir)
 			cd(dir)
+			proj = project() // the attempt's root, not the caller's
 			say("carrying on attempt %s in %s", str(get(rec, "id")), dir)
 		} else {
 			if why := unclaimable(proj, cycle); why != "" {
@@ -1450,14 +1456,15 @@ func attempt() {
 			if b != tmp {
 				quiet("git", "branch", "-D", tmp) // Herdr needs a branch; Grove's claim makes its own
 			}
-			rec = firstRun(project(), "branch", b)
+			proj = project()
+			rec = firstRun(proj, "branch", b)
 			if rec == nil {
 				stop("claimed %s, but Grove shows no record for %s", cycle, b)
 			}
 			say("claimed %s as attempt %s in %s", cycle, str(get(rec, "id")), dir)
 		}
 		branch, id = str(get(rec, "branch")), str(get(rec, "id"))
-		root = str(get(project(), "root")) // the attempt's, not the caller's
+		root = str(get(proj, "root"))
 	}
 	impl = "impl-" + id
 	run = state + "/runs/" + id
