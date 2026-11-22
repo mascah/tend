@@ -140,7 +140,7 @@ func (r *rex) start(name, kind string, _ bool, args []string) (string, error) {
 			return b, nil
 		}
 		// A dialog start answers or stops at: no first report will come.
-		if screen := strings.ToLower(r.read(name)); strings.Contains(screen, "trust") || strings.Contains(screen, "yes, add it") {
+		if screen := strings.ToLower(strings.Join(strings.Fields(r.read(name)), " ")); strings.Contains(screen, "trust") || strings.Contains(screen, "yes, add it") || strings.Contains(screen, "esc skip") {
 			return b, errors.New("agent_not_ready")
 		}
 	}

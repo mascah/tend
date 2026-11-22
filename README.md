@@ -371,7 +371,11 @@ Grove does not know tend exists, and is useful without it.
   `~/.local/state/tend` (or `$TEND_STATE`) and choose "Yes, I trust this
   folder"; every run folder below it is then added without asking. It never
   trusts Codex hooks: when Codex asks to review new or changed hooks, tend
-  stops for you, since a trusted hook runs outside the sandbox.
+  stops for you, since a trusted hook runs outside the sandbox. A startup
+  notice that offers to be skipped (its hint says `esc skip`), such as
+  Codex's "Update available", it skips by Esc alone, so it never updates an
+  agent or picks a model, and says so. At any other screen an agent starts
+  at, tend stops for you, saying the agent did not start.
 - The reviewer may write in the attempt's run folder besides its checkout
   (`--add-dir`), where its verdict goes. So may the implementer, which writes
   its notes, the commit message and its replies there; the repair prompt

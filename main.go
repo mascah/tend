@@ -654,13 +654,15 @@ func takeLock() {
 // before answering, and a dialog still on screen after an answer, even behind
 // an agent called ready, is answered again. Codex's review of new or changed
 // hooks is never answered: a hook trusted runs outside the sandbox, and one in
-// the candidate is the implementer's to write.
+// the candidate is the implementer's to write. A notice whose hint offers
+// "esc skip", as Codex's "Update available", is skipped by Esc alone, which can
+// choose nothing: never an update, never a model.
 // ponytail: trusts whatever repo the caller passed; the real tool should
 // answer only for repos the owner registered.
 func start(name, kind string, fresh bool, args ...string) string {
 	p, err := term.start(name, kind, fresh, args)
-	for range 3 {
-		screen := term.read(name)
+	for range 4 {
+		screen := strings.Join(strings.Fields(term.read(name)), " ") // a hint or warning may wrap
 		switch {
 		case strings.Contains(screen, "Hooks can run outside the sandbox"):
 			stop("%s asks to review new or changed hooks, which run outside its sandbox once trusted; tend trusts none. Answer it in its pane, then run tend again", name)
@@ -670,6 +672,10 @@ func start(name, kind string, fresh bool, args ...string) string {
 		case strings.Contains(screen, "Trust and continue"):
 			time.Sleep(time.Second)
 			term.keys(name, "enter")
+		case strings.Contains(screen, "esc skip"):
+			time.Sleep(time.Second)
+			term.keys(name, "esc")
+			say("skipped %s's startup notice", name)
 		case err == nil:
 			return p
 		default:

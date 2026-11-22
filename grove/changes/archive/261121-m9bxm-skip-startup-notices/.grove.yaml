@@ -3,4 +3,4 @@ created: 2026-11-21T23:29:35Z
 description: tend presses Esc at a startup notice that offers to be skipped, such as Codex's "Update available", where today the agent does not start
 schema: default
 depends_on: [261121-gapde]
-base: 0a4e821632e1c0f8ed8861b8b38bd2bc0bedd1cb
+base: d54c96c3308a6b1c1f37554eefeba2cf5b5dbd2c
