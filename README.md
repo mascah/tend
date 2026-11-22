@@ -37,9 +37,7 @@ or later), `git` and `gh` on PATH, Herdr or rex, and Claude Code and Codex
 signed in. Run it inside a Herdr pane or a rex terminal:
 
 ```sh
-bin/tend <repo> <change-id>
-bin/tend <repo> <cycle-id>
-bin/tend <repo> issue-<n>
+bin/tend <repo> <id>          # a change, a cycle, issue-<n> or a Jira <KEY>
 bin/tend status <repo> [<change-id> | <cycle-id>]
 bin/tend watch [<repo>...]
 bin/tend propose <repo>
@@ -63,17 +61,27 @@ tend rather than being prompted into. rex worktrees are made by Git under
 `TEND_STATE/worktrees/`, and tend reports its own state to its tab.
 
 - Exit 0: the head is reviewed, and the verdict is printed.
-- Exit 2: no work item was given; a usage line says how to give one.
+- Exit 2: no work item was given; tend prints `usage: tend <repo> <id>`.
 - Exit 3: a person is needed. A Herdr notification says why, or under rex
   tend's own tab.
-- Exit 4: another tend is running with the same `TEND_STATE`, and nothing was
-  done. One tend runs at a time per state folder; the lock goes when it exits
+- Exit 4: the work item is taken: another tend with the same `TEND_STATE` is
+  on it in that repository (or, for `tend propose`, another intake pass of
+  the repository), and nothing was done. The lock goes when its holder exits
   or is killed.
 - Exit 1: a command tend relies on failed unexpectedly.
 
+Tends on different work items run at once, each with its own lock, worktree
+and agents, and one intake pass per repository runs beside them. Tends that
+start together set up one at a time: each fetches, tidies, makes its worktree
+and claims while the others wait, and a claim Grove refuses, such as for a
+piece that shares a planned file with one in flight, stops with Grove's
+sentence and leaves no worktree or branch. A worktree or branch another
+attempt or intake pass made is not held against an implementer; anything
+else new outside its branch still stops the attempt.
+
 Its own files live under `TEND_STATE` (default `$XDG_STATE_HOME/tend`, or
 `~/.local/state/tend` without it): the
-lock, and a folder per attempt under `runs/` holding its verdicts and repair
+locks under `locks/`, and a folder per attempt under `runs/` holding its verdicts and repair
 mark. They never enter the candidate, so a repository needs no Git excludes.
 An attempt from before this, with a `.tend/` folder in its checkout, has
 those files moved to its folder on the next run, and a name clash stops for
@@ -230,10 +238,12 @@ With `tend watch <repo>...` running, each pass (every `WATCH_SECONDS`, default
    change. Run `tend <repo> <change-id>`, and tend claims it, has Claude
    implement it and Codex review it, repairs once if the review asks, and
    opens the implementation pull request. A cycle is needed only to build
-   several changes together, or for watch to start the build without you:
-   plan one (`/grove-plan`) and mark it `unattended: true`. A cycle not
-   marked `unattended` is built only when someone runs
-   `tend <repo> <cycle-id>`.
+   several changes together. Without you, watch starts a build in one of two
+   ways: with `watch: {at_once: N}` in the flow file it starts every change
+   and cycle Grove calls claimable (see [Flows](#flows-the-steps-an-attempt-runs));
+   without it, only a cycle you plan (`/grove-plan`) and mark
+   `unattended: true`, and anything else only when someone runs
+   `tend <repo> <id>`.
 3. **Requested changes.** On an implementation pull request, GitHub's
    "Request changes" (not a plain comment) by an owner, member or
    collaborator goes to the implementer; anyone else's is left. Either it
@@ -242,11 +252,13 @@ With `tend watch <repo>...` running, each pass (every `WATCH_SECONDS`, default
    the pull request, and that review is not asked again. Request changes again
    to have it tried.
 4. **Cleanup.** Once a pull request is merged or closed, a later pass removes
-   its worktree, branch and terminal workspace.
+   its worktree, branch and terminal workspace, but not while a tend is on
+   that attempt.
 
 Not picked up: plain comments, on any pull request, and comments on proposals
 (revising a proposal is a person's); issues without the label; approved
-changes in no cycle, and cycles not marked `unattended`; a proposal closed
+changes in no cycle, and cycles not marked `unattended`, unless the flow file
+sets `watch.at_once`; a proposal closed
 without merging, which is never drafted again. In a repository without Grove, an issue labelled `tend-build` is built
 only by `tend <repo> issue-<n>` (or `<KEY>`).
 
@@ -340,6 +352,35 @@ starts, a file that is not YAML, holds a field it does not know, names a
 step, harness, prompt or outcome that does not exist, or loops with no
 limited step.
 
+The flow file also says how many attempts `tend watch` keeps going:
+
+```yaml
+watch:
+  at_once: 2
+```
+
+Without `watch`, watch starts only cycles marked `unattended`, one a pass.
+With it, each pass first runs tend again on attempts with changes requested,
+then starts every cycle not done and change in no cycle that Grove calls
+claimable, marked or not, oldest first, until that many attempts on this
+runner in that repository are being worked on: a tend holds its lock,
+whoever started it, building, in review or repairing. Watch waits for none of
+them before its next pass, and intake runs beside them, outside the count.
+`AT_ONCE` in watch's environment lowers the count for this machine, never
+raises it; `AT_ONCE=0` starts nothing new and lets running work finish. The
+count is read from the target, so an attempt that commits a different one
+changes nothing. Each runner counts its own; Grove's claim still refuses an
+overlap whichever machine asks.
+
+An attempt that stops for a person frees its slot, so work that does not
+overlap it goes on: it keeps its change in flight in Grove, so nothing claims
+it again, and watch leaves it until a person runs tend on it. To park an
+attempt that is running, interrupt its agent in its pane; tend stops for you,
+and the slot is free.
+
+`at_once` must be a whole number of at least 1; anything else in `watch`
+stops tend as a flow file that is not valid.
+
 Each step asked is recorded in the run folder (`<step>-asked`, a head a
 line), so a rerun after a kill waits for an agent still working, takes a
 result already there, and never asks a step twice for the same thing.
@@ -401,7 +442,7 @@ Grove does not know tend exists, and is useful without it.
   and notifies you.
 - Each attempt gets a Herdr worktree workspace. `herdr worktree create`
   needs a branch name and `grove claim` then makes its own, so tend deletes
-  the `tend-HHMMSS` branch it made after the claim.
+  the `tend-HHMMSS-<pid>` branch it made after the claim.
 
 ## What has been seen, and what has not
 
@@ -428,7 +469,7 @@ Not yet shown:
 - a dialog Herdr does not recognize (it reports `idle`, so tend prompts into
   it; the missing verdict then stops tend);
 - whether the Herdr notification reaches a phone;
-- tmux without Herdr, a saved SSH machine, two cycles at once.
+- tmux without Herdr, a saved SSH machine.
 
 ## Next
 
