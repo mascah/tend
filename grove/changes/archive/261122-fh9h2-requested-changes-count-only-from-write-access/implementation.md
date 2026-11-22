@@ -57,7 +57,5 @@ gives both names as GitHub documents them.
 
 ## Reconciliation
 
-<!-- One line per change spec, once applied to its maintained spec:
-
-    - record-editing: applied to specs/record-editing/spec.md
--->
+- publication: applied to grove/specs/publication/spec.md
+- watch-and-status: applied to grove/specs/watch-and-status/spec.md
