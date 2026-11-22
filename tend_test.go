@@ -215,6 +215,17 @@ project() { # dir [target] [remote]
 	fi
 	cd - >/dev/null
 }
+# An approved change in no cycle, committed, and pushed when there is origin.
+change() { # id title [depends-on]
+	local c=grove/changes/$1-$(tr 'A-Z ' 'a-z-' <<<"$2")
+	mkdir -p "$c"
+	printf 'title: %s\ncreated: 2026-10-16T09:00:00Z\nschema: default\nbase: %s\n' "$2" "$(git rev-parse HEAD)" >"$c/.grove.yaml"
+	[ -z "${3:-}" ] || printf 'depends_on: [%s]\n' "$3" >>"$c/.grove.yaml"
+	printf '# %s\n\n## Why\n\nBecause.\n' "$2" >"$c/proposal.md"
+	printf '# Tasks\n\n- [ ] T-01 Do it\n' >"$c/tasks.md"
+	git add -A && git commit -qm "$2"
+	if git remote get-url origin >/dev/null 2>&1; then git push -q origin HEAD; fi
+}
 # A repository without Grove, with origin.
 plain() {
 	git init -q -b main "$t/repo" && (cd "$t/repo" && echo x >a.txt && git add -A && git commit -qm init &&
@@ -230,6 +241,10 @@ func (s *sc) project(target string, remote bool) {
 	s.bash(s.dir, fmt.Sprintf("project %q %q %q", s.repo, target, r))
 }
 func (s *sc) plain() { s.bash(s.dir, "plain") }
+func (s *sc) change(id, title, dep string) {
+	s.bash(s.repo, fmt.Sprintf("change %q %q %q", id, title, dep))
+}
+func (s *sc) crun(id string, env ...string) res { return s.tendIn(env, s.repo, id) } // tend <repo> <change-id>
 
 // Files written into the repository, committed on its branch, and pushed when
 // it has origin: as the target holds them, e.g. a tend/flow.yaml.
@@ -312,6 +327,17 @@ func (s *sc) records() int {
 	n := 0
 	for _, r := range list(get(x, "runs")) {
 		if str(get(r, "cycle")) == "261114-k0000" {
+			n++
+		}
+	}
+	return n
+}
+
+// Grove's records naming change c alone and no cycle.
+func (s *sc) changeRecords(c string) int {
+	n := 0
+	for _, r := range list(get(parse(s.sh(s.repo, "grove", "changes", "--json")), "runs")) {
+		if get(r, "cycle") == nil && slices.Equal(list(get(r, "changes")), []any{c}) {
 			n++
 		}
 	}
@@ -833,6 +859,7 @@ var scenarios = []scenario{
 		s.check("a review lists the open questions", strings.Contains(rv, "Which thing?"))
 		s.check("and says what merging with them open means", strings.Contains(rv, "its implementation may then choose those answers"))
 		s.check("naming the change to revise", strings.Contains(rv, "/grove-propose 261115-p0000"))
+		s.check("and that once merged it can be built by its ID, or planned with others", strings.Contains(rv, "can be built by its ID, `tend <repo> <change-id>`, or planned into a cycle with others") && !strings.Contains(rv, "waits for a cycle"))
 		s.propose()
 		s.check("a second pass drafts nothing again", s.drafts() == 2)
 		s.check("and opens nothing again", s.creates() == 2)
@@ -914,14 +941,14 @@ var scenarios = []scenario{
 	{"overview", func(s *sc) {
 		s.project("main", true)
 		s.allow()
-		s.bash(s.repo, `c=grove/changes/261016-c0001-another && mkdir -p "$c" && printf 'title: Another\ncreated: 2026-10-16T09:00:00Z\nschema: default\nbase: %s\n' "$(git rev-parse HEAD)" >"$c/.grove.yaml" && printf '# Another\n\n## Why\n\nBecause.\n' >"$c/proposal.md" && printf '# Tasks\n\n- [ ] T-01 Do it\n' >"$c/tasks.md" && git add -A && git commit -qm another && git push -q origin main`)
+		s.change("261016-c0001", "Another", "")
 		s.issues("1:tend", "2:tend")
 		s.propose("CAP=1")
 		s.run()
 		s.request()
 		o := s.overview()
-		s.check("the overview names an approved change without a cycle", s.has(o, `^  261016-c0001 Another`))
-		s.check("a cycle not done, with Grove's verdict", s.has(o, `^  261114-k0000 One: claimed by attempt`))
+		s.check("the overview names an approved change in no cycle, with Grove's verdict", s.has(after(o, "Approved changes in no cycle", 1), `^  261016-c0001 Another: grove claim 261016-c0001 would claim it`))
+		s.check("a cycle not done, with Grove's verdict", s.has(o, `^  261114-k0000 One: 261114-k0000 is in flight in attempt`))
 		s.check("the attempt on this runner and its stage", s.has(o, `^  [0-9]{6}-[a-z0-9]{5} \(261114-k0000\): done: success`))
 		s.check("the proposal to review", strings.Contains(after(o, "Proposals to review", 1), "Propose a thing"))
 		s.check("the implementation to review, with the change requested", s.has(after(o, "Implementations to review", 1), `Add the file .*changes requested`))
@@ -931,6 +958,73 @@ var scenarios = []scenario{
 		s.check("nor once its proposal is merged", !strings.Contains(s.overview(), "#1 Request 1"))
 		s.bash(s.repo, `mkdir -p grove/changes/archive && git mv grove/changes/261015-c0000-a-change grove/changes/archive/261015-c0000-a-change && git commit -qm landed && git push -q origin main`)
 		s.check("an attempt whose cycle is done is left out", !strings.Contains(s.overview(), "(261114-k0000)"))
+	}},
+	{"change-claim", func(s *sc) {
+		s.project("main", true)
+		s.allow()
+		s.change("261016-c0001", "Another", "")
+		r := s.crun("261016-c0001")
+		s.check("a change in no cycle is claimed by name and passes review", r.passed())
+		s.check("Grove holds one record, naming it alone and no cycle", s.changeRecords("261016-c0001") == 1 && s.records() == 0)
+		s.check("the implementer is asked for the change under --runner", s.has(s.log(), `^agent prompt impl-[^ ]* /grove-implement --runner 261016-c0001 --wait`))
+		s.check("one pull request is opened, onto the target", s.count(s.log(), `^gh pr create --base main `) == 1)
+		s.check("its description ends with the change", strings.HasSuffix(s.cat(s.pr()), "\nGrove: 261016-c0001"))
+		st := s.tendIn(nil, "status", s.repo, "261016-c0001").out
+		s.check("status finds the attempt", s.has(st, `^attempt [0-9]{6}-[a-z0-9]{5} of 261016-c0001: grove/[0-9]{6}-[a-z0-9]{5} in `))
+		s.check("and what it recorded", s.has(st, `done: success`))
+	}},
+	{"change-resume", func(s *sc) {
+		s.project("main", true)
+		s.change("261016-c0001", "Another", "")
+		r := s.crun("261016-c0001", "IMPL_FAIL=stub_failure")
+		s.check("an implementer failure after the claim stops for a person", r.code == 3)
+		id := str(get(parse(s.sh(s.repo, "grove", "changes", "--json")), "runs", 0, "id"))
+		r = s.crun("261016-c0001")
+		s.check("the rerun exits 0", r.code == 0)
+		s.check("the rerun carries on the same attempt", r.said("carrying on attempt "+id))
+		s.check("one record for the change", s.changeRecords("261016-c0001") == 1)
+	}},
+	{"change-waits", func(s *sc) {
+		s.project("main", true)
+		s.change("261016-c0001", "Another", "")
+		s.change("261017-c0002", "Third", "261016-c0001")
+		r := s.crun("261017-c0002")
+		s.check("a change that waits stops for a person", r.code == 3)
+		s.check("with Grove's sentence", r.said("261017-c0002 waits on 261016-c0001"))
+		s.check("and no implementer is prompted", s.count(s.log(), `^agent prompt`) == 0)
+		o := s.overview()
+		s.check("the overview gives its verdict", s.has(after(o, "Approved changes in no cycle", 2), `^  261017-c0002 Third: 261017-c0002 waits on 261016-c0001`))
+	}},
+	{"change-in-cycle", func(s *sc) {
+		s.project("main", true)
+		r := s.crun("261015-c0000")
+		s.check("a change a cycle lists stops for a person", r.code == 3)
+		s.check("with Grove's sentence", r.said("261015-c0000 is in cycle 261114-k0000"))
+		s.check("and no implementer is prompted", s.count(s.log(), `^agent prompt`) == 0)
+		s.check("the worktree made for the refused claim is removed", s.worktree() == s.st+"/wt-tend-[0-9]*" && s.git(s.repo, "branch", "--list", "tend-*") == "")
+		s.check("the cycle is still claimed as before", s.run().passed() && s.records() == 1)
+	}},
+	{"change-overview", func(s *sc) {
+		s.project("main", true)
+		s.change("261016-c0001", "Another", "")
+		s.crun("261016-c0001")
+		s.check("the overview lists the attempt at the change", s.has(s.overview(), `^  [0-9]{6}-[a-z0-9]{5} \(261016-c0001\): done: success`))
+		s.bash(s.repo, `grove archive 261016-c0001 >/dev/null && git add -A && git commit -qm landed && git push -q origin main`)
+		s.check("and no longer once the target holds it archived", !strings.Contains(s.overview(), "(261016-c0001)"))
+	}},
+	{"change-tidy", func(s *sc) {
+		s.project("main", true)
+		s.allow()
+		s.change("261016-c0001", "Another", "")
+		s.crun("261016-c0001", "IMPL_FAIL=stub_failure")
+		wt, b := s.worktree(), s.branch()
+		s.issues()
+		s.propose()
+		s.check("an attempt at a change not archived stays", isDir(wt))
+		s.bash(s.repo, `grove archive 261016-c0001 >/dev/null && git add -A && git commit -qm "built elsewhere" && git push -q origin main`)
+		s.propose()
+		s.check("an attempt with no pull request whose change is archived elsewhere is removed", !exists(wt))
+		s.check("with its local branch", s.git(s.repo, "branch", "--list", b) == "")
 	}},
 	{"watch-intake", func(s *sc) {
 		s.project("main", true)

@@ -28,11 +28,11 @@ readable when `gh` fails there, and exiting 0.
   as a proposal and issue #2 labelled `tend` and not yet drafted
 - WHEN a person runs `tend status <repo>`
 - THEN it lists `261016-c0001 Another` with Grove's verdict under "Approved
-  changes in no cycle", `261114-k0000 One: claimed by attempt…`, the attempt
-  `(261114-k0000): done: success…`, the proposal `Propose a thing` under
-  "Proposals to review", `Add the file` with "changes requested" under
-  "Implementations to review", and `#2 Request 2` but not `#1` under
-  "Requests waiting for tend propose"
+  changes in no cycle", `261114-k0000 One: 261114-k0000 is in flight in
+  attempt…`, the attempt `(261114-k0000): done: success…`, the proposal
+  `Propose a thing` under "Proposals to review", `Add the file` with
+  "changes requested" under "Implementations to review", and `#2 Request 2`
+  but not `#1` under "Requests waiting for tend propose"
 
 #### Scenario: A change that waits
 
