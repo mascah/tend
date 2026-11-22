@@ -129,6 +129,35 @@ repository or work item is given.
 - WHEN the owner runs `tend <repo>`
 - THEN tend prints `usage: tend <repo> <id>` and exits 2
 
+### Requirement: Carry on the attempt or claim the cycle
+
+When tend runs on a Grove cycle, the system shall carry on the newest attempt
+record for the cycle in `grove changes --json` whose checkout still holds its
+branch, and otherwise make a new worktree, run `grove claim <cycle-id>` inside
+it and delete the temporary `tend-HHMMSS-<pid>` branch the worktree was made
+with, named for the time and tend's process so that tends setting up in the
+same second each make their own, stopping for a person if the claim is
+refused; with or without origin.
+
+#### Scenario: A rerun after a stop
+
+- GIVEN a repository with origin where tend claimed the cycle and then stopped
+  because the implementer's prompt failed
+- WHEN the owner runs tend on the cycle again
+- THEN standard error says `carrying on attempt <id>`, Grove holds one record
+  for the cycle, and tend exits 0
+
+#### Scenario: Without origin
+
+- GIVEN a repository with no remote, where tend claimed the cycle and stopped
+- WHEN the owner runs tend on the cycle again
+- THEN it carries on the same attempt and exits 0
+
+#### Scenario: The temporary branch goes
+
+- WHEN tend claims a cycle
+- THEN the repository has no `tend-*` branch afterwards
+
 ### Requirement: Work stays on the attempt's branch
 
 When an implementer turn that builds, repairs or makes requested changes

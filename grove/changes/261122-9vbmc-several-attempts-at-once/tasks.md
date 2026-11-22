@@ -30,6 +30,9 @@ Acceptance:
   finished worktree, and an intake pass a merged proposal's.
 - `lock` and `status-interrupted` still pass, and the usage test expects
   `usage: tend <repo> <id>`.
+- The scenarios of the MODIFIED attempts requirement "Carry on the attempt
+  or claim the cycle" still pass (`remote-resume`, `local-resume`,
+  `remote-claim`), with the temporary branch named `tend-HHMMSS-<pid>`.
 
 ## T-02 — Containment allows for tend's other attempts
 
