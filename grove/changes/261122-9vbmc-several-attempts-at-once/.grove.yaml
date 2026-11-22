@@ -1,0 +1,6 @@
+title: "Several attempts at once"
+created: 2026-11-22T06:48:49Z
+description: a lock for each work item in place of one for the runner, and a watch setting in the flow file that starts every piece Grove calls claimable, up to a count
+schema: default
+depends_on: [261122-nh8aa]
+base: 40ca101ace0c26ffa479c672b821fbdfd8a1ff96

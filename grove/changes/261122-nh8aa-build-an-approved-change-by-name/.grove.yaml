@@ -1,0 +1,5 @@
+title: "Build an approved change by name"
+created: 2026-11-22T06:48:48Z
+description: tend <repo> <change-id> builds an approved change that no cycle lists, as it builds a cycle, so no cycle has to be planned and merged first
+schema: default
+base: 40ca101ace0c26ffa479c672b821fbdfd8a1ff96

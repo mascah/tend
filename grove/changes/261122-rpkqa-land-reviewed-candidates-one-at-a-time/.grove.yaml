@@ -1,0 +1,6 @@
+title: "Land reviewed candidates one at a time"
+created: 2026-11-22T06:48:50Z
+description: a land step a flow opts into, which merges the target into a reviewed candidate, waits for its checks and squash-merges it, one candidate at a time
+schema: default
+depends_on: [261122-9vbmc, 261122-fh9h2]
+base: 40ca101ace0c26ffa479c672b821fbdfd8a1ff96
