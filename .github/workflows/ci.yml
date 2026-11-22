@@ -29,7 +29,7 @@ jobs:
           go-version-file: go.mod
       - name: Install Grove
         run: |
-          curl -fsSL https://raw.githubusercontent.com/mascah/grove/main/install.sh | sh -s -- v0.14.0
+          curl -fsSL https://raw.githubusercontent.com/mascah/grove/main/install.sh | sh -s -- v0.15.0
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
       - run: go vet ./...
