@@ -2,7 +2,8 @@
 # GitHub stand-in. "auth token --user A" gives tok-A, and every write records the
 # account whose token made it. One PR per head branch: pr-<branch> holds its body
 # and pr-<branch>.by its author. Reviews go to reviews (a JSON array, read back
-# through the caller's --jq), statuses to statuses as "<sha> <state> <account>".
+# through the caller's --jq; a review's author_association is what GitHub
+# gives as author association), statuses to statuses as "<sha> <state> <account>".
 # CREATE_LOST opens the PR and then fails, as when GitHub acted but tend never
 # heard back. pr-<branch>.merged marks it merged; its head is origin's branch.
 set -euo pipefail
@@ -58,7 +59,7 @@ case "$1 $2" in
 	[ -e "$k.merged" ] && st=MERGED || st=OPEN
 	[ -e "$k.draft" ] && dr=true || dr=false
 	jq --arg st "$st" --argjson dr "$dr" --arg h "$(git -C "$o" rev-parse "$b" 2>/dev/null)" --arg b "$b" --rawfile body "$k" --arg t "$(cat "$k.title" 2>/dev/null)" \
-		'{state: $st, isDraft: $dr, headRefOid: $h, headRefName: $b, title: $t, body: $body, reviews: map({id: .node_id, state, commit: {oid: .commit_id}, author: {login: .user.login}})}' "$s/reviews" |
+		'{state: $st, isDraft: $dr, headRefOid: $h, headRefName: $b, title: $t, body: $body, reviews: map({id: .node_id, state, commit: {oid: .commit_id}, author: {login: .user.login}, authorAssociation: .author_association})}' "$s/reviews" |
 		if q=$(arg --jq "$@") && [ -n "$q" ]; then jq -r "$q"; else cat; fi ;;
 api*)
 	[ -f "$s/reviews" ] || echo '[]' >"$s/reviews"
