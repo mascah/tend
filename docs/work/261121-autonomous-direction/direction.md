@@ -1,10 +1,8 @@
 # Grove and tend: direction for autonomous development
 
-A record of one exploratory conversation with the owner on 2026-11-21,
-reviewed with Codex over four rounds; decisions 11 and 12 and the implied
-order changed after that review. It is direction, not a spec: nothing here is
-built, and only step 1 of the implied order is proposed. Decisions are the
-owner's; lines marked (inference) are the assistant's and not confirmed.
+Direction from the owner, including the follow-up review of Grove step 2.
+[Steps](steps.md) tracks delivery. The background describes the starting
+point before the tend rewrite. Lines marked (inference) await confirmation.
 
 ## Background
 
@@ -45,8 +43,11 @@ owner's; lines marked (inference) are the assistant's and not confirmed.
 
 1. **Autonomy.** Agents propose, plan, build, merge and file the work they
    discover. The owner keeps direction: goals and principles.
-2. **Reach.** This is a supported mode a project opts into. Grove and tend keep
-   today's supervised defaults for projects that do not.
+2. **Reach.** Support both supervised and autonomous work. The owner chose
+   “one claim model for both workflows.” A person can select a change or tend
+   can select it under the project's flow. Human approval and the number of
+   simultaneous builds are separate choices. Compatibility with the old
+   timer is a migration question.
 3. **What still needs the owner in that mode:**
    - (a) The rules agents work under: the flow file (decision 7), CI, the
      repository ruleset, CODEOWNERS, the principles file, `grove.yaml`, agent
@@ -114,36 +115,113 @@ owner's; lines marked (inference) are the assistant's and not confirmed.
 12. **Test suite.** Rewritten in Go with the rewrite, replacing `dev/test.sh`.
     The earlier plan, to split the Bash suite per spec first and move to Go
     afterwards, is dropped.
+13. **What a cycle is for.** Claim approved changes individually by default.
+    Keep a cycle when there is a concrete reason to review and land several
+    changes together. A dependency can express build order on its own.
+    Changes contributing to the same outcome can land independently.
+14. **Outcome identity and authority.** The owner chose “Grove ID and
+    owner-approved text in Git.” A pitch gets a permanent Grove ID when
+    first recorded. Acceptance keeps that ID. A title or path can change,
+    and several GitHub or Jira requests can refer to the same outcome.
+    Store the owner's accepted scope on the target branch. The standing
+    agent can draft an outcome or an amendment. Only the owner's approval
+    gives that text authority; a proposed expansion stays pending. A
+    change referring to an outcome still follows the proposal approval
+    and owner-boundary rules in decisions 3 and 4.
+15. **What the graph expresses.** A change's outcome reference says why it
+    exists. Its `depends_on` references say which changes must land first.
+    A discovery link records where a request or pitch came from. Following
+    that link grants no authority to build a new outcome. The graph should
+    answer “Which changes serve this outcome, and what is holding them up?”
+    Read current attempts and planned overlap when answering readiness.
+    These can change during execution without changing the relationships.
+
+    For example, both proposals in Grove PR 182 serve the outcome of
+    removing scheduling merges. Named claims depend on reconciliation,
+    which can land on its own. A new product idea found while building
+    reconciliation can point back to it and wait for the owner's decision.
+    This example illustrates the intended graph; the drafts predate it.
 
 ## Implied order (inference)
 
-1. tend: rewrite around steps and a flow file, with Go tests. Proposed as
+1. tend: rewrite around steps and a flow file, with Go tests. Built as
    change 261121-gapde.
-2. Grove: first settle what is claimed, a cycle or a change (the first open
-   question below). Then scheduling leaves merges and more than one piece of
-   work can be claimed.
+2. Grove: reconcile stale requirements, then allow independent approved
+   changes and optional cycles to be claimed by name. Proposed in PR 182.
 3. tend: parallel work and the merge train; the autonomous flow's new steps
    (decompose a goal, check a proposal against decision 3, plan); the standing
    agent. Each with its own tests.
 4. The typing app, as the first project in the autonomous mode.
 
-Found on the way, and independent of all of it: under rex, tend waits a full
-60 seconds before answering Claude's dialog for adding the run folder
-(`rex.go:137-146` at ed385ad). It wants a `bugfix` change of its own.
+## Step 2 review findings
+
+The review covered [Grove PR 182](https://github.com/mascah/grove/pull/182)
+at `9043b19` against `07d319f`, and its companion
+[constitution amendment](https://github.com/mascah/grove/pull/181).
+These findings describe the drafts at that revision.
+
+- **Within a cycle**, two members can name different task files and rewrite
+  the same requirement. Both builders can read the old text before either
+  archives. Apply the overlap check to members before they start and read
+  the maintained requirement again after the earlier member archives.
+- **Across changes**, B can depend on A and still omit a clause A gained
+  during implementation. Two changes can also add different text under the
+  same new requirement name. Compare B with what actually landed in both
+  cases. Include an example where B already incorporates the landed text.
+- **At claim time**, today's watcher can read a cycle's `runs` value and
+  lose a race before it calls `grove claim <cycle-id>`. If a project
+  requires serial execution, its limit must hold when the claim is recorded
+  across participating runners. An earlier readiness read is advisory.
+- **After a stop**, scanning all historical unarchived claims can revive a
+  superseded pre-upgrade attempt and pause a previously working timer.
+  Retrying replaces the attempt and keeps the change in flight. Specify
+  the upgrade behavior, how to release a particular attempt for retry, and
+  how to park a change for an owner answer while unrelated work proceeds.
+  A late release must leave a newer attempt alone.
+
+## What the comparison established
+
+Beads gives work separate links for grouping, dependency and discovery.
+Claiming, returning work to the queue and closing it have distinct effects.
+Its Dolt-backed implementation versions an issue's owner and status and
+keeps lease renewals local to the store. A shared database can coordinate
+writers. Independent replicas see one another's updates after sync.
+[Beads work graph](https://github.com/gastownhall/beads/blob/main/docs/core-concepts/index.md),
+[claim transaction](https://github.com/gastownhall/beads/blob/main/internal/storage/issueops/claim.go)
+and [lease recovery](https://github.com/gastownhall/beads/blob/main/cmd/bd/reclaim.go).
+
+Gas City supports a file provider (`GC_BEADS=file`) as well as Beads. Its
+file store coordinates processes sharing a file and persists ownership
+revisions. Its controller compares the recorded work with the actual agent
+session when deciding to resume or restart. This is relevant to tend's
+existing promise to recover without prompting a surviving agent twice.
+[Gas City file store](https://github.com/gastownhall/gascity/blob/main/internal/beads/filestore.go)
+and [health patrol](https://github.com/gastownhall/gascity/blob/main/engdocs/architecture/health-patrol.md).
+
+Multiple hosts claiming different work need one authority for reservations.
+Grove already conditionally updates a shared Git ref. Taking over work from
+a lost host also needs an accessible candidate commit and step checkpoint,
+and a way to prevent the returning attempt from delivering. Support for a
+work graph takes priority. Dolt, Beads integration and cross-host takeover
+remain options to evaluate against a concrete need.
 
 ## Open questions
 
-- Whether a cycle survives as an optional "build these together", or goes away.
-  This blocks step 2.
-- The flow file's format and what a step can express. A throwaway prototype was
-  offered and declined in favour of going straight to the rebuild.
+- How Grove records evidence of owner acceptance for an outcome revision,
+  how a runner identifies the revision used for a particular decision, and
+  the file format and reference syntax. Decision 14 settles the identity
+  and authority.
+- How tend detects a lost worker, reattaches to a surviving session and
+  retries from a durable step. Automatic local recovery matters for
+  unattended work. Lease timing, takeover by another machine and the
+  choice of a shared store remain open.
 - Who runs the merge train. GitHub's merge queue needs CI to run on its
   `merge_group` event and waits for every required check on the train's own
   commit, so `tend/review` would have to be reported there too; whether it is
   available to a repository owned by a personal account is not verified. The
   alternative is tend running the train as a step, which means tend merges.
-- Where goals, pitches and discovered work are written down: GitHub issues or
-  Grove documents.
+- Where to keep broad goals and discovered requests before they become
+  outcome pitches or changes, and how trackers expose their Grove links.
 - What a built pitch is: a throwaway to try, or the real change parked on an
   unmerged branch.
 - When no person approves a proposal, who answers its open questions, and which
