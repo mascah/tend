@@ -1,0 +1,1 @@
+tend could not land {branch} at {head}: {base} does not merge into it cleanly, so tend merged nothing and left the branch as it was. Merge {base} into the branch yourself, resolving each conflict so that both sides' intent holds, run the tests, update {notes} where a claim changes, and commit the merge. Ask no one.

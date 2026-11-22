@@ -6,6 +6,14 @@
 # gives as author association), statuses to statuses as "<sha> <state> <account>".
 # CREATE_LOST opens the PR and then fails, as when GitHub acted but tend never
 # heard back. pr-<branch>.merged marks it merged; its head is origin's branch.
+# A status's description goes to descriptions as "<sha> <description>". ci
+# holds the checks every commit gets, "<name> <conclusion>" a line, pending
+# for one not finished; none, no checks. pr merge squash-merges onto origin's
+# main as the account, merged-by naming it, and refuses as GitHub would when
+# the head moved or lacks main; REQUIRE_APPROVAL refuses without an approving
+# review, CI_LATE (a check's name) refuses once for that check, then reports
+# it passed, BEFORE_MERGE is a script run once before the first merge, and
+# MERGE_HOLD holds every merge until the file it names exists.
 set -euo pipefail
 s=$HERDR_STATE
 printf 'gh %s\n' "$*" >>"$s/log"
@@ -49,6 +57,26 @@ case "$1 $2" in
 "pr edit")
 	cat >"$s/pr-${3##*/}"
 	arg --title "$@" >"$s/pr-${3##*/}.title" ;;
+"pr merge")
+	k=$s/pr-${3##*/}
+	{ read -r b; read -r o; } <"$k.where"
+	h=$(arg --match-head-commit "$@")
+	[ -z "${MERGE_HOLD:-}" ] || until [ -e "$MERGE_HOLD" ]; do sleep 0.1; done
+	if [ -n "${BEFORE_MERGE:-}" ] && [ ! -e "$s/before-merge" ]; then touch "$s/before-merge"; bash -c "$BEFORE_MERGE" >/dev/null 2>&1; fi
+	[ "$(git -C "$o" rev-parse "$b")" = "$h" ] || { echo "GraphQL: Head branch was modified. Review and try the merge again. (mergePullRequest)" >&2; exit 1; }
+	git -C "$o" merge-base --is-ancestor main "$h" || { echo "GraphQL: Head branch is out of date. Review and try the merge again. (mergePullRequest)" >&2; exit 1; }
+	if [ -n "${REQUIRE_APPROVAL:-}" ] && ! jq -e --arg h "$h" 'any(.[]?; .state == "APPROVED" and .commit_id == $h)' "$s/reviews" >/dev/null 2>&1; then
+		echo "GraphQL: At least 1 approving review is required by reviewers with write access. (mergePullRequest)" >&2
+		exit 1
+	fi
+	if [ -n "${CI_LATE:-}" ] && [ ! -e "$s/late" ]; then
+		touch "$s/late" && echo "$CI_LATE success" >>"$s/ci"
+		echo "GraphQL: Required status check \"$CI_LATE\" is expected. (mergePullRequest)" >&2
+		exit 1
+	fi
+	c=$(git -C "$o" commit-tree "$h^{tree}" -p main -m "$(arg --subject "$@")" -m "$(cat)")
+	git -C "$o" update-ref refs/heads/main "$c"
+	touch "$k.merged" && echo "$by" >"$k.merged-by" ;;
 "pr comment")
 	[ -f "$s/comments" ] || echo '[]' >"$s/comments"
 	jq --arg n "${3##*/}" --arg by "$by" --rawfile b /dev/stdin '. + [{issue: $n, body: $b, user: {login: $by}}]' "$s/comments" >"$s/c.new" && mv "$s/c.new" "$s/comments" ;;
@@ -59,7 +87,7 @@ case "$1 $2" in
 	[ -e "$k.merged" ] && st=MERGED || st=OPEN
 	[ -e "$k.draft" ] && dr=true || dr=false
 	jq --arg st "$st" --argjson dr "$dr" --arg h "$(git -C "$o" rev-parse "$b" 2>/dev/null)" --arg b "$b" --rawfile body "$k" --arg t "$(cat "$k.title" 2>/dev/null)" \
-		'{state: $st, isDraft: $dr, headRefOid: $h, headRefName: $b, title: $t, body: $body, reviews: map({id: .node_id, state, commit: {oid: .commit_id}, author: {login: .user.login}, authorAssociation: .author_association})}' "$s/reviews" |
+		'{state: $st, number: 1, isDraft: $dr, headRefOid: $h, headRefName: $b, title: $t, body: $body, reviews: map({id: .node_id, state, commit: {oid: .commit_id}, author: {login: .user.login}, authorAssociation: .author_association})}' "$s/reviews" |
 		if q=$(arg --jq "$@") && [ -n "$q" ]; then jq -r "$q"; else cat; fi ;;
 api*)
 	[ -f "$s/reviews" ] || echo '[]' >"$s/reviews"
@@ -77,6 +105,16 @@ api*)
 		else
 			jq -r "$(arg --jq "$@")" "$s/reviews"
 		fi ;;
-	*/statuses/*) echo "${2##*/} $(printf '%s\n' "$@" | sed -n 's/^state=//p') $by" >>"$s/statuses" ;;
+	*/statuses/*)
+		echo "${2##*/} $(printf '%s\n' "$@" | sed -n 's/^state=//p') $by" >>"$s/statuses"
+		echo "${2##*/} $(printf '%s\n' "$@" | sed -n 's/^description=//p')" >>"$s/descriptions" ;;
+	*/commits/*/check-runs)
+		{ [ ! -f "$s/ci" ] || cat "$s/ci"; } | jq -Rn '{check_runs: [inputs | split(" ") | select(length == 2) |
+			{name: .[0], status: (if .[1] == "pending" then "in_progress" else "completed" end), conclusion: (if .[1] == "pending" then null else .[1] end), html_url: ("https://example.test/checks/" + .[0])}]}' |
+			jq -r "$(arg --jq "$@")" ;;
+	*/commits/*/status)
+		h=${2%/status} h=${h##*/}
+		{ [ ! -f "$s/statuses" ] || grep "^$h " "$s/statuses" | tail -1 || true; } | jq -Rn '{statuses: [inputs | split(" ") | {context: "tend/review", state: .[1], target_url: "https://example.test/pr"}]}' |
+			jq -r "$(arg --jq "$@")" ;;
 	esac ;;
 esac

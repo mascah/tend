@@ -33,6 +33,9 @@ turn() { # name text
 			*"earlier head"*) printf 'Add the file, plainer\n\nThe project needed a plain file.\n\n%s\n' "$e" >"$m" ;;
 			*) printf 'Add the file\n\nThe project needed a file.\n\n%s\n' "$e" >"$m" ;;
 			esac ;;
+		*"does not merge into it cleanly"*) # how the branch was left, then the target merged in, keeping ours
+			{ git rev-parse HEAD; git rev-parse -q --verify MERGE_HEAD || true; git status --porcelain; } >"$s/at-conflict"
+			git merge -q -X ours --no-edit origin/main >/dev/null 2>&1 ;;
 		*) echo fix >>a.txt && git commit -qam repair ;;
 		esac ;;
 	prop-*)

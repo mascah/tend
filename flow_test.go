@@ -97,6 +97,40 @@ build:
 	}
 }
 
+// A flow that lands: publish sends on to land, a conflict and a failed check
+// go back to the implementer once each.
+const landing = `
+build:
+  start: implement
+  steps:
+    implement: {agent: claude, prompt: p.md, result: commit, next: {ok: review}}
+    review: {agent: codex, prompt: p.md, result: "verdict v-{head}.json", next: {success: publish, failure: publish}}
+    publish: {next: {ok: land}}
+    land: {next: {ok: end, conflict: resolve, failed: fix}}
+    resolve: {continue: implement, prompt: p.md, result: commit, limit: 1, next: {ok: review}}
+    fix: {continue: implement, prompt: p.md, result: commit, limit: 1, next: {ok: review}}
+`
+
+func TestLandFaults(t *testing.T) {
+	for _, c := range []struct{ name, text, want string }{
+		{"a flow that lands", landing, ""},
+		{"land without publish", strings.Replace(strings.Replace(landing, "publish: {next: {ok: land}}", "", 1), "success: publish, failure: publish", "success: land, failure: land", 1), "a step land and no publish"},
+		{"land given a prompt", strings.Replace(landing, "land: {next:", "land: {prompt: p.md, next:", 1), "more than next, though landing is tend's own"},
+		{"land given an agent", strings.Replace(landing, "land: {next:", "land: {agent: claude, next:", 1), "landing is tend's own"},
+		{"an outcome land cannot have", strings.Replace(landing, "failed: fix}", "failed: fix, spent: end}", 1), "it has ok, conflict and failed"},
+		{"a conflict step with no limit", strings.Replace(landing, "limit: 1, next: {ok: review}}\n    fix", "next: {ok: review}}\n    fix", 1), "loops through review, publish, land and resolve with no limit"},
+		{"a continue of land", strings.Replace(landing, "resolve: {continue: implement", "resolve: {continue: land", 1), `"land" to continue`},
+		{"land in propose", "propose:\n  start: draft\n  steps:\n    draft: {agent: claude, prompt: p.md, next: {ok: publish}}\n    publish: {next: {ok: land}}\n    land: {next: {ok: end}}\n", "where tend lands nothing"},
+		// Only people's approvals bring a supervised flow round to land again.
+		{"a loop only through approved", strings.Replace(strings.Replace(landing, "{ok: land}", "{ok: end, approved: land}", 1), "limit: 1, ", "", -1), ""},
+	} {
+		got := faultOf(c.text)
+		if c.want == "" && got != "" || !strings.Contains(got, c.want) {
+			t.Errorf("%s: fault %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
 // ---- the flows spec's scenarios, through the binary and the stand-ins
 
 // The built-in build flow as text, with each pair of old, new replaced once.
@@ -143,6 +177,25 @@ func (s *sc) at(re string) int {
 func (s *sc) agentStarts() int { return s.count(s.log(), `^agent start `) }
 
 var flowScenarios = []scenario{
+	{"flow-land-faults", func(s *sc) {
+		s.project("main", true)
+		land := landFlow(s.t, false)["tend/flow.yaml"]
+		for _, c := range []struct{ what, text, want string }{
+			{"land without publish", strings.NewReplacer("    publish:\n      next:\n        ok: land\n        requested: request\n", "",
+				"        success: publish\n        failure: publish\n", "        success: land\n        failure: land\n", "        spent: publish\n", "        spent: land\n").Replace(land),
+				`^tend: tend/flow\.yaml gives flow build a step land and no publish`},
+			{"land given a prompt", strings.Replace(land, "    land:\n", "    land:\n      prompt: prompts/review.md\n", 1), `^tend: tend/flow\.yaml gives step land of flow build more than next, though landing is tend's own$`},
+			{"a conflict step with no limit", strings.Replace(land, "      prompt: prompts/conflict.md\n      result: commit\n      limit: 1\n", "      prompt: prompts/conflict.md\n      result: commit\n", 1), `^tend: tend/flow\.yaml loops through .* with no limit$`},
+		} {
+			s.commit(c.what, map[string]string{"tend/flow.yaml": c.text})
+			r := s.run()
+			s.check(c.what+": tend exits 3 saying why", r.code == 3 && r.said(c.want))
+			s.check(c.what+": and no agent is started", s.agentStarts() == 0)
+		}
+		s.commit("Land", map[string]string{"tend/flow.yaml": land})
+		p := s.tendIn(nil, "flow", s.repo)
+		s.check("a flow naming tend's own prompts for conflict and failed, with none beside it, is valid", p.code == 0 && strings.Contains(p.out, "prompt: prompts/conflict.md") && strings.Contains(p.out, "prompt: prompts/failed.md"))
+	}},
 	{"flow-one-more-step", func(s *sc) {
 		s.project("main", true)
 		s.allow()
