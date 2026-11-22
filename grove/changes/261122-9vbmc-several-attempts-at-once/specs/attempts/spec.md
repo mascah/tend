@@ -60,7 +60,11 @@ agents outlive it.
 While one tend fetches the target, tidies finished worktrees, makes its
 worktree and claims, the system shall have any other tend using that
 TEND_STATE wait before doing the same, so that tends started together each
-end with a worktree, a branch and a record of their own.
+end with a worktree, a branch and a record of their own; a tend shall record
+its worktree in its run folder, and an intake pass a request's worktree in
+its intake folder, before it lets the next go; and a tend shall wait for one
+that is setting up before it checks what "Work stays on the attempt's branch"
+says.
 
 #### Scenario: Two started together
 
@@ -69,6 +73,14 @@ end with a worktree, a branch and a record of their own.
   the same second
 - THEN Grove holds one record for each, each attempt has its own worktree,
   both reach a verdict, and the repository has no `tend-*` branch afterwards
+
+#### Scenario: A turn ends while another attempt sets up
+
+- GIVEN a tend on cycle K whose implementer's turn ends while a tend on
+  change C has made its worktree and is still claiming
+- WHEN K's tend checks the repository
+- THEN it waits for C's tend to finish setting up, K's head is reviewed, and
+  tend does not stop for C's worktree or branch
 
 ### Requirement: A refused claim leaves nothing behind
 

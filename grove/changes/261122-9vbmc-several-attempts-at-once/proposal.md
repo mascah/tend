@@ -56,7 +56,8 @@ stops for a person frees its slot, so work that does not overlap it goes on.
 - Tends that start together setting up one at a time.
 - A claim Grove refuses leaving no worktree or branch behind.
 - The containment rule allowing for what tend's other attempts and intake
-  passes made.
+  passes made, and waiting for one that is setting up.
+- Cleanup leaving the worktree of an attempt or intake pass a tend is on.
 - `watch.at_once` in the flow file: reading it, refusing a value that is not
   valid, and `tend flow` printing it.
 - `tend watch` under that setting: which pieces it starts, in what order,
@@ -132,6 +133,15 @@ before writing, which holds the rest.
     `WATCH_ONCE` waits for what it started. Test layout, private helpers,
     file names under TEND_STATE that no spec names, and the wording of
     one-sentence messages are the implementer's to choose.
+
+14. From a review on 2026-11-22, each fix approved by the owner:
+    - Cleanup leaves the worktree of an attempt or intake pass a tend is
+      on. Reason: with a lock for each work item, one tend's cleanup runs
+      while another tend still uses its worktree.
+    - A tend records its worktree before it lets the next tend set up, and
+      waits for one that is setting up before it checks containment. Reason:
+      a worktree made and not yet recorded would stop another attempt for a
+      person.
 
 ## Open questions
 

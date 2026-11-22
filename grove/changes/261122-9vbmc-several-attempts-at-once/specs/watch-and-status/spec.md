@@ -85,6 +85,29 @@ set it shall wait for what it started and then exit.
 - WHEN a pass of `tend watch <repo>` runs
 - THEN it starts nothing
 
+### Requirement: Tidying leaves what a tend is on
+
+While another tend holds a work item's lock, or another intake pass a
+repository's, the system shall remove no worktree of that attempt, or of that
+repository's requests, as "Finished worktrees are tidied" would have it do,
+and shall say it left it because a tend is on it; a tend's own lock shall not
+keep it from tidying what it would otherwise remove.
+
+#### Scenario: A pull request closed under a tend
+
+- GIVEN a tend on cycle K that has published its head and is still running,
+  whose pull request a person closes
+- WHEN the owner runs tend on change C
+- THEN K's worktree and branch stay, and tend says it left the worktree as a
+  tend is on it; once K's tend has exited, the next run removes them
+
+#### Scenario: A tend tidies its own finished work
+
+- GIVEN issue #7's pull request is merged
+- WHEN the owner runs `tend <repo> issue-7`
+- THEN the worktree of `tend/build-7` is removed, though that tend holds the
+  lock of `issue-7`
+
 ### Requirement: The runner may lower the count
 
 Where `AT_ONCE` is set to a whole number in `tend watch`'s environment, the

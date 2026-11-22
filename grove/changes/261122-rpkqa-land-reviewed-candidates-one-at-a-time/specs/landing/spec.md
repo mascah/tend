@@ -128,11 +128,13 @@ any other head without a verdict as not reviewed.
 ### Requirement: Checks decide
 
 Before merging, the system shall wait, for at most `TIMEOUT_MS`, until every
-check GitHub reports on the head has finished; if one failed, it shall give
-`failed`, giving the step that follows the failed checks' names and links for
-its prompt; and if GitHub reports no check on the head but `tend/review`, or
-one is still unfinished when the wait ends, it shall stop for a person saying
-so, and merge nothing.
+check GitHub reports on the head, check runs and commit statuses alike, has
+finished; a check that finished as success, neutral or skipped passed, and
+one that finished any other way, as cancelled or timed out, failed; if one
+failed, it shall give `failed`, giving the step that follows the failed
+checks' names and links for its prompt; and if GitHub reports no check on the
+head but `tend/review`, or one is still unfinished when the wait ends, it
+shall stop for a person saying so, and merge nothing.
 
 #### Scenario: A check fails on the merged head
 
@@ -142,6 +144,19 @@ so, and merge nothing.
 - WHEN tend waits for the checks
 - THEN nothing is merged, that step's prompt names the failed check, and the
   head the implementer makes is reviewed before anything lands
+
+#### Scenario: A cancelled check
+
+- GIVEN a candidate on whose head one check passed and another was cancelled,
+  and a flow that sends `failed` to a step continuing the implementer
+- WHEN tend waits for the checks
+- THEN nothing is merged, and that step's prompt names the cancelled check
+
+#### Scenario: A skipped check
+
+- GIVEN a candidate on whose head one check passed and another was skipped
+- WHEN tend reaches `land`
+- THEN the pull request is merged
 
 #### Scenario: No CI
 
@@ -165,9 +180,11 @@ have GitHub squash-merge the pull request at exactly that head, as the
 publishing account, with the pull request's title followed by its number as
 the commit's subject and its description as the body; if GitHub refuses
 because the target or the head moved, it shall begin again from merging the
-target in; if GitHub refuses for any other reason, it shall stop for a person
-with GitHub's reason; and once merged it shall give `ok`, `status` saying the
-pull request landed.
+target in; if GitHub refuses only because a check it requires is pending or
+not yet reported, it shall go back to waiting for the checks, within the same
+wait; if GitHub refuses for any other reason, it shall stop for a person with
+GitHub's reason; and once merged it shall give `ok`, `status` saying the pull
+request landed.
 
 #### Scenario: Landed
 
@@ -186,6 +203,15 @@ pull request landed.
 - WHEN GitHub refuses the merge
 - THEN tend merges the target in again, waits for the new head's checks, and
   lands it
+
+#### Scenario: A required check reports late
+
+- GIVEN a repository whose rule requires the checks `title` and `check`, and
+  a candidate on whose head only `title` is reported, and passed, when tend
+  first looks
+- WHEN GitHub refuses the merge because `check` is expected
+- THEN tend stops for no one, waits, and lands the pull request once `check`
+  passes
 
 #### Scenario: A description a person edited
 

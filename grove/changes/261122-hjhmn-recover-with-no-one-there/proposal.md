@@ -87,7 +87,11 @@ which holds the rest.
    follow-up, as well as any step of a project's flow.
 4. This change depends on 261122-rpkqa, so that it is built after landing
    and its account of what watch runs again is written once.
-5. Test layout, private helpers, file names under TEND_STATE that no spec
+5. From a review on 2026-11-22, approved by the owner: the second ask does
+   not count toward a step's limit. Reason: the built-in repair has limit 1,
+   and a repair whose agent went before it committed would otherwise be both
+   asked again and refused.
+6. Test layout, private helpers, file names under TEND_STATE that no spec
    names, and the wording of one-sentence messages are the implementer's to
    choose.
 

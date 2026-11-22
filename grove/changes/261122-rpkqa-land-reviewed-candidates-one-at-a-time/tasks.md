@@ -118,9 +118,15 @@ Acceptance:
   there, each with limited steps for `conflict` and `failed`.
 - It says to set a branch rule on the target that requires the project's CI
   and `tend/review` and requires branches to be up to date, that the
-  publishing account must be allowed to merge, and that a rule dismissing
-  approvals on new commits undoes an approval whenever tend merges the
-  target in.
+  publishing account must be allowed to merge and must not be able to
+  bypass the rule, so that for an account that administers the repository
+  "Do not allow bypassing the above settings" is on, and that a rule
+  dismissing approvals on new commits undoes an approval whenever tend
+  merges the target in.
+- It says tend reads an approval once, at `publish`, and that a supervised
+  project which wants an approval withdrawn, or changes requested, while the
+  candidate waits to hold the merge sets the rule to require an approving
+  review, so that GitHub refuses and tend stops with its reason.
 - It says one candidate lands for each CI run, and that a project with no
   CI on pull requests cannot land.
 - Once the change is archived, the publication spec's Boundaries says tend

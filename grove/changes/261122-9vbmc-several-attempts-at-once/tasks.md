@@ -4,7 +4,9 @@ Result: tends on different work items, and an intake pass beside them, run at
 the same time; tends that start together set up one at a time; and a refused
 claim leaves nothing behind, as the attempts requirements "One tend for each
 work item", "Attempts set up one at a time", "A refused claim leaves nothing
-behind" and "Exit statuses" in this change say.
+behind" and "Exit statuses" in this change say; and cleanup leaves the
+worktree of an attempt a tend is on, as the watch-and-status requirement
+"Tidying leaves what a tend is on" says.
 
 Files:
 - `main.go`
@@ -20,8 +22,12 @@ Constraints: `tend status <repo> <item>` still says `tend is on it` only for
 the item asked about; a lock goes when its holder exits or is killed.
 
 Acceptance:
-- Each scenario of the three ADDED attempts requirements is a test that
-  passes.
+- Each scenario of the three ADDED attempts requirements but "A turn ends
+  while another attempt sets up", and the watch-and-status scenario "A pull
+  request closed under a tend", is a test that passes; "A tend tidies its
+  own finished work" is the existing test of a merged issue build.
+- `tidy` and `tidy-superseded` still pass: a tend still removes its own
+  finished worktree, and an intake pass a merged proposal's.
 - `lock` and `status-interrupted` still pass, and the usage test expects
   `usage: tend <repo> <id>`.
 
@@ -39,8 +45,9 @@ Files:
 Delegated: test layout and private helpers.
 
 Acceptance:
-- The scenarios "Another attempt starts during the turn" and "A stray
-  worktree beside another attempt's" are tests that pass.
+- The scenarios "Another attempt starts during the turn", "A stray
+  worktree beside another attempt's" and "A turn ends while another attempt
+  sets up" are tests that pass.
 - `stray-worktree` and `stray-branch` still pass.
 
 ## T-03 — The flow file holds watch's count

@@ -75,6 +75,12 @@ project that adds none sees no change, and people merge as before.
   before it merges, and the rule "require branches to be up to date", which
   the README tells the owner to set, is what closes the moment between tend's
   check and GitHub's merge.
+- Reading an approval again before the merge. tend reads it once, at
+  `publish`. If the approver withdraws it or requests changes while the
+  candidate waits for its turn or its checks, tend still merges, unless the
+  branch rule requires an approving review, which the README tells a
+  supervised project to set; GitHub then refuses and tend stops with its
+  reason.
 - An order of landing across machines. Each runner lands one candidate at a
   time; between runners GitHub's rule decides.
 - Running a failed check again, and deleting a merged branch.
@@ -116,12 +122,14 @@ before writing, which holds the rest.
    - If the head lacks the target's tip, tend merges the target in, as a
      merge commit and never by a forced push. A conflict is aborted and gives
      `conflict`.
-   - It waits for every check GitHub reports on the head; a failed one gives
-     `failed`.
+   - It waits for every check GitHub reports on the head, check runs and
+     commit statuses alike; success, neutral and skipped pass, and any other
+     finished check gives `failed`.
    - It squash-merges exactly that head, with the pull request's title and
      description as the commit message.
-   - If the target moved meanwhile, it starts again from the merge. Any other
-     refusal stops for a person with GitHub's reason.
+   - If the target moved meanwhile, it starts again from the merge. If a
+     required check is pending or not yet reported, it goes back to waiting.
+     Any other refusal stops for a person with GitHub's reason.
 6. A head with no check other than `tend/review` stops for a person. Reason:
    decision 9's train is a test by CI, and merging with none would be a train
    in name only.
@@ -141,6 +149,16 @@ before writing, which holds the rest.
     supervised and an autonomous flow file and the branch rule to set. Test
     layout, private helpers, file names under TEND_STATE that no spec names,
     and the wording of one-sentence messages are the implementer's to choose.
+
+12. From a review on 2026-11-22, each fix approved by the owner:
+    - Which finished checks pass, that commit statuses count, and that a
+      merge refused for a required check still pending or not yet reported
+      goes back to waiting. Reason: a second workflow can register after the
+      first finishes, as `check` does after `title` in tend's own repository.
+    - The README says the branch rule must bind the publishing account, and
+      that a supervised project requires an approving review in the rule.
+      Reason: an account that can bypass the rule loses the up-to-date
+      guarantee, and tend reads an approval only once.
 
 ## Open questions
 

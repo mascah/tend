@@ -2,8 +2,9 @@
 
 Result: a step recorded as asked, with no result, whose agent has no pane is
 asked a second time in a new session and no more often, while an agent that
-is there and not working still stops for a person, as the flows requirement
-"Any step recovers without being prompted twice", the review requirement "An
+is there and not working still stops for a person, as the flows requirements
+"Any step recovers without being prompted twice" and "A step is asked no
+more often than its limit", the review requirement "An
 uncertain repair goes to a person", the publication requirement "A request
 answered with no change" and the intake requirement "Drafting prompts are
 sent once" in this change say.
@@ -22,7 +23,8 @@ blocked and unknown agents still stop for a person; deleting a step's record
 still has it asked once more.
 
 Acceptance:
-- The flows scenarios "The agent is gone" and "Gone a second time", the
+- The flows scenarios "The agent is gone", "Gone a second time" and "A
+  repair asked once more", the
   review scenario "The implementer is gone", the publication scenario "The
   implementer is gone" and the intake scenario "The drafter is gone" are
   tests that pass.
