@@ -119,6 +119,31 @@ Check: `ghRequest`, the GitHub request, went to `request.go` with the type
 it builds: the table gives GitHub requests no file of their own, and
 `jira.go` may hold nothing a GitHub request uses.
 
+### T-06 — Flows are three files
+
+Status: done
+
+- `flow.go` keeps a flow's definition and validation: `step`, `flow`,
+  `flowFile`, `watchSetting` and their methods, `result`, `parseResult`,
+  `sorted`, `and`, `decode`.
+- `flow_load.go`: `builtin` (still `//go:embed flows`), `flowPath`,
+  `promptText`, `flowsAt`, `watchCount`, `printFlows`, `loadFlow`.
+- `flow_run.go`: the `// ---- the engine` section: its variables, `fill`,
+  `prompted`, `walkFlow`, the ask records (`recordOf`, `asks`, `timesAsked`,
+  `setAsks`), agents (`agentOf`, `agentAt`, `startAgent`, `implementer`,
+  `doing`), `promptStep`, recovery (`againOf`, `again`, `continued`) and
+  reaching steps (`reach`, `reachAt`, `implStep`, `fileName`,
+  `reachInOrder`).
+- Edit beyond moves: none.
+- Checks: `go build -o bin/tend .` succeeded; `bin/tend flow .` in this
+  repository printed byte for byte what a build of `43758c3` printed;
+  `go test -count=1 ./...` passed. `flow.go` calls no `git`, `quiet`, `ok`,
+  `builtin` or terminal method.
+
+Check: `loadFlow` sets the engine's variables but went to `flow_load.go`, as
+it is finding the flow in effect at a revision; the variables it sets stay
+with the engine in `flow_run.go`.
+
 ## Scenarios
 
 ## Reconciliation
