@@ -5,26 +5,6 @@ import (
 	"time"
 )
 
-// The terminal the agents run in. A place is the workspace of one worktree,
-// where its agents' panes open; an agent is found by its name.
-type terminal interface {
-	worktree(branch, base, label string) string // a new worktree from base, opened as the place: its path
-	open(dir string)                            // an existing worktree, opened as the place
-	pane(name string) string                    // the pane holding the agent, or ""
-	gone(name string) bool                      // the terminal answered that it holds no such agent; a failed call is not gone
-	// The agent started in a free pane of the place, or in a fresh one: its
-	// pane, or why not (a dialog may be waiting; see start).
-	start(name, kind string, fresh bool, args []string) (string, error)
-	read(name string) string // its visible screen
-	keys(name string, keys ...string)
-	status(name string) string                              // "" when there is no such agent
-	prompt(name, text string) (string, string)              // the state it settled in, or "" and why
-	wait(name, ms string, until ...string) (string, string) // likewise
-	closePane(pane string)
-	closePlace(dir string) // the worktree's place closed, with its agents; Git removes what is left
-	notify(title, body, sound string)
-}
-
 // Herdr: agents by name through its CLI, worktrees as its workspaces.
 type herdr struct{ ws, dir string }
 

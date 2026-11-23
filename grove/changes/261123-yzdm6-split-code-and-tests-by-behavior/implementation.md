@@ -97,6 +97,28 @@ Check: `accountOf`, `token` and `pushAs` are also used by intake and landing;
 they are in `publication.go` because the task names the GitHub account and
 token helpers there.
 
+### T-05 — Intake and terminals have their own files
+
+Status: done
+
+- `intake.go`: `propose`, `draft`, `proposal`.
+- `request.go`: the `request` type and `ghRequest` from `jira.go`, with
+  `marker` from `main.go`, which only `ghRequest` uses. `jira.go` keeps Jira
+  alone: nothing in it is used by `ghRequest`.
+- `terminal.go`: the `terminal` interface from `herdr.go`, and the
+  `// ---- agents` section of `main.go`: `dialogs`, `dialogOn`, `start`,
+  `settled`, `await`, `ask`. `herdr.go` keeps the `herdr` type, its methods
+  and `settledAs`, which only they use; rex uses nothing in it.
+- Edit beyond moves: the `// ---- Jira` section comment is dropped from the
+  top of `jira.go`, now the file's whole subject.
+- Checks: `go build -o bin/tend .` succeeded; `go test -count=1 ./...`
+  passed; the reference scan found no `main.go` declaration used only by
+  intake or only by the terminal code.
+
+Check: `ghRequest`, the GitHub request, went to `request.go` with the type
+it builds: the table gives GitHub requests no file of their own, and
+`jira.go` may hold nothing a GitHub request uses.
+
 ## Scenarios
 
 ## Reconciliation
