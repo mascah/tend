@@ -33,6 +33,9 @@ six fails with `flow.go` as it was on main. `request-uncertain`,
 `repair-blocked`, `repair-undelivered`, `propose-follow-lost` and
 `flow-unknown-outcome` still pass, their agents there and idle.
 
+Also changed: `herdr.go` — a new `gone` method on the terminal. An agent counts as gone only when Herdr answers `agent_not_found`. Before, `pane` came back empty on any failed `agent get`, so a Herdr that was restarting or slow looked like a gone agent and got the step asked twice. A side review found this after the first version.
+Also changed: `rex.go` — the same for rex: gone only when the block listing succeeds and no block carries the agent's label.
+Also changed: `testdata/bin/herdr` — `AGENT_GET_FAIL` makes every `agent get` fail, as a terminal that cannot be reached. Test: `flow_test.go` `flow-terminal-unreachable`. It stops for a person and prompts no one. It fails with the earlier pane check.
 Check: deleting a step's record after a second ask has it asked afresh, but
 `again-<record>` still holds that head. So if that fresh ask's agent is then
 gone too, tend stops for a person and does not ask a third time. The change

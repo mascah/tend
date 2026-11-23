@@ -659,9 +659,10 @@ func againOf(rec string) string { return filepath.Dir(rec) + "/again-" + fileNam
 
 // Ask a step once more, in a new session, when its ask at head a left nothing
 // and its agent is gone, so that nothing is left to act on the earlier prompt;
-// never a third time. Whether it was asked.
+// never a third time. A terminal that cannot be asked says nothing is gone,
+// so a person decides. Whether it was asked.
 func again(name, agent, rec, a string) bool {
-	if term.pane(agent) != "" || slices.Contains(asks(againOf(rec)), a) {
+	if !term.gone(agent) || slices.Contains(asks(againOf(rec)), a) {
 		return false
 	}
 	say("%s was asked at %s and left nothing, and %s is gone; asking it once more in a new session", name, short(a), agent)

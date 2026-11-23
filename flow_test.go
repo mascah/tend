@@ -312,6 +312,16 @@ var flowScenarios = []scenario{
 		s.check("gone a second time, tend stops saying check was asked twice and left nothing", r.code == 3 && r.said(`check was asked twice at [0-9a-f]{7} and left nothing`))
 		s.check("and prompts no agent", s.count(s.log(), `^agent prompt `) == prompts)
 	}},
+	{"flow-terminal-unreachable", func(s *sc) {
+		s.project("main", true)
+		s.allow()
+		s.commit("Check each head", withCheck(s.t))
+		s.run("CHECK_FAIL=timeout")
+		prompts := s.count(s.log(), `^agent prompt `)
+		r := s.run("AGENT_GET_FAIL=1")
+		s.check("a terminal that cannot be asked about the agent is not taken as the agent gone: tend stops", r.code == 3 && r.said(`check was asked at [0-9a-f]{7} and left nothing`))
+		s.check("and prompts no agent", s.count(s.log(), `^agent prompt `) == prompts)
+	}},
 	{"flow-agent-gone-once", func(s *sc) {
 		s.project("main", true)
 		s.allow()

@@ -86,6 +86,19 @@ func (r *rex) pane(name string) string {
 	return ""
 }
 
+func (r *rex) gone(name string) bool {
+	s, err := rexCmd("block", "ls", "-s", r.session, "--json")
+	if err != nil || get(parse(s), "blocks") == nil {
+		return false
+	}
+	for _, b := range list(get(parse(s), "blocks")) {
+		if str(get(b, "label")) == name {
+			return false
+		}
+	}
+	return true
+}
+
 // The root record, or nil when the program reports none.
 func (r *rex) record(b string) any {
 	s, err := rexCmd("block", "call", "-s", r.session, "-b", b, "program_status")
