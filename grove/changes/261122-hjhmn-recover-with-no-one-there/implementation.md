@@ -89,8 +89,48 @@ here.
 
 ### T-03 — The README says what recovers by itself
 
-Status: not started
+Status: done
+
+`README.md`, in four places. The recovery list ("After exit 3, or a kill")
+now says that a step whose agent is gone is asked once more in a new session,
+recorded in `again-<record>` and not counted toward the step's limit. It says
+that an agent there and idle with nothing to show still stops for you, and
+that the repair and requested changes stop only when the implementer is
+there. The `tend watch` paragraph adds attempts whose tend died, plus a
+paragraph on what carries on with no one there: what still stops for a person
+(idle, blocked, unknown, or a second ask that left nothing), and that the
+first pass after upgrading runs again any attempt left `working`. "How work
+reaches tend" gains a fifth kind of work, "A tend that died". The flows
+section's "never asks a step twice" now reads "a second time only when its
+agent is gone, never a third".
+
+Check: whether the README reads well is for a person to judge. Checked by
+reading it against the task's acceptance; every point it lists is stated.
 
 ## Scenarios
+
+- flows "A second repair": flow_test.go TestFlows/flow-second-repair, passed
+- flows "The built-in one repair": flow_test.go TestFlows/flow-one-repair, passed
+- flows "A repair asked once more": flow_test.go TestFlows/flow-repair-once-more, passed
+- flows "tend is killed during a project's own step": flow_test.go TestFlows/flow-killed-in-step, passed
+- flows "The outcome of a step is unknown": flow_test.go TestFlows/flow-unknown-outcome, passed
+- flows "The agent is gone": flow_test.go TestFlows/flow-agent-gone-once, passed
+- flows "Gone a second time": flow_test.go TestFlows/flow-agent-gone, passed
+- intake "The follow-up stalled": tend_test.go TestTend/propose-follow-lost, passed
+- intake "The drafter outlived a timeout": tend_test.go TestTend/propose-survivor, passed
+- intake "The drafter is gone": tend_test.go TestTend/propose-follow-gone, passed
+- publication "Out of scope": tend_test.go TestTend/request-declined, passed
+- publication "A request prompt that stalled": tend_test.go TestTend/request-uncertain, passed
+- publication "The implementer is gone": tend_test.go TestTend/request-gone, passed
+- review "A stalled repair prompt": tend_test.go TestTend/repair-undelivered, passed
+- review "The mark deleted": tend_test.go TestTend/repair-undelivered, passed
+- review "The implementer still repairing": tend_test.go TestTend/survivor-repairing, passed
+- review "A blocked implementer": tend_test.go TestTend/repair-blocked, passed
+- review "The implementer is gone": tend_test.go TestTend/repair-gone, passed
+- watch-and-status "After a kill": tend_test.go TestTend/watch-killed, passed
+- watch-and-status "After the agents went too": tend_test.go TestTend/watch-killed-agents-gone, passed
+- watch-and-status "A tend is on it": tend_test.go TestTend/watch-killed, passed
+- watch-and-status "An attempt that needs a person": tend_test.go TestTend/watch-killed, passed
+- watch-and-status "An attempt retried since": tend_test.go TestTend/watch-killed-retried, passed
 
 ## Reconciliation
