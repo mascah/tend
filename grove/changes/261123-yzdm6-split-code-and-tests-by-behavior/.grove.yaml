@@ -1,0 +1,5 @@
+title: "Split the CLI implementation and tests by behavior"
+created: 2026-11-23T03:02:13Z
+description: Move main.go, flow.go and tend_test.go into files named for the behavior they hold, in package main, with no change in behavior
+schema: default
+base: 43758c3790079dd6f1a7a81a4c93d7e68ff1292c
