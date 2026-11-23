@@ -76,6 +76,27 @@ Status: done
   passed; the reference scan found no `main.go` declaration used only by
   `watch.go` or only by `status.go`.
 
+### T-04 — Publication has its own file
+
+Status: done
+
+- `publication.go`: the GitHub account and token helpers `accountOf`, `token`
+  and `pushAs`, and publishing and answering a pull request: `told`,
+  `publishStep`, `publish`, `markDraft`, `answer`, `message`, `titleBody`,
+  `fold`, `redescribe`, `writer`, `approved`, `requested`.
+- Shared and kept in `main.go`: `prNumber`, `reviewsAPI` and `postJSON`, which
+  intake's `proposal` uses as well.
+- Edit beyond moves: the `// ---- Git and GitHub` section comment, which sat
+  above `accountOf`, stays in `main.go` above the Git and GitHub helpers that
+  remain there (`fetchTarget` on), instead of moving with `accountOf`.
+- Checks: `go build -o bin/tend .` succeeded; `go test -count=1 ./...`
+  passed; the reference scan found no `main.go` declaration used only by
+  `publication.go` but `ask`, which is the terminal's and moves with T-05.
+
+Check: `accountOf`, `token` and `pushAs` are also used by intake and landing;
+they are in `publication.go` because the task names the GitHub account and
+token helpers there.
+
 ## Scenarios
 
 ## Reconciliation
