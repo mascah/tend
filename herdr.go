@@ -11,6 +11,7 @@ type terminal interface {
 	worktree(branch, base, label string) string // a new worktree from base, opened as the place: its path
 	open(dir string)                            // an existing worktree, opened as the place
 	pane(name string) string                    // the pane holding the agent, or ""
+	gone(name string) bool                      // the terminal answered that it holds no such agent; a failed call is not gone
 	// The agent started in a free pane of the place, or in a fresh one: its
 	// pane, or why not (a dialog may be waiting; see start).
 	start(name, kind string, fresh bool, args []string) (string, error)
@@ -53,6 +54,11 @@ func (h *herdr) pane(name string) string {
 		return ""
 	}
 	return str(get(parse(s), "result", "agent", "pane_id"))
+}
+
+func (h *herdr) gone(name string) bool {
+	s, err := both("herdr", "agent", "get", name)
+	return err != nil && str(get(parse(s), "error", "code")) == "agent_not_found"
 }
 
 // A new pane, split from the workspace's first.

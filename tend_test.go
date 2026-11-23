@@ -95,7 +95,7 @@ func newSc(t *testing.T) *sc {
 	return s
 }
 
-var dropped = regexp.MustCompile(`^(TEND_|HERDR_|REX_|JIRA_|GIT_|GH_|WATCH_|NO_NOTES|REVIEW|IMPL_|REPAIR_FAIL|REV_FAIL|BLOCK_AFTER_BUILD|CREATE_LOST|REQUEST_|PROPOSE_FAIL|FOLLOW_FAIL|DECLINE|EDIT_FAIL|CAP|TRUST_|DRAFT_FAIL|COMMENT_FAIL|STRAY|CHECK|UNFINISHED|TIMEOUT_MS|KEEP|AT_ONCE|HOLD|WORKTREE_HOLD|CI_LATE|BEFORE_MERGE|REQUIRE_APPROVAL|MERGE_HOLD)`)
+var dropped = regexp.MustCompile(`^(TEND_|HERDR_|REX_|JIRA_|GIT_|GH_|WATCH_|NO_NOTES|REVIEW|IMPL_|REPAIR_FAIL|REV_FAIL|BLOCK_AFTER_BUILD|CREATE_LOST|REQUEST_|PROPOSE_FAIL|FOLLOW_FAIL|DECLINE|EDIT_FAIL|CAP|TRUST_|DRAFT_FAIL|COMMENT_FAIL|STRAY|CHECK|UNFINISHED|TIMEOUT_MS|KEEP|AT_ONCE|HOLD|WORKTREE_HOLD|CI_LATE|BEFORE_MERGE|REQUIRE_APPROVAL|MERGE_HOLD|AGENT_GET_FAIL)`)
 
 // The environment every command of the scenario gets, then extra ("K=V").
 func (s *sc) env(extra ...string) []string {
@@ -431,6 +431,17 @@ func (s *sc) follows() int            { return s.count(s.log(), `^agent prompt p
 func (s *sc) agent(status, prefix string) {
 	a := filepath.Base(glob(s.st + "/agent-" + prefix + "*"))
 	s.write(s.st+"/status-"+strings.TrimPrefix(a, "agent-"), status+"\n")
+}
+
+// An agent's pane closed, by the prefix of its name: the stand-ins then know
+// no agent of that name, nor any turn it had pending.
+func (s *sc) gone(prefix string) {
+	for _, k := range []string{"agent-", "status-", "pending-"} {
+		fs, _ := filepath.Glob(s.st + "/" + k + prefix + "*")
+		for _, f := range fs {
+			os.Remove(f)
+		}
+	}
 }
 
 func (s *sc) records() int {
@@ -909,6 +920,21 @@ var scenarios = []scenario{
 		s.check("with the mark deleted by a person, it is asked again and passes", r.passed())
 		s.check("twice in all", s.prompts("teammate") == 2)
 	}},
+	{"request-gone", func(s *sc) {
+		s.project("main", true)
+		s.allow()
+		s.run()
+		s.request()
+		r := s.run("REQUEST_FAIL=timeout")
+		s.check("a request prompt that timed out stops", r.code == 3)
+		s.gone("impl-")
+		r = s.run()
+		s.check("with the implementer gone, the rerun asks the request once more and passes", r.passed())
+		s.check("of a new implementer session", s.prompts("teammate") == 2 && s.count(s.log(), `^agent start impl-`) == 2)
+		s.check("and the new head is reviewed and published", s.reviews() == 2 && s.has(s.cat(s.st+"/statuses"), `^`+s.head()+` success the-bot$`))
+		r = s.run()
+		s.check("a later run asks nothing again", r.code == 0 && s.prompts("teammate") == 2)
+	}},
 	{"request-merged", func(s *sc) {
 		s.project("main", true)
 		s.allow()
@@ -1035,6 +1061,18 @@ var scenarios = []scenario{
 		}
 		r = s.propose()
 		s.check("with the mark deleted, it is asked again and published", r.code == 0 && s.follows() == 2 && exists(s.prOf("1")))
+		s.check("the draft was asked for once", s.drafts() == 1)
+	}},
+	{"propose-follow-gone", func(s *sc) {
+		s.project("main", true)
+		s.allow()
+		s.issues("1:tend")
+		r := s.propose("FOLLOW_FAIL=timeout")
+		s.check("a follow-up that timed out stops", r.code == 3)
+		s.gone("prop-")
+		r = s.propose()
+		s.check("with the drafter gone, the rerun asks the follow-up once more and publishes", r.code == 0 && s.follows() == 2 && exists(s.prOf("1")))
+		s.check("of a new drafter session", s.count(s.log(), `^agent start prop-`) == 2)
 		s.check("the draft was asked for once", s.drafts() == 1)
 	}},
 	{"propose-survivor", func(s *sc) {
@@ -1338,6 +1376,15 @@ var scenarios = []scenario{
 		s.check("with repair-asked deleted by a person, the repair is asked again and passes", r.passed())
 		s.check("twice in all", s.prompts("An") == 2)
 	}},
+	{"repair-gone", func(s *sc) {
+		s.project("main", false)
+		r := s.run("REVIEW=repairable", "REPAIR_FAIL=timeout")
+		s.check("a repair prompt that timed out stops", r.code == 3)
+		s.gone("impl-")
+		r = s.run("REVIEW=repairable")
+		s.check("with the implementer gone, the repair is asked once more, reviewed, and passes", r.passed() && s.reviews() == 2)
+		s.check("of a new implementer session", s.prompts("An") == 2 && s.count(s.log(), `^agent start impl-`) == 2)
+	}},
 	{"repair-blocked", func(s *sc) {
 		s.project("main", false)
 		r := s.run("REVIEW=repairable", "BLOCK_AFTER_BUILD=1")
@@ -1398,6 +1445,53 @@ var scenarios = []scenario{
 		}
 		time.Sleep(500 * time.Millisecond)
 		s.check("after a kill, status says to run tend again", strings.Contains(s.status(), "tend stopped before this finished"))
+	}},
+	{"watch-killed", func(s *sc) {
+		s.project("main", false)
+		bg := s.background("IMPL_SLEEP=30")
+		w := s.watchrepo()
+		s.check("watch runs nothing for an attempt a tend is on", s.count(w.err, `running tend`) == 0)
+		killed(bg)
+		st := s.cat(s.runDir() + "/status")
+		s.write(s.runDir()+"/status", "x needs-you: something\nnext: a person\n")
+		w = s.watchrepo()
+		s.check("nor for one that needs a person", s.count(w.err, `running tend`) == 0)
+		s.write(s.runDir()+"/status", st+"\n")
+		w = s.watchrepo()
+		s.check("after a kill, watch says it runs the attempt again", w.said(`tend stopped on attempt [^ ]* before it finished; running tend on 261114-k0000`))
+		s.check("tend waits for the implementer, prompted once in all", s.prompts("/grove-implement") == 1)
+		s.check("and the head is reviewed", s.reviews() == 1 && strings.Contains(s.status(), "done: success"))
+		w = s.watchrepo()
+		s.check("a finished attempt is not run again", s.count(w.err, `running tend`) == 0)
+	}},
+	{"watch-killed-agents-gone", func(s *sc) {
+		s.project("main", false)
+		killed(s.background("IMPL_SLEEP=30"))
+		if pid, err := strconv.Atoi(s.cat(s.st + "/sleeper")); err == nil {
+			syscall.Kill(pid, syscall.SIGKILL)
+		}
+		s.gone("impl-")
+		w := s.watchrepo()
+		s.check("with the agents gone too, watch runs the attempt again", w.said(`running tend on 261114-k0000`))
+		s.check("the implementer is asked once more in a new session", s.prompts("/grove-implement") == 2 && s.count(s.log(), `^agent start impl-`) == 2)
+		s.check("and the head is reviewed", s.reviews() == 1 && strings.Contains(s.status(), "done: success"))
+	}},
+	{"watch-killed-retried", func(s *sc) {
+		s.project("main", false)
+		killed(s.background("IMPL_SLEEP=30"))
+		s.git(s.repo, "worktree", "add", "-q", s.dir+"/other", "-b", "other")
+		s.sh(s.dir+"/other", "grove", "claim", "--retry", "261114-k0000")
+		s.check("the cycle is claimed again from another checkout", s.records() == 2)
+		w := s.watchrepo()
+		s.check("watch runs nothing for the earlier attempt", s.count(w.err, `running tend`) == 0 && s.prompts("/grove-implement") == 1)
+	}},
+	{"watch-at-once-killed", func(s *sc) {
+		s.atOnce(1)
+		s.change("261016-c0001", "Another", "")
+		killed(s.background("IMPL_SLEEP=30"))
+		w := s.watchrepo()
+		s.check("under a count, watch runs the attempt whose tend died", w.said(`running tend on 261114-k0000`) && s.reviews() == 1)
+		s.check("within the count, before starting anything new", !w.said(`starting 261016-c0001`))
 	}},
 	{"jira-propose", func(s *sc) {
 		s.project("main", true)
@@ -1526,6 +1620,17 @@ var scenarios = []scenario{
 		s.check("the rerun waits for the agent once it is working", r.code == 0 && r.conclusion() == "success")
 		s.check("and does not prompt it again", s.prompts("/grove-implement") == 1)
 		s.check("and says so", r.said("still working on an earlier prompt"))
+	}},
+	{"rex-gone-mid-turn", func(s *sc) {
+		s.project("main", false)
+		r := s.rexrun("REX_VANISH=impl")
+		s.check("under rex, an implementer whose block closes after its prompt went stops", r.code == 3 && r.said("agent_gone_after_delivery"))
+		s.check("its ask stays recorded, as delivered", s.cat(s.runDir()+"/implement-asked") != "")
+		r = s.rexrun("REX_VANISH=impl")
+		s.check("the rerun asks it once more in a new session, which goes too", r.code == 3 && s.prompts("/grove-implement") == 2)
+		s.check("and that second ask stays recorded", s.cat(s.runDir()+"/again-implement-asked") != "")
+		r = s.rexrun()
+		s.check("gone a second time, tend stops and asks no third time", r.code == 3 && s.prompts("/grove-implement") == 2)
 	}},
 	{"rex-dialog", func(s *sc) {
 		s.project("main", false)

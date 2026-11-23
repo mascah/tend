@@ -92,12 +92,21 @@ After exit 3, or a kill, the same line carries on, with or without `origin`:
 - An agent still working, as after tend was killed mid-turn, is waited for
   and never prompted again. A blocked or unknown agent stops for you.
 - A timed-out or stalled prompt is not assumed undelivered, so tend never
-  sends it twice.
+  sends it twice to an agent that is still there.
+- A step that was asked and left nothing, whose agent is gone (the terminal
+  has no pane for it, as after a reboot or a restart of Herdr or rex), is
+  asked once more in a new session, which finds the work in Git: nothing is
+  left that could act on the earlier prompt. This applies to any step of the
+  flow, the repair, requested changes and intake's follow-up. The second ask
+  is recorded in `again-<record>` beside the step's record and does not count
+  toward the step's limit. If it also leaves nothing, tend stops for you.
+- An agent that is there but idle with nothing to show still stops for you,
+  since it may have acted on the prompt.
 - The one repair is used once asked: `repair-asked` records the reviewed head
   just before the prompt goes. If that head has no commit since and the
-  implementer is not working, the outcome is unknown, and tend stops for you
-  on every run until you commit a fix or delete `repair-asked` to have it asked
-  once more. A repair refused before sending, such as by a blocked
+  implementer is there and not working, the outcome is unknown, and tend stops
+  for you on every run until you commit a fix or delete `repair-asked` to have
+  it asked once more. A repair refused before sending, such as by a blocked
   implementer, is not used.
 
 `tend status` says which attempt the change or cycle has, whether a tend is
@@ -133,7 +142,8 @@ the next run gives their review and line comments to the implementer's own
 session once, has the new head reviewed and publishes it, with the
 implementer's reply in the review. `request-<review id>` in the run folder
 records the ask just before it goes; asked with no commit since and nobody
-working, it stops for you, as the repair does. When the implementer changes
+working, it stops for you, as the repair does, unless the implementer is gone
+and the request is asked once more. When the implementer changes
 nothing (a request it judges out of scope, say), its reply goes on the PR as a
 comment and the request is not asked again; request changes again to have it
 tried. After the new head, the implementer rewrites the commit message and
@@ -145,11 +155,21 @@ member with read access only still counts), and says whose request it left.
 
 `tend watch` runs in a pane of its own and does that without you: every
 `WATCH_SECONDS` (default 300) it runs tend on each attempt whose PR is open
-with a change request on its head from a person with write access, and `tend propose` on each repository it
+with a change request on its head from a person with write access, and on
+each attempt whose tend died: its status says `working`, no tend is on it,
+and, for Grove work, Grove still shows it in flight. It also runs
+`tend propose` on each repository it
 was given. In each of those repositories it then starts the oldest cycle that
 Grove would claim and whose plan marks it `unattended`: marking a cycle so when
 you plan it is how you let it be built with no one there. An attempt or request
 waiting for you is left alone until you have run tend on it.
+
+With watch running, an attempt carries on with no one there after its tend is
+killed, and after a reboot that took its agents too. The rerun waits for a
+surviving agent, asks a step whose agent is gone once more, and stops for you
+only where an agent is idle with nothing to show, blocked or in an unknown
+state, or where a second ask also left nothing. On the first pass after you
+upgrade, any attempt left `working` from before is run again.
 
 `tend status <repo>`, without a work item, says what waits for whom: approved
 changes in no cycle and cycles not done, each with Grove's verdict,
@@ -227,7 +247,7 @@ name with `go test -run 'TestTend/^publish$'`.
 ## How work reaches tend
 
 With `tend watch <repo>...` running, each pass (every `WATCH_SECONDS`, default
-300) picks up four kinds of work in the repositories it was given.
+300) picks up five kinds of work in the repositories it was given.
 
 1. **A request becomes a proposal.** Label an open GitHub issue `tend`, or an
    issue of a mapped Jira project that is not done. tend drafts a Grove change
@@ -258,6 +278,11 @@ With `tend watch <repo>...` running, each pass (every `WATCH_SECONDS`, default
 4. **Cleanup.** Once a pull request is merged or closed, a later pass removes
    its worktree, branch and terminal workspace, but not while a tend is on
    that attempt.
+5. **A tend that died.** An attempt whose `status` says `working` with no
+   tend on it, after a kill or a reboot, is run again, within the count where
+   the flow file sets one. An attempt Grove no longer shows in flight, such as
+   one retried with `grove claim --retry` from another checkout, is left
+   alone.
 
 Not picked up: plain comments, on any pull request, and comments on proposals
 (revising a proposal is a person's); issues without the label; approved
@@ -462,7 +487,8 @@ stops tend as a flow file that is not valid.
 
 Each step asked is recorded in the run folder (`<step>-asked`, a head a
 line), so a rerun after a kill waits for an agent still working, takes a
-result already there, and never asks a step twice for the same thing.
+result already there, and asks a step a second time only when its agent is
+gone, never a third.
 
 ## What it asks of Grove
 

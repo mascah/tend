@@ -296,6 +296,52 @@ var flowScenarios = []scenario{
 		r = s.run()
 		s.check("until a person deletes its record, and it is asked once more", r.passed() && s.promptsTo("check-", "Check") == 2)
 	}},
+	{"flow-agent-gone", func(s *sc) {
+		s.project("main", true)
+		s.allow()
+		s.commit("Check each head", withCheck(s.t))
+		s.run("CHECK_FAIL=timeout")
+		s.gone("check-")
+		r := s.run("CHECK_FAIL=timeout")
+		s.check("a step whose agent is gone is prompted a second time", s.promptsTo("check-", "Check") == 2)
+		s.check("in a new session", s.count(s.log(), `^agent start check-`) == 2)
+		s.check("and a second ask that leaves nothing stops", r.code == 3)
+		s.gone("check-")
+		prompts := s.count(s.log(), `^agent prompt `)
+		r = s.run()
+		s.check("gone a second time, tend stops saying check was asked twice and left nothing", r.code == 3 && r.said(`check was asked twice at [0-9a-f]{7} and left nothing`))
+		s.check("and prompts no agent", s.count(s.log(), `^agent prompt `) == prompts)
+	}},
+	{"flow-terminal-unreachable", func(s *sc) {
+		s.project("main", true)
+		s.allow()
+		s.commit("Check each head", withCheck(s.t))
+		s.run("CHECK_FAIL=timeout")
+		prompts := s.count(s.log(), `^agent prompt `)
+		r := s.run("AGENT_GET_FAIL=1")
+		s.check("a terminal that cannot be asked about the agent is not taken as the agent gone: tend stops", r.code == 3 && r.said(`check was asked at [0-9a-f]{7} and left nothing`))
+		s.check("and prompts no agent", s.count(s.log(), `^agent prompt `) == prompts)
+	}},
+	{"flow-agent-gone-once", func(s *sc) {
+		s.project("main", true)
+		s.allow()
+		s.commit("Check each head", withCheck(s.t))
+		s.run("CHECK_FAIL=timeout")
+		s.gone("check-")
+		r := s.run()
+		s.check("a step whose agent is gone is asked once more, its result taken, and the flow goes on", r.passed() && s.creates() == 1)
+		s.check("prompted twice in all, in a new session", s.promptsTo("check-", "Check") == 2 && s.count(s.log(), `^agent start check-`) == 2)
+	}},
+	{"flow-repair-once-more", func(s *sc) {
+		s.project("main", false)
+		r := s.run("REVIEW=actionable", "REPAIR_FAIL=timeout")
+		s.check("a repair prompt that timed out stops", r.code == 3)
+		s.gone("impl-")
+		r = s.run("REVIEW=actionable")
+		s.check("the repair is asked a second time though its limit is 1", s.prompts("An independent review") == 2)
+		s.check("the head it makes is reviewed", s.reviews() == 2)
+		s.check("and no third repair is asked: tend exits 0 with the failed verdict", r.code == 0 && r.conclusion() == "failure")
+	}},
 	{"flow-without-publish", func(s *sc) {
 		s.project("main", true)
 		s.allow()

@@ -237,6 +237,11 @@ func stage(k, text, next string) {
 	}
 }
 
+// Whether status file f says working, as one a tend that died leaves.
+func working(f string) bool {
+	return regexp.MustCompile(`^[^ ]* working:`).MatchString(strings.SplitN(cat(f), "\n", 2)[0])
+}
+
 func needsYou(f string) bool {
 	return regexp.MustCompile(`(?m)^[^ ]* needs-you:`).MatchString(cat(f))
 }
@@ -309,8 +314,9 @@ func main() {
 	attempt()
 }
 
-// tend watch: every WATCH_SECONDS (default 300), each attempt whose pull
-// request is open with a change request on its head is run again, and for
+// tend watch: every WATCH_SECONDS (default 300), each attempt whose tend died
+// on it or whose pull request is open with a change request on its head is
+// run again, and for
 // each repository named tend propose runs and then the oldest cycle Grove
 // would claim that its plan marks unattended is started: marking it is the
 // person's approval to build it with no one there. An attempt or request
@@ -435,32 +441,60 @@ func countIn(r string, sync bool) int {
 // pull request is open with a change request on its head, from a person with
 // write access, not yet answered; or, where its flow's publish acts on an
 // approval (approves, written by its last run), the newest review on its head
-// by such a person that approves or requests changes approves; and it waits
-// for no person.
+// by such a person that approves or requests changes approves; or the tend on
+// it died (stopped); and it waits for no person.
 func rerun(d string) string {
-	if !exists(d+"/pr") || !exists(d+"/attempt") || needsYou(d+"/status") || len(strings.Split(cat(d+"/attempt"), "\n")) < 2 {
+	a := strings.Split(cat(d+"/attempt"), "\n")
+	if len(a) < 2 || needsYou(d+"/status") {
 		return ""
 	}
-	p := cat(d + "/pr")
-	// An approval holds for a head carried from the approved one: carried-<head>
-	// names the head it came from, written once tend found it so in Git.
-	from := map[string]string{}
-	ms, _ := filepath.Glob(d + "/carried-*")
-	for _, m := range ms {
-		from[strings.TrimPrefix(filepath.Base(m), "carried-")] = cat(m)
+	if p := cat(d + "/pr"); p != "" {
+		// An approval holds for a head carried from the approved one: carried-<head>
+		// names the head it came from, written once tend found it so in Git.
+		from := map[string]string{}
+		ms, _ := filepath.Glob(d + "/carried-*")
+		for _, m := range ms {
+			from[strings.TrimPrefix(filepath.Base(m), "carried-")] = cat(m)
+		}
+		c, _ := json.Marshal(from)
+		s, _ := quiet("gh", "pr", "view", p, "--json", "state,headRefOid,reviews", "--jq",
+			string(c)+` as $c | select(.state == "OPEN") | .headRefOid as $h | [.reviews[] | select((.state == "CHANGES_REQUESTED" or .state == "APPROVED") and `+writer("authorAssociation")+`)] |
+			(map(select(.state == "CHANGES_REQUESTED" and .commit.oid == $h)) | last | .id // ""), (map(select(.commit.oid == $h or .commit.oid == $c[$h])) | last | .state // "")`)
+		ls := strings.Split(s, "\n")
+		switch {
+		case ls[0] != "" && !exists(d+"/answered-"+ls[0]):
+			return "changes requested on " + p
+		case len(ls) > 1 && ls[1] == "APPROVED" && exists(d+"/approves"):
+			return p + " was approved"
+		}
 	}
-	c, _ := json.Marshal(from)
-	s, _ := quiet("gh", "pr", "view", p, "--json", "state,headRefOid,reviews", "--jq",
-		string(c)+` as $c | select(.state == "OPEN") | .headRefOid as $h | [.reviews[] | select((.state == "CHANGES_REQUESTED" or .state == "APPROVED") and `+writer("authorAssociation")+`)] |
-		(map(select(.state == "CHANGES_REQUESTED" and .commit.oid == $h)) | last | .id // ""), (map(select(.commit.oid == $h or .commit.oid == $c[$h])) | last | .state // "")`)
-	ls := strings.Split(s, "\n")
-	switch {
-	case ls[0] != "" && !exists(d+"/answered-"+ls[0]):
-		return "changes requested on " + p
-	case len(ls) > 1 && ls[1] == "APPROVED" && exists(d+"/approves"):
-		return p + " was approved"
+	if stopped(d, a[0], a[1]) {
+		return "tend stopped on attempt " + filepath.Base(d) + " before it finished"
 	}
 	return ""
+}
+
+// Whether the tend on the attempt of run folder d, at work item w of
+// repository r, died: its status says working, no tend holds its lock, and,
+// for a Grove cycle or change, Grove shows d's attempt still in flight, not
+// retried since from another checkout.
+func stopped(d, r, w string) bool {
+	if !working(d+"/status") || held(r, w) {
+		return false
+	}
+	if isItem(w) {
+		return true
+	}
+	g, err := groveIn(r)
+	if err != nil {
+		return false
+	}
+	for _, x := range list(get(g, "runs")) {
+		if str(get(x, "id")) == filepath.Base(d) {
+			return get(x, "in_flight") == true
+		}
+	}
+	return false
 }
 
 // tend watch under a count: of repository r's attempts on this runner, at most
@@ -781,8 +815,8 @@ func status() {
 	}
 	if held(repo, cycle) {
 		fmt.Printf("tend is on it: %s\n", cat(lockFile(repo, cycle)))
-	} else if first := strings.SplitN(cat(run+"/status"), "\n", 2)[0]; regexp.MustCompile(`^[^ ]* working:`).MatchString(first) {
-		fmt.Println(first)
+	} else if working(run + "/status") {
+		fmt.Println(strings.SplitN(cat(run+"/status"), "\n", 2)[0])
 		fmt.Println("next: tend stopped before this finished; run it again, and it waits for an agent still working rather than prompting it again")
 		os.Exit(0)
 	}

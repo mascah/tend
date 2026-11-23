@@ -121,11 +121,14 @@ that verdict for a person to decide.
 ### Requirement: An uncertain repair goes to a person
 
 If `repair-asked` names the head under review, no commit has followed and the
-implementer is not working, then the system shall stop for a person on every
-run, saying the repair's outcome is unknown, until a person commits a fix or
-deletes `repair-asked`, which has the repair asked once more; an implementer
-still working on the repair shall be waited for; and a repair refused before
-its prompt went, as by a blocked implementer, shall leave the repair unused.
+implementer is there and not working, then the system shall stop for a person
+on every run, saying the repair's outcome is unknown, until a person commits
+a fix or deletes `repair-asked`, which has the repair asked once more; an
+implementer that is gone shall be asked the repair once more in a new
+session, as the flows spec's "Any step recovers without being prompted twice"
+says; an implementer still working on the repair shall be waited for; and a
+repair refused before its prompt went, as by a blocked implementer, shall
+leave the repair unused.
 
 #### Scenario: A stalled repair prompt
 
@@ -156,6 +159,14 @@ its prompt went, as by a blocked implementer, shall leave the repair unused.
 - THEN it exits 3 with no `repair-asked` written; once the implementer is
   idle, the next run asks the repair and passes
 
+#### Scenario: The implementer is gone
+
+- GIVEN tend was killed after asking the repair, no commit has followed, and
+  the implementer's pane is closed
+- WHEN the owner runs tend again
+- THEN the repair is asked once more of a new implementer session, the new
+  head is reviewed, and tend exits 0
+
 ## Known discrepancies
 
 None recorded.
@@ -168,3 +179,4 @@ None.
 
 - Written when tend adopted Grove (2026-11-16).
 - [261122-rpkqa](../../changes/archive/261122-rpkqa-land-reviewed-candidates-one-at-a-time/) Land reviewed candidates one at a time
+- [261122-hjhmn](../../changes/archive/261122-hjhmn-recover-with-no-one-there/) Recover with no one there

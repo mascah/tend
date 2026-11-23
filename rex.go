@@ -86,6 +86,19 @@ func (r *rex) pane(name string) string {
 	return ""
 }
 
+func (r *rex) gone(name string) bool {
+	s, err := rexCmd("block", "ls", "-s", r.session, "--json")
+	if err != nil || get(parse(s), "blocks") == nil {
+		return false
+	}
+	for _, b := range list(get(parse(s), "blocks")) {
+		if str(get(b, "label")) == name {
+			return false
+		}
+	}
+	return true
+}
+
 // The root record, or nil when the program reports none.
 func (r *rex) record(b string) any {
 	s, err := rexCmd("block", "call", "-s", r.session, "-b", b, "program_status")
@@ -189,7 +202,11 @@ func (r *rex) prompt(name, text string) (string, string) {
 			return "", "agent_prompt_stalled"
 		}
 	}
-	return r.wait(name, timeout())
+	st, why := r.wait(name, timeout())
+	if why == "agent_not_found" {
+		why = "agent_gone_after_delivery" // the prompt went: not a refusal
+	}
+	return st, why
 }
 
 // Until the agent settles idle, done or blocked, or one of until.

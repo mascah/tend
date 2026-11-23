@@ -7,7 +7,8 @@
 # its turn is taken when it is waited for after tend is killed. As Herdr
 # does, a blocked agent refuses a prompt. HOLD holds every prompt until the
 # file it names exists, the agent idle meanwhile, so another tend runs during
-# the turn. WORKTREE_HOLD holds a new worktree's creation, once made, likewise,
+# the turn. AGENT_GET_FAIL fails every agent get, as a terminal that cannot be
+# reached. WORKTREE_HOLD holds a new worktree's creation, once made, likewise,
 # touching $WORKTREE_HOLD.made.
 set -euo pipefail
 s=$HERDR_STATE
@@ -32,6 +33,7 @@ case "$1 $2" in
 "pane split") echo '{"result":{"pane":{"pane_id":"p1"}}}' ;;
 "agent start") touch "$s/agent-$3" ;;
 "agent get")
+	[ -z "${AGENT_GET_FAIL:-}" ] || { echo '{"error":{"code":"server_unavailable"}}'; exit 1; }
 	[ -f "$s/agent-$3" ] || { echo '{"error":{"code":"agent_not_found"}}'; exit 1; }
 	said "$(status "$3")" ;;
 "agent wait")
