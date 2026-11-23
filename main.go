@@ -34,8 +34,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
-	"syscall"
 	"time"
 )
 
@@ -172,28 +170,6 @@ func timeout() string {
 		return t
 	}
 	return "14400000" // four hours: a backstop for a hung agent; a three-change cycle took 80 minutes
-}
-
-// POSIX cksum, which names an issue's attempt after its repository.
-func cksum(b []byte) uint32 {
-	var crc uint32
-	add := func(c byte) {
-		crc ^= uint32(c) << 24
-		for range 8 {
-			if crc&0x80000000 != 0 {
-				crc = crc<<1 ^ 0x04c11db7
-			} else {
-				crc <<= 1
-			}
-		}
-	}
-	for _, c := range b {
-		add(c)
-	}
-	for l := len(b); l > 0; l >>= 8 {
-		add(byte(l))
-	}
-	return ^crc
 }
 
 // abs is cd "$1" && pwd: the logical path of a folder that exists.
@@ -635,15 +611,6 @@ func project() any {
 	return parse(s)
 }
 
-func firstRun(proj any, key, val string) any {
-	for _, r := range list(get(proj, "runs")) {
-		if str(get(r, key)) == val {
-			return r
-		}
-	}
-	return nil
-}
-
 // The newest record of an attempt at Grove work item w: a cycle's, or a
 // change's in no cycle, which names the change alone and no cycle.
 func itemRun(proj any, w string) any {
@@ -669,17 +636,6 @@ func workState(proj any, w string) (known, open bool) {
 		}
 	}
 	return false, false
-}
-
-// Grove's sentence on why it would not claim work item w now, or "" when it
-// would or does not say.
-func unclaimable(proj any, w string) string {
-	for _, x := range append(list(get(proj, "cycles")), list(get(proj, "changes"))...) {
-		if str(get(x, "id")) == w && get(x, "claimable") == false {
-			return str(get(x, "verdict"))
-		}
-	}
-	return ""
 }
 
 // tend status <repo>: what waits for whom in the repository, read from Grove's
@@ -783,15 +739,6 @@ func runDirs() []string {
 func isIssue(c string) bool { return regexp.MustCompile(`^issue-[0-9]`).MatchString(c) }
 func isItem(c string) bool  { return isIssue(c) || isJira(c) }
 
-// An issue's attempt is named after it and its repository: issue-7-<cksum>,
-// jira-scrum-5-<cksum>.
-func issueRun(c string) string {
-	if isJira(c) {
-		c = "jira-" + strings.ToLower(c)
-	}
-	return fmt.Sprintf("%s/runs/%s-%d", state, c, cksum([]byte(repo)))
-}
-
 // tend status <repo> <cycle or change>: the newest attempt at it, what it last recorded
 // and whether a tend is on it now. Reads only; takes no lock, prompts nobody.
 func status() {
@@ -826,83 +773,6 @@ func status() {
 		fmt.Println("nothing recorded yet")
 	}
 	os.Exit(0)
-}
-
-// One tend for each work item of a repository, and one intake pass ("intake")
-// for each repository. A lock is an flock on a descriptor no child inherits,
-// so it goes when tend exits or is killed, whatever children (an agent's wait,
-// a shell) outlive it. A lock just dropped is waited for briefly.
-func takeLock() {
-	f := lockFile(repo, cycle)
-	os.MkdirAll(filepath.Dir(f), 0o755)
-	l, err := os.OpenFile(f, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
-	if err != nil {
-		stop("could not take the lock %s", f)
-	}
-	for i := 0; ; i++ {
-		err = syscall.Flock(int(l.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
-		if err == nil {
-			break
-		}
-		if err != syscall.EWOULDBLOCK {
-			stop("could not take the lock %s", f)
-		}
-		if i == 10 {
-			say("another tend is on %s in %s: %s", cycle, repo, cat(f))
-			os.Exit(4)
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
-	lock = l
-	write(f, fmt.Sprintf("pid %d, %s in %s\n", os.Getpid(), cycle, repo))
-}
-
-// The lock file of work item w of repository r.
-func lockFile(r, w string) string {
-	// One lock however the repository is reached: a symlink, a subfolder or a
-	// linked worktree all share its common Git directory.
-	if g, err := quiet("git", "-C", r, "rev-parse", "--path-format=absolute", "--git-common-dir"); err == nil {
-		r = g
-	}
-	if p, err := filepath.EvalSymlinks(r); err == nil {
-		r = p
-	}
-	return fmt.Sprintf("%s/locks/%d-%s", state, cksum([]byte(r)), strings.ReplaceAll(w, "/", "_"))
-}
-
-// Whether a tend other than this one holds the lock of work item w of
-// repository r; this tend's own reads as held too. Reads only.
-func held(r, w string) bool {
-	f, err := os.Open(lockFile(r, w))
-	if err != nil {
-		return false
-	}
-	defer f.Close()
-	return syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB) != nil
-}
-
-// While one tend fetches, tidies, makes its worktree and claims, other tends
-// on this TEND_STATE wait: settingUp until setUp. A tend records its worktree
-// before it lets the next go.
-func settingUp() {
-	f, err := os.OpenFile(state+"/setup", os.O_WRONLY|os.O_CREATE, 0o644)
-	if err != nil {
-		stop("could not take the setup lock in %s", state)
-	}
-	for err = syscall.EINTR; err == syscall.EINTR; {
-		err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX)
-	}
-	if err != nil {
-		stop("could not take the setup lock in %s", state)
-	}
-	setup = f
-}
-
-func setUp() {
-	if setup != nil {
-		setup.Close()
-		setup = nil
-	}
 }
 
 // ---- agents
@@ -1019,72 +889,6 @@ func ask(name, text, mark string) {
 	settled(name, st, why)
 }
 
-// The repository's worktrees and local branches, one a line.
-func layout() string {
-	var ls []string
-	for _, line := range strings.Split(git("worktree", "list", "--porcelain"), "\n") {
-		if p, found := strings.CutPrefix(line, "worktree "); found {
-			ls = append(ls, "worktree "+p)
-		}
-	}
-	for _, b := range strings.Split(git("for-each-ref", "--format=%(refname:short)", "refs/heads"), "\n") {
-		ls = append(ls, "branch "+b)
-	}
-	return strings.Join(ls, "\n")
-}
-
-// Work left anywhere but the attempt's branch in its worktree is a person's.
-// The repository's layout is recorded just before each implementer prompt
-// goes, and a rerun compares with the same record. What tend's other attempts
-// and intake passes made is theirs: the worktree each run or intake folder
-// records and the branch it is on, once any tend setting up has recorded its
-// own.
-// ponytail: tend cannot tell whether an implementer wrote into another
-// attempt's worktree; that attempt's own diff and review would show it.
-func contained() {
-	if !exists(run + "/layout") {
-		return
-	}
-	settingUp() // until the layout is compared, so no tend makes a worktree meanwhile
-	var dirs, branches []string
-	fs, _ := filepath.Glob(state + "/runs/*/worktree")
-	more, _ := filepath.Glob(state + "/intake/*/worktree")
-	for _, f := range append(fs, more...) {
-		if d := cat(f); f != run+"/worktree" && exists(d) {
-			dirs = append(dirs, d)
-			branches = append(branches, gitQ("-C", d, "branch", "--show-current"))
-		}
-	}
-	theirs := func(l string) bool {
-		if p, found := strings.CutPrefix(l, "worktree "); found {
-			return slices.ContainsFunc(dirs, func(d string) bool { return sameDir(d, p) })
-		}
-		return slices.Contains(branches, strings.TrimPrefix(l, "branch "))
-	}
-	why := ""
-	if b := git("branch", "--show-current"); b != branch {
-		why = "its worktree is on " + b + ", not " + branch
-	}
-	was := strings.Split(cat(run+"/layout"), "\n")
-	for _, l := range strings.Split(layout(), "\n") {
-		if why != "" {
-			break
-		}
-		if slices.Contains(was, l) || theirs(l) {
-			continue
-		}
-		if p, found := strings.CutPrefix(l, "worktree "); found {
-			why = "it added the worktree " + p
-		} else if b := strings.TrimPrefix(l, "branch "); commits(base + ".." + b) {
-			why = "it made the branch " + b + ", with commits"
-		}
-	}
-	setUp()
-	if why != "" {
-		stop("%s left work outside %s: %s. tend reviews and publishes nothing; move the work onto %s and remove the rest, then run tend again", impl, branch, why, branch)
-	}
-}
-
 // ---- Git and GitHub
 
 // The account a repository's origin is published as, from $state/publish
@@ -1115,26 +919,6 @@ func pushAs(b string) bool {
 	return err == nil
 }
 
-// The worktree holding branch b, opened as the place, or a new one from base:
-// sets dir. A branch is found wherever its worktree is, so a rerun finds its
-// work.
-func worktreeFor(b, base, label string) {
-	dir = ""
-	w := ""
-	for _, line := range strings.Split(git("-C", repo, "worktree", "list", "--porcelain"), "\n") {
-		if p, found := strings.CutPrefix(line, "worktree "); found {
-			w = p
-		} else if line == "branch refs/heads/"+b {
-			dir = w
-		}
-	}
-	if dir != "" {
-		term.open(dir)
-		return
-	}
-	dir = term.worktree(b, base, label)
-}
-
 // The target new work starts from and is compared with: origin's, fetched
 // first, when the repository has an origin, so a stale local branch is never
 // the base.
@@ -1146,105 +930,6 @@ func fetchTarget() string {
 		stop("could not fetch %s from origin", target)
 	}
 	return "origin/" + target
-}
-
-// The worktree and its local branch removed, with the place the agents ran
-// in; left, and said, while it holds uncommitted files.
-func removeWorktree(d, b string) {
-	if !exists(d) {
-		return
-	}
-	if s := gitQ("-C", d, "status", "--porcelain"); s != "" {
-		say("left %s: it has uncommitted files", d)
-		return
-	}
-	term.closePlace(d)
-	if exists(d) {
-		quiet("git", "-C", repo, "worktree", "remove", d)
-	}
-	if !exists(d) {
-		quiet("git", "-C", repo, "branch", "-D", b)
-		say("removed %s", d)
-	}
-}
-
-// Worktrees tend made for this repository whose pull request is merged or
-// closed, removed when their head is the pull request's, so nothing is lost;
-// and those of attempts with no pull request whose cycle or change is done, when their
-// branch has no commit the target lacks. Never one with a worktree inside it
-// or whose implementer is working. A run folder names its worktree in
-// worktree, deleted once it is gone.
-func tidy() {
-	g := sync.OnceValues(func() (any, error) { return groveIn(repo) }) // one read for every folder
-	var listed []string
-	for _, line := range strings.Split(git("-C", repo, "worktree", "list", "--porcelain"), "\n") {
-		if p, found := strings.CutPrefix(line, "worktree "); found {
-			listed = append(listed, p)
-		}
-	}
-	fs, _ := filepath.Glob(state + "/runs/*/worktree")
-	more, _ := filepath.Glob(state + "/intake/*/worktree")
-	for _, f := range append(fs, more...) {
-		d, r := cat(f), filepath.Dir(f)
-		if !slices.ContainsFunc(listed, func(p string) bool { return sameDir(p, d) }) {
-			continue
-		}
-		b := ""
-		if nonempty(r + "/pr") {
-			s, err := out("gh", "pr", "view", cat(r+"/pr"), "--json", "state,headRefOid,headRefName", "--jq", `select(.state != "OPEN") | .headRefOid + " " + .headRefName`)
-			h, pb, _ := strings.Cut(s, " ")
-			if err != nil || h == "" {
-				continue
-			}
-			if gitQ("-C", d, "rev-parse", "HEAD") != h {
-				say("left %s: its head is not its pull request's", d)
-				continue
-			}
-			b = pb
-		} else if b = superseded(d, r, g); b == "" {
-			continue
-		}
-		real, _ := filepath.EvalSymlinks(d)
-		if slices.ContainsFunc(listed, func(p string) bool { return strings.HasPrefix(p, real+"/") }) {
-			say("left %s: a worktree is inside it", d)
-			continue
-		}
-		if filepath.Dir(r) == state+"/runs" && term.status("impl-"+filepath.Base(r)) == "working" {
-			say("left %s: its implementer is working", d)
-			continue
-		}
-		on, w := repo, "intake" // an intake folder's worktree listed here is this repository's
-		if filepath.Dir(r) == state+"/runs" {
-			a := strings.Split(cat(r+"/attempt"), "\n")
-			on, w = a[0], a[min(1, len(a)-1)]
-		}
-		if !(sameDir(on, repo) && w == cycle) && held(on, w) {
-			say("left %s: a tend is on it", d)
-			continue
-		}
-		removeWorktree(d, b)
-		if !exists(d) {
-			os.Remove(f)
-		}
-	}
-}
-
-// The branch of an attempt with no pull request whose Grove cycle or change is done
-// and whose branch the local target already holds, as when its work reached
-// the target some other way; or nothing.
-func superseded(d, r string, grove func() (any, error)) string {
-	a := strings.Split(cat(r+"/attempt"), "\n")
-	if filepath.Dir(r) != state+"/runs" || len(a) < 2 || !sameDir(a[0], repo) || isItem(a[1]) {
-		return ""
-	}
-	g, err := grove()
-	if known, open := workState(g, a[1]); err != nil || !known || open {
-		return ""
-	}
-	if !ok("git", "-C", d, "merge-base", "--is-ancestor", "HEAD", str(get(g, "target"))) {
-		return ""
-	}
-	return gitQ("-C", d, "branch", "--show-current")
 }
 
 func commits(rng string) bool { return git("rev-list", rng) != "" }
@@ -1445,221 +1130,6 @@ func proposal(r request, b string) {
 		stop("%s: %s committed no change and wrote no reason. Look at its pane, then commit the draft or write %s/declined, or delete %s/followed to have it asked again", r.ref, impl, run, run)
 	}
 	cd(repo)
-}
-
-// ---- an attempt
-
-// 1. The attempt, and what the work item says it must do. Two kinds:
-//
-// A Grove cycle, or an approved change no cycle lists, built as a cycle of that
-// one change. The newest record for it, if its checkout still holds its
-// branch; otherwise a new worktree and a claim made inside it, so the
-// attempt's branch is the worktree's. Grove holds approval, eligibility and
-// the scope; the build is done when each change is archived on the branch.
-//
-// issue-<n>, a GitHub issue of a repository without Grove: where Grove holds
-// the scope, a request goes through a proposal (tend propose) instead, so the
-// maintained specs keep up with what is built. It is approved by the
-// tend-build label, which only people who may label can put on; it may start
-// while it is open and labelled, and a closed one is done. Its title and
-// description are the scope. Its branch is tend/build-<n>, found wherever its
-// worktree is. The build is done when the branch has a commit and the
-// implementer's notes for the reviewer are in the run folder.
-func attempt() {
-	if isItem(cycle) {
-		kind = "issue"
-		cd(repo)
-		ref := "issue #" + strings.TrimPrefix(cycle, "issue-")
-		if isJira(cycle) {
-			ref = "issue " + cycle
-		}
-		if ok("grove", "changes", "--json") {
-			stop("%s uses Grove, so %s is not built directly: label it tend for tend propose to draft a proposal, then approve and plan it", repo, ref)
-		}
-		if isJira(cycle) {
-			item = jiraGet(cycle)
-		} else {
-			item = ghRequest(strings.TrimPrefix(cycle, "issue-"), "title,body,url,state,labels")
-		}
-		issue = item.fields
-		if str(get(issue, "state")) != "OPEN" {
-			say("%s is closed; nothing to do", item.ref)
-			os.Exit(0)
-		}
-		labelled := false
-		for _, l := range list(get(issue, "labels")) {
-			labelled = labelled || str(get(l, "name")) == "tend-build"
-		}
-		if !labelled {
-			stop("%s is not labelled tend-build, so it is not approved for building", item.ref)
-		}
-		var err error
-		if target, err = out("gh", "repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name"); err != nil {
-			stop("gh cannot see %s's repository", repo)
-		}
-		branch = "tend/build-" + item.key
-		if s, _ := out("gh", "pr", "list", "--head", branch, "--state", "all", "--json", "state", "--jq", ".[0].state // empty"); s == "MERGED" {
-			say("%s's pull request from %s is merged; nothing to do", item.ref, branch)
-			os.Exit(0)
-		}
-		id = filepath.Base(issueRun(cycle))
-		base = fetchTarget()
-		loadFlow("build", base)
-		worktreeFor(branch, base, "tend: "+item.ref)
-		cd(dir)
-		say("%s on %s in %s", item.ref, branch, dir)
-		what = item.named + ", quoted here: " + quoted("")
-	} else {
-		kind = "grove"
-		cd(repo)
-		proj := project()
-		target = str(get(proj, "target"))
-		was := gitQ("-C", repo, "rev-parse", target)
-		base = fetchTarget()
-		if gitQ("-C", repo, "rev-parse", target) != was {
-			proj = project() // as the target now is, which the fetch moved
-		}
-		loadFlow("build", base)
-		rec = itemRun(proj, cycle)
-		dir = str(get(rec, "checkout"))
-		if dir != "" && gitQ("-C", dir, "branch", "--show-current") == str(get(rec, "branch")) {
-			term.open(dir)
-			cd(dir)
-			proj = project() // the attempt's root, not the caller's
-			say("carrying on attempt %s in %s", str(get(rec, "id")), dir)
-		} else {
-			if why := unclaimable(proj, cycle); why != "" {
-				stop("%s", why)
-			}
-			tmp := fmt.Sprintf("tend-%s-%d", time.Now().Format("150405"), os.Getpid())
-			dir = term.worktree(tmp, base, "tend: "+cycle)
-			cd(dir)
-			if _, err := sh(nil, os.Stderr, false, "grove", "claim", cycle); err != nil {
-				cd(repo)
-				removeWorktree(dir, tmp) // nothing in it yet; a rerun makes its own
-				stop("grove claim refused %s", cycle)
-			}
-			b := git("branch", "--show-current")
-			if b != tmp {
-				quiet("git", "branch", "-D", tmp) // Herdr needs a branch; Grove's claim makes its own
-			}
-			proj = project()
-			rec = firstRun(proj, "branch", b)
-			if rec == nil {
-				stop("claimed %s, but Grove shows no record for %s", cycle, b)
-			}
-			say("claimed %s as attempt %s in %s", cycle, str(get(rec, "id")), dir)
-		}
-		branch, id = str(get(rec, "branch")), str(get(rec, "id"))
-		root = str(get(proj, "root"))
-	}
-	impl = "impl-" + id
-	run = state + "/runs/" + id
-	must("", os.MkdirAll(run, 0o755))
-	// What the reviewer is told the change must do, where the implementer's
-	// claims are, and the line that ends the squash commit message.
-	if kind == "grove" {
-		what = "in the change folders that diff moves into " + root + "/changes/archive/ (proposal.md, specs, tasks.md, implementation.md); reproduce each scenario the change spec gives"
-		notes = "implementation.md"
-		var cs []string
-		for _, c := range list(get(rec, "changes")) {
-			cs = append(cs, str(c))
-		}
-		trailer = "Grove: " + strings.Join(cs, ", ")
-	} else {
-		what += "; reproduce what it describes. The implementer's notes are in " + run + "/implemented"
-		notes = run + "/implemented"
-		trailer = item.closes
-	}
-	// The prototype kept an attempt's verdicts and repair mark in .tend/ in the
-	// checkout. They move to the attempt's folder, never over a file there.
-	if exists(".tend") {
-		fs, _ := filepath.Glob(".tend/*")
-		for _, f := range fs {
-			if t := run + "/" + filepath.Base(f); !exists(t) {
-				os.Rename(f, t)
-			}
-		}
-		if os.Remove(".tend") == nil {
-			say("moved .tend/ to %s", run)
-		} else {
-			left, _ := os.ReadDir(".tend")
-			var names []string
-			for _, e := range left {
-				names = append(names, e.Name())
-			}
-			stop("left in .tend/, as %s holds the same: %s", run, strings.Join(names, "\n"))
-		}
-	}
-	// The prototype wrote repaired before sending the repair, so it means asked.
-	if exists(run+"/repaired") && !exists(run+"/repair-asked") {
-		os.Rename(run+"/repaired", run+"/repair-asked")
-	}
-	write(run+"/attempt", repo+"\n"+cycle+"\n") // for tend watch
-	if fl.Steps["publish"] != nil && fl.Steps["publish"].Next["approved"] != "" {
-		write(run+"/approves", "publish acts on an approval\n") // for tend watch
-	} else {
-		os.Remove(run + "/approves")
-	}
-	write(run+"/worktree", dir+"\n") // for tidy and contained
-	setUp()
-
-	// 2. The build flow: implement, review, repair, publish and requested
-	//    changes as the built-in flow says, or as the project's does.
-	vars = map[string]string{"branch": branch, "base": base, "run": run, "item": cycle, "target": target,
-		"what": what, "notes": notes, "kind": kind, "named": item.named, "scope": quoted("")}
-	walkFlow(publishStep)
-
-	if v == "" {
-		stage("done", "the flow ended for "+branch+" with no verdict", "a person reviews "+where+" and decides whether to merge it")
-		say("done: %s, with no verdict", branch)
-		os.Exit(0)
-	}
-	verdict := parse(cat(v))
-	conclusion, h := str(get(verdict, "conclusion")), short(str(get(verdict, "head")))
-	if landed != "" {
-		term.notify("tend "+cycle+": landed", landed+" is merged", "done")
-		stage("done", fmt.Sprintf("landed %s, %s at %s, verdict %s", landed, branch, short(git("rev-parse", "HEAD")), v), "nothing: it is merged")
-		say("done: landed %s, verdict %s", landed, v)
-	} else {
-		term.notify("tend "+cycle+": "+conclusion, where+" at "+h+" is ready for you", "done")
-		stage("done", fmt.Sprintf("%s for %s at %s, verdict %s", conclusion, branch, h, v), "a person reviews "+where+" and decides whether to merge it")
-		say("done: %s, verdict %s", branch, v)
-	}
-	var pretty bytes.Buffer
-	if json.Indent(&pretty, []byte(cat(v)), "", "  ") == nil {
-		fmt.Println(pretty.String())
-	}
-	os.Exit(0)
-}
-
-// Done is what Git holds, never what the pane's state says: why the branch is
-// not a finished candidate, or nothing.
-func unbuilt() string {
-	if !clean() {
-		return branch + " has uncommitted files"
-	}
-	if kind == "issue" {
-		if !commits(base + "..HEAD") {
-			return branch + " has no commit for " + item.ref
-		}
-		if !nonempty(run + "/implemented") {
-			return impl + " wrote no notes for the reviewer in " + run + "/implemented"
-		}
-		return ""
-	}
-	for _, c := range list(get(rec, "changes")) {
-		if m, _ := filepath.Glob(root + "/changes/archive/" + str(c) + "-*"); len(m) == 0 {
-			return "change " + str(c) + " is not archived on " + branch
-		}
-	}
-	return ""
-}
-
-func built() {
-	if why := unbuilt(); why != "" {
-		stop("%s", why)
-	}
 }
 
 // A verdict counts only when complete and naming the head it was written

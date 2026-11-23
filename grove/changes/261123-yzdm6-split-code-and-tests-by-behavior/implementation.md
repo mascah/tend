@@ -31,6 +31,36 @@ Status: done
   `main.go` keeps no landing lock, reviewed head, check or merge decision
   (`grep` for them finds only `watch`'s own lock and claim code).
 
+### T-02 — The CLI and attempts are apart
+
+Status: done
+
+- `attempt.go`: starting and resuming a build with its locks and its claim:
+  `cksum`, `firstRun`, `unclaimable`, `issueRun`, `takeLock`, `lockFile`,
+  `held`, `settingUp`, `setUp`, and the `// ---- an attempt` section
+  (`attempt`, `unbuilt`, `built`).
+- `worktree.go`: `layout`, `contained`, `worktreeFor`, `removeWorktree`,
+  `tidy`, `superseded`.
+- `main.go` keeps dispatch and startup (`version`, `main`, the globals) and
+  the helpers more than one area uses, as open question 2 recommends: the
+  command, JSON and reporting helpers, and the Grove and Git readers several
+  areas call (`groveIn`, `syncTarget`, `groveJSON`, `project`, `itemRun`,
+  `workState`, `runDirs`, `isIssue`, `isItem`, `fetchTarget`, `commits`,
+  `clean`, `prNumber`, `reviewsAPI`, `postJSON`, `valid`).
+- Edit beyond moves: none.
+- Checks: `go build -o bin/tend .` succeeded; `bin/tend version` printed
+  `tend dev`, as at `43758c3`; `go test -count=1 ./...` passed. A reference
+  scan (each `main.go` declaration and the files that use it) found none used
+  only by `attempt.go` or only by `worktree.go`.
+
+Check: `lockFile` and `issueRun` are also read by watch, status and landing;
+they went to `attempt.go` because the task names the attempt's locks there
+and an issue attempt's run folder is named by `issueRun`. `contained` and
+`layout`, the guard that work stays in the attempt's worktree, went to
+`worktree.go` as part of the checkout's lifecycle; `valid` (whether a verdict
+file is complete) stayed in `main.go`, being used by publication, landing and
+flows alike.
+
 ## Scenarios
 
 ## Reconciliation
