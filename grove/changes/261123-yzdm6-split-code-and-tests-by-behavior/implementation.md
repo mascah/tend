@@ -144,6 +144,55 @@ Check: `loadFlow` sets the engine's variables but went to `flow_load.go`, as
 it is finding the flow in effect at a revision; the variables it sets stay
 with the engine in `flow_run.go`.
 
+### T-07 — Tests are filed by behavior
+
+Status: done
+
+- `tend_test.go` is renamed `scenario_test.go` (so Git shows it as the same
+  file) and keeps the fixtures every scenario shares, `TestMain`, `TestTend`
+  and the `version` and `usage` scenarios.
+- The one `scenarios` list became one list for each test file, each scenario
+  kept in its order within its list: `attemptScenarios` (36),
+  `worktreeScenarios` (11), `watchScenarios` (22), `statusScenarios` (3),
+  `publicationScenarios` (15), `intakeScenarios` (12), `jiraScenarios` (5),
+  `terminalScenarios` (12), and `cliScenarios` (2) in `scenario_test.go`.
+  118 scenarios before and after.
+- Fixtures only one file's scenarios use moved with them: `jbuild` and the
+  Jira section (`jmap`, `adf`, `jissue`, `jcomments`, `rich`) to
+  `jira_test.go`; `build`, `bworktree` and `verdict` to `attempt_test.go`;
+  `labelled` to `intake_test.go`; `watchrepo`, `atOnce` and `unattend` to
+  `watch_test.go`.
+- Edits beyond moves:
+  - `var scenarios = slices.Concat(cliScenarios, attemptScenarios, …)` in
+    `scenario_test.go` gathers the lists, so `TestTend` itself is unchanged
+    and every scenario stays under it.
+  - The section comment over `TestTend`, "the scenarios, as dev/test.sh had
+    them, in its order", became "the scenarios, each list in its behavior's
+    test file": the order is no longer dev/test.sh's.
+  - The `// ---- other helpers` section comment stays in `scenario_test.go`
+    above `rexwt` instead of moving with `bworktree`.
+- `README.md` and the `context` line of `grove.yaml` name `scenario_test.go`
+  and the behavior's test files, such as `landing_test.go`, instead of
+  `tend_test.go`.
+- Checks: `go test -count=1 -v ./...` passed and reported the same 175 test
+  and scenario names as the baseline (sorted lists compared with `diff`);
+  `go test -run 'TestTend/^publish$'` ran that one scenario and passed;
+  `git grep tend_test -- ':!grove/changes'` finds nothing.
+
+Check: test files follow open question 3's recommendation, plus one choice
+per scenario. Recovery and repair scenarios (`repair*`, `survivor-*`,
+`unfinished`, `cached-*`, `legacy`) are in `attempt_test.go`, as the attempts
+spec covers recovering an attempt and no `flow_run_test.go` was asked for;
+the containment scenarios (`stray-*`, `at-once-stray`,
+`at-once-during-turn`, `at-once-setting-up`) and every tidy scenario,
+`rex-tidy` included, are in `worktree_test.go`; `at-once-intake` and
+`at-once-second-intake` are in `intake_test.go`; `version` and `usage`, the
+CLI's dispatch, stay in `scenario_test.go`, as no test file was asked for
+`main.go`.
+Found: `built()` in `attempt.go` (in `main.go` at `43758c3`) has no caller;
+`walkFlow` and `reachInOrder` call `unbuilt()` directly. Seen in the
+reference scan made to place declarations.
+
 ## Scenarios
 
 ## Reconciliation
