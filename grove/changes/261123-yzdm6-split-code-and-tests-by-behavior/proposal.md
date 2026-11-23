@@ -109,10 +109,12 @@ None must be answered before review. Each has a recommended answer that
    being moved lines, and every other edit is recorded with its reason.
 2. **Where do the helpers every area uses live?** Decides T-02. The table
    gives no file to the command, JSON and reporting helpers (`main.go:54` to
-   `main.go:248` at `43758c3`). Recommended: they stay in `main.go`. Reason:
-   they are the vocabulary of every other file and change rarely, and a
-   file made only to hold them adds a place to look without adding a
-   behavior.
+   `main.go:248` at `43758c3`). Recommended: those that more than one area
+   uses stay in `main.go`, and one that a single area uses moves with that
+   area, as `needsYou` does with watch, its only caller (`main.go:448`).
+   Reason: the shared ones are the vocabulary of every other file and change
+   rarely, and a file made only to hold them adds a place to look without
+   adding a behavior.
 3. **Which test files, beyond the two the issue names?** Decides T-07.
    Recommended: one for each source file whose behavior has scenarios:
    `attempt_test.go`, `worktree_test.go`, `watch_test.go`, `status_test.go`,
