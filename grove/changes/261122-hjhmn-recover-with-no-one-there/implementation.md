@@ -50,7 +50,42 @@ has no agent and prompts none, so the second ask never applies to it.
 
 ### T-02 — Watch runs again an attempt whose tend died
 
-Status: not started
+Status: done
+
+`main.go`: `rerun` has a new reason, `stopped`: the attempt's `status` says
+`working`, no tend holds its lock (`held`), and, for a Grove cycle or change,
+`grove changes --json` lists the run folder's attempt with `in_flight: true`.
+Watch then says "tend stopped on attempt <id> before it finished; running tend
+on <item>". Both of watch's paths use `rerun`. Under a count, `keep` already
+runs reruns within the count and before it starts anything new, and skips an
+attempt a tend holds. A new `working` helper reads the status file, and
+`status` now uses it too. The pull request's own reasons (changes requested,
+approved) are still checked first, so an attempt that has both is named by the
+same reason as before.
+
+Tests, all passing (`go test ./...`, 100s): `tend_test.go` `watch-killed`
+(a tend is on it, needs a person, after a kill, then finished),
+`watch-killed-agents-gone`, `watch-killed-retried` and
+`watch-at-once-killed`. Without the change, `watch-killed` and
+`watch-killed-agents-gone` fail. With the in-flight check taken out,
+`watch-killed-retried` fails. `watch`, `watch-unattended` and
+`status-interrupted` still pass.
+
+Check: the first version checked `stopped` before the pull request's reasons.
+`land-rerun-after-kill` then failed: it expects the reason "was approved" for
+an attempt whose tend was also killed. So the pull request's reasons now come
+first and `stopped` is the fallback. The change does not say which reason
+watch gives when both hold.
+Check: T-02's `main.go` and `tend_test.go` changed on main since the change's
+base, in landing (261122-rpkqa) and several attempts at once (261122-9vbmc).
+Those changes brought `keep` and its count. This task builds on them: the
+dead-tend rerun goes through `rerun`, which `keep` already calls within the
+count.
+Found: a tend that exits through `must` (exit 1, an unexpected command
+failure) leaves `status` saying `working`. Watch now runs that attempt again
+on every pass until it gets further or stops for a person. I saw this by
+reading `must` in `main.go`. The change rules out any other way to stop watch
+here.
 
 ### T-03 — The README says what recovers by itself
 
