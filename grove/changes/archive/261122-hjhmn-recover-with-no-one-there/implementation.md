@@ -35,6 +35,8 @@ six fails with `flow.go` as it was on main. `request-uncertain`,
 
 Also changed: `herdr.go` — a new `gone` method on the terminal. An agent counts as gone only when Herdr answers `agent_not_found`. Before, `pane` came back empty on any failed `agent get`, so a Herdr that was restarting or slow looked like a gone agent and got the step asked twice. A side review found this after the first version.
 Also changed: `rex.go` — the same for rex: gone only when the block listing succeeds and no block carries the agent's label.
+Also changed: `rex.go` (again) — an agent whose block goes after the prompt was delivered reports `agent_gone_after_delivery`, not `agent_not_found`. `promptStep` keeps the ask recorded for that code, as it does for a timeout. Before, a rex agent closed mid-turn read as a prompt refused before it went: the first ask's record or the second ask's mark was erased, and a later run prompted again. A Codex review found this.
+Also changed: `testdata/bin/rex` — `REX_VANISH` closes an agent's block once its prompt is taken. Test: `tend_test.go` `rex-gone-mid-turn`. It fails without the fix.
 Also changed: `testdata/bin/herdr` — `AGENT_GET_FAIL` makes every `agent get` fail, as a terminal that cannot be reached. Test: `flow_test.go` `flow-terminal-unreachable`. It stops for a person and prompts no one. It fails with the earlier pane check.
 Check: deleting a step's record after a second ask has it asked afresh, but
 `again-<record>` still holds that head. So if that fresh ask's agent is then

@@ -1621,6 +1621,17 @@ var scenarios = []scenario{
 		s.check("and does not prompt it again", s.prompts("/grove-implement") == 1)
 		s.check("and says so", r.said("still working on an earlier prompt"))
 	}},
+	{"rex-gone-mid-turn", func(s *sc) {
+		s.project("main", false)
+		r := s.rexrun("REX_VANISH=impl")
+		s.check("under rex, an implementer whose block closes after its prompt went stops", r.code == 3 && r.said("agent_gone_after_delivery"))
+		s.check("its ask stays recorded, as delivered", s.cat(s.runDir()+"/implement-asked") != "")
+		r = s.rexrun("REX_VANISH=impl")
+		s.check("the rerun asks it once more in a new session, which goes too", r.code == 3 && s.prompts("/grove-implement") == 2)
+		s.check("and that second ask stays recorded", s.cat(s.runDir()+"/again-implement-asked") != "")
+		r = s.rexrun()
+		s.check("gone a second time, tend stops and asks no third time", r.code == 3 && s.prompts("/grove-implement") == 2)
+	}},
 	{"rex-dialog", func(s *sc) {
 		s.project("main", false)
 		r := s.rexrun("REVIEW=repairable", "BLOCK_AFTER_BUILD=1")

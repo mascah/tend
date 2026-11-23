@@ -644,7 +644,7 @@ func promptStep(name, rec, h string) {
 		write(run+"/layout", layout()+"\n") // for contained()
 	}
 	st, why := term.prompt(agent, text)
-	if st == "" && !strings.Contains(why, "timeout") && !strings.Contains(why, "stall") && why != "no answer" {
+	if st == "" && !strings.Contains(why, "timeout") && !strings.Contains(why, "stall") && !strings.Contains(why, "after_delivery") && why != "no answer" {
 		hs := asks(rec)
 		if i := slices.Index(hs, h); i >= 0 {
 			setAsks(rec, slices.Delete(hs, i, i+1)) // refused before it went: not asked

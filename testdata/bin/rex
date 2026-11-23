@@ -11,6 +11,8 @@
 # NOTICE starts agents at Codex's "Update available" notice, before any trust dialog,
 # which Esc alone skips;
 # REX_STALL leaves a prompt untaken and pending.
+# REX_VANISH closes the block of an agent whose name starts with it once its
+# prompt is taken, before the turn, as a pane closed mid-turn.
 set -euo pipefail
 s=$HERDR_STATE
 . "${0%/*}/turn.sh"
@@ -48,6 +50,13 @@ block)
 		case ${!#} in
 		modes) echo '{"screen":"alternate","modes":[{"name":"bracketed_paste","number":2004,"set":true}]}' ;;
 		program_status)
+			if [ -n "$n" ] && [ -e "$s/vanish-$n" ]; then # seen taking the prompt, then gone
+				rm "$s/vanish-$n"
+				grep -v " $n\$" "$s/rex-blocks" >"$s/rb" || true
+				mv "$s/rb" "$s/rex-blocks"
+				jq -n --arg u "$(cat "$s/updated-$n")" '{records: [{state: "working", updated_at: $u, app: "agent"}]}'
+				exit 0
+			fi
 			# A working agent is seen working once, then finishes its turn.
 			if [ "$(cat "$s/status-$n" 2>/dev/null)" = working ] && [ -f "$s/pending-$n" ] && [ -e "$s/seen-$n" ]; then
 				turn "$n" "$(cat "$s/pending-$n")"
@@ -78,6 +87,7 @@ send-key)
 		rm "$s/typed-$n"
 		printf 'agent prompt %s %s\n' "$n" "$text" >>"$s/log"
 		if [ -n "${REX_STALL:-}" ]; then printf '%s' "$text" >"$s/pending-$n"; exit 0; fi
+		if [ -n "${REX_VANISH:-}" ] && [[ $n == "$REX_VANISH"* ]]; then bump "$n"; touch "$s/vanish-$n"; exit 0; fi
 		turn "$n" "$text"
 		bump "$n"
 		[ -z "${block:-}" ] || echo blocked >"$s/status-$block"

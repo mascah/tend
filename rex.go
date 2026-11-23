@@ -202,7 +202,11 @@ func (r *rex) prompt(name, text string) (string, string) {
 			return "", "agent_prompt_stalled"
 		}
 	}
-	return r.wait(name, timeout())
+	st, why := r.wait(name, timeout())
+	if why == "agent_not_found" {
+		why = "agent_gone_after_delivery" // the prompt went: not a refusal
+	}
+	return st, why
 }
 
 // Until the agent settles idle, done or blocked, or one of until.
