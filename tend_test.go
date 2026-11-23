@@ -433,6 +433,17 @@ func (s *sc) agent(status, prefix string) {
 	s.write(s.st+"/status-"+strings.TrimPrefix(a, "agent-"), status+"\n")
 }
 
+// An agent's pane closed, by the prefix of its name: the stand-ins then know
+// no agent of that name, nor any turn it had pending.
+func (s *sc) gone(prefix string) {
+	for _, k := range []string{"agent-", "status-", "pending-"} {
+		fs, _ := filepath.Glob(s.st + "/" + k + prefix + "*")
+		for _, f := range fs {
+			os.Remove(f)
+		}
+	}
+}
+
 func (s *sc) records() int {
 	x := parse(s.sh(s.repo, "grove", "changes", "--json"))
 	n := 0
@@ -909,6 +920,21 @@ var scenarios = []scenario{
 		s.check("with the mark deleted by a person, it is asked again and passes", r.passed())
 		s.check("twice in all", s.prompts("teammate") == 2)
 	}},
+	{"request-gone", func(s *sc) {
+		s.project("main", true)
+		s.allow()
+		s.run()
+		s.request()
+		r := s.run("REQUEST_FAIL=timeout")
+		s.check("a request prompt that timed out stops", r.code == 3)
+		s.gone("impl-")
+		r = s.run()
+		s.check("with the implementer gone, the rerun asks the request once more and passes", r.passed())
+		s.check("of a new implementer session", s.prompts("teammate") == 2 && s.count(s.log(), `^agent start impl-`) == 2)
+		s.check("and the new head is reviewed and published", s.reviews() == 2 && s.has(s.cat(s.st+"/statuses"), `^`+s.head()+` success the-bot$`))
+		r = s.run()
+		s.check("a later run asks nothing again", r.code == 0 && s.prompts("teammate") == 2)
+	}},
 	{"request-merged", func(s *sc) {
 		s.project("main", true)
 		s.allow()
@@ -1035,6 +1061,18 @@ var scenarios = []scenario{
 		}
 		r = s.propose()
 		s.check("with the mark deleted, it is asked again and published", r.code == 0 && s.follows() == 2 && exists(s.prOf("1")))
+		s.check("the draft was asked for once", s.drafts() == 1)
+	}},
+	{"propose-follow-gone", func(s *sc) {
+		s.project("main", true)
+		s.allow()
+		s.issues("1:tend")
+		r := s.propose("FOLLOW_FAIL=timeout")
+		s.check("a follow-up that timed out stops", r.code == 3)
+		s.gone("prop-")
+		r = s.propose()
+		s.check("with the drafter gone, the rerun asks the follow-up once more and publishes", r.code == 0 && s.follows() == 2 && exists(s.prOf("1")))
+		s.check("of a new drafter session", s.count(s.log(), `^agent start prop-`) == 2)
 		s.check("the draft was asked for once", s.drafts() == 1)
 	}},
 	{"propose-survivor", func(s *sc) {
@@ -1337,6 +1375,15 @@ var scenarios = []scenario{
 		r = s.run("REVIEW=repairable")
 		s.check("with repair-asked deleted by a person, the repair is asked again and passes", r.passed())
 		s.check("twice in all", s.prompts("An") == 2)
+	}},
+	{"repair-gone", func(s *sc) {
+		s.project("main", false)
+		r := s.run("REVIEW=repairable", "REPAIR_FAIL=timeout")
+		s.check("a repair prompt that timed out stops", r.code == 3)
+		s.gone("impl-")
+		r = s.run("REVIEW=repairable")
+		s.check("with the implementer gone, the repair is asked once more, reviewed, and passes", r.passed() && s.reviews() == 2)
+		s.check("of a new implementer session", s.prompts("An") == 2 && s.count(s.log(), `^agent start impl-`) == 2)
 	}},
 	{"repair-blocked", func(s *sc) {
 		s.project("main", false)

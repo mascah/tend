@@ -616,10 +616,10 @@ func doing(name, agent string) (string, string) {
 	return fmt.Sprintf("%s works on step %s at %s", agent, name, h), "tend waits for " + agent + ", then checks its result"
 }
 
-// Prompt a step's agent once: the head is added to the step's record just
-// before the prompt goes, and taken off again only when the terminal refused
-// the prompt, as a timeout or a stall may have delivered it.
-func promptStep(name, rec string) {
+// Prompt a step's agent once: head h is added to the record rec just before
+// the prompt goes, and taken off again only when the terminal refused the
+// prompt, as a timeout or a stall may have delivered it.
+func promptStep(name, rec, h string) {
 	s := fl.Steps[name]
 	agent, harness, root := agentOf(name)
 	rr, _ := parseResult(fl.Steps[root].Result)
@@ -638,7 +638,6 @@ func promptStep(name, rec string) {
 	case "blocked", "unknown":
 		stop("%s is %s; look at it, then run tend again", agent, st)
 	}
-	h := git("rev-parse", "HEAD")
 	setAsks(rec, append(asks(rec), h))
 	prompted++
 	if strings.HasPrefix(agent, "impl-") {
@@ -652,6 +651,22 @@ func promptStep(name, rec string) {
 		}
 	}
 	settled(agent, st, why)
+}
+
+// The record of the asks made once more, by the head of the ask repeated: a
+// name the glob of request-* does not take, so none counts toward a limit.
+func againOf(rec string) string { return filepath.Dir(rec) + "/again-" + fileName(rec) }
+
+// Ask a step once more, in a new session, when its ask at head a left nothing
+// and its agent is gone, so that nothing is left to act on the earlier prompt;
+// never a third time. Whether it was asked.
+func again(name, agent, rec, a string) bool {
+	if term.pane(agent) != "" || slices.Contains(asks(againOf(rec)), a) {
+		return false
+	}
+	say("%s was asked at %s and left nothing, and %s is gone; asking it once more in a new session", name, short(a), agent)
+	promptStep(name, againOf(rec), a)
+	return true
 }
 
 // Reach a step at the branch's head: take its result if it is there, wait for
@@ -741,12 +756,19 @@ func reachAt(name string, s *step, r result, h, rec string) string {
 		return o
 	}
 	if slices.Contains(asks(rec), h) {
-		stop("%s was asked at %s and left nothing: no %s, and %s is not working on it. Look at its pane, then write it and run tend again, or delete %s to have it asked once more", name, short(h), fileName(f), agent, rec)
+		if again(name, agent, rec, h) {
+			return left()
+		}
+		asked := "asked"
+		if slices.Contains(asks(againOf(rec)), h) {
+			asked = "asked twice"
+		}
+		stop("%s was %s at %s and left nothing: no %s, and %s is not working on it. Look at its pane, then write it and run tend again, or delete %s to have it asked once more", name, asked, short(h), fileName(f), agent, rec)
 	}
 	if s.Limit > 0 && timesAsked(name, rec) >= s.Limit {
 		return "spent"
 	}
-	promptStep(name, rec)
+	promptStep(name, rec, git("rev-parse", "HEAD"))
 	return left()
 }
 
@@ -837,6 +859,8 @@ func reachInOrder(name string, s *step, r result, h, rec string) string {
 			stage("working", text1, next1)
 			say("%s is still working on an earlier prompt; waiting for it, not prompting again", agent)
 			await(agent)
+		} else if got(a) == "" || implementing && unbuilt() != "" {
+			seen = again(name, agent, rec, a)
 		}
 		return left(a, seen)
 	}
@@ -851,7 +875,7 @@ func reachInOrder(name string, s *step, r result, h, rec string) string {
 	if s.Limit > 0 && timesAsked(name, rec) >= s.Limit {
 		return "spent"
 	}
-	promptStep(name, rec)
+	promptStep(name, rec, h)
 	used[rec]++
 	return left(h, true)
 }
