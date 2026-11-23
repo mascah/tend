@@ -22,14 +22,17 @@ judgement is right is not checked.
 
 ### Requirement: A fresh reviewer for each head
 
-When an attempt's head has no valid verdict, the system shall start reviewer
-`rev-<short head>` as Codex with `-s workspace-write -c
-sandbox_workspace_write.network_access=true -a never --add-dir <run folder>`, reusing one an earlier run left, and prompt it once with the branch,
-the head, the change as `git diff <base>...HEAD`, what the work item must do
-and where the implementer's claims are, asking for material findings only, no
-edits or commits, and the verdict written to `verdict-<head>.json` in the run
-folder as `head`, `conclusion`, `actionable` and `summary`; and once the
-verdict is valid it shall close the reviewer's pane.
+When an attempt's head has no valid verdict and is not carried from a head
+that passed review, as the landing spec's "The verdict carries across a clean
+merge" says, the system shall start reviewer `rev-<short head>` as Codex with
+`-s workspace-write -c sandbox_workspace_write.network_access=true -a never
+--add-dir <run folder>`, reusing one an earlier run left, and prompt it once
+with the branch, the head, the change as `git diff <base>...HEAD`, what the
+work item must do and where the implementer's claims are, asking for material
+findings only, no edits or commits, and the verdict written to
+`verdict-<head>.json` in the run folder as `head`, `conclusion`, `actionable`
+and `summary`; and once the verdict is valid it shall close the reviewer's
+pane.
 
 #### Scenario: The reviewer's one writable folder
 
@@ -43,6 +46,14 @@ verdict is valid it shall close the reviewer's pane.
   is still working
 - WHEN the owner runs tend again
 - THEN the reviewer is started once and prompted once in all
+
+#### Scenario: A carried head
+
+- GIVEN an attempt whose head is a clean merge of the target into a head
+  that passed review, made at `land`
+- WHEN the owner runs tend again
+- THEN no reviewer is started for the merge commit, and the flow goes on as
+  from a passing review
 
 ### Requirement: Only a valid verdict counts
 
@@ -156,3 +167,4 @@ None.
 ## History
 
 - Written when tend adopted Grove (2026-11-16).
+- [261122-rpkqa](../../changes/archive/261122-rpkqa-land-reviewed-candidates-one-at-a-time/) Land reviewed candidates one at a time

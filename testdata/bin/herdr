@@ -12,8 +12,10 @@
 set -euo pipefail
 s=$HERDR_STATE
 printf '%s\n' "$*" >>"$s/log"
-said() { jq -n --arg st "$1" '{result: {agent: {agent_status: $st, pane_id: "p9"}}}'; }
-. "$(dirname "$0")/turn.sh"
+said() { printf '{"result":{"agent":{"agent_status":"%s","pane_id":"p9"}}}\n' "$1"; }
+# The agent's status, idle when it has none, read with no process started.
+status() { st=idle; [ ! -f "$s/status-$1" ] || read -r st <"$s/status-$1" || true; echo "$st"; }
+. "${0%/*}/turn.sh"
 case "$1 $2" in
 "worktree create")
 	shift 2
@@ -31,13 +33,13 @@ case "$1 $2" in
 "agent start") touch "$s/agent-$3" ;;
 "agent get")
 	[ -f "$s/agent-$3" ] || { echo '{"error":{"code":"agent_not_found"}}'; exit 1; }
-	said "$(cat "$s/status-$3" 2>/dev/null || echo idle)" ;;
+	said "$(status "$3")" ;;
 "agent wait")
-	if [ "$(cat "$s/status-$3" 2>/dev/null)" = working ] && [ -f "$s/pending-$3" ]; then
+	if [ "$(status "$3")" = working ] && [ -f "$s/pending-$3" ]; then
 		turn "$3" "$(cat "$s/pending-$3")"
 		rm "$s/pending-$3" "$s/status-$3"
 	fi
-	said "$(cat "$s/status-$3" 2>/dev/null || echo idle)" ;;
+	said "$(status "$3")" ;;
 "agent prompt")
 	case $3 in
 	impl-*) case $4 in /grove-implement* | "Implement GitHub issue"* | "Implement Jira issue"*) fail=${IMPL_FAIL:-} ;; *"requested changes at commit"*) fail=${REQUEST_FAIL:-} ;; *) fail=${REPAIR_FAIL:-} ;; esac ;;
@@ -45,7 +47,7 @@ case "$1 $2" in
 	check-*) fail=${CHECK_FAIL:-} ;;
 	*) fail=${REV_FAIL:-} ;;
 	esac
-	if [ "$(cat "$s/status-$3" 2>/dev/null)" = blocked ]; then
+	if [ "$(status "$3")" = blocked ]; then
 		echo '{"error":{"code":"agent_blocked"}}'
 		exit 1
 	fi
@@ -57,7 +59,7 @@ case "$1 $2" in
 	[ -z "${HOLD:-}" ] || until [ -e "$HOLD" ]; do sleep 0.1; done
 	case $3 in impl-*) [ -z "${IMPL_SLEEP:-}" ] || { echo working >"$s/status-$3"; printf '%s' "$4" >"$s/pending-$3"; echo $$ >"$s/sleeper"; exec sleep "$IMPL_SLEEP"; } ;; esac
 	turn "$3" "$4"
-	said "$(cat "$s/status-$3" 2>/dev/null || echo idle)"
+	said "$(status "$3")"
 	[ -z "${block:-}" ] || echo blocked >"$s/status-$block" ;;
 *) echo '{"result":{}}' ;;
 esac

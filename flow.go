@@ -119,7 +119,9 @@ func (s *step) outcomes(name, flowName string) []string {
 	r, _ := parseResult(s.Result)
 	switch {
 	case name == "publish" && flowName == "build":
-		o = []string{"ok", "requested"}
+		o = []string{"ok", "requested", "approved"}
+	case name == "land":
+		o = []string{"ok", "conflict", "failed"}
 	case r.verdict != "":
 		o = []string{"success", "actionable", "failure"}
 	default:
@@ -169,9 +171,15 @@ func (f *flow) fault(name string, has func(string) bool) string {
 		if n == "end" || n == "person" {
 			return fmt.Sprintf("names a step %s in flow %s, a word kept for what follows a step", n, name)
 		}
-		if n == "publish" {
+		if n == "publish" || n == "land" {
 			if s.Agent != "" || s.Continue != "" || s.Prompt != "" || s.Result != "" || s.Limit != 0 {
-				return fmt.Sprintf("gives step publish of flow %s more than next, though publishing is tend's own", name)
+				return fmt.Sprintf("gives step %s of flow %s more than next, though %s is tend's own", n, name, map[string]string{"publish": "publishing", "land": "landing"}[n])
+			}
+			if n == "land" && name != "build" {
+				return fmt.Sprintf("names a step land in flow %s, where tend lands nothing", name)
+			}
+			if n == "land" && f.Steps["publish"] == nil {
+				return fmt.Sprintf("gives flow %s a step land and no publish, where land lands the pull request publish opens", name)
 			}
 		} else {
 			if (s.Agent == "") == (s.Continue == "") {
@@ -185,7 +193,7 @@ func (f *flow) fault(name string, has func(string) bool) string {
 				for f.Steps[root] != nil && f.Steps[root].Continue != "" && seen <= len(f.Steps) {
 					root, seen = f.Steps[root].Continue, seen+1
 				}
-				if c := f.Steps[root]; c == nil || root == "publish" || c.Agent == "" {
+				if c := f.Steps[root]; c == nil || root == "publish" || root == "land" || c.Agent == "" {
 					return fmt.Sprintf("%s %q to continue, which is no step with an agent", at, s.Continue)
 				}
 			}
@@ -221,8 +229,8 @@ func (f *flow) fault(name string, has func(string) bool) string {
 }
 
 // The steps of a loop no step of which has a limit, or nil. A loop through
-// publish's requested comes round only when a person requests changes, so
-// people bound it.
+// publish's requested or approved comes round only when a person requests
+// changes or approves, so people bound it.
 func (f *flow) loop() []string {
 	state := map[string]int{} // 1 on the path, 2 done
 	var path []string
@@ -241,7 +249,7 @@ func (f *flow) loop() []string {
 		state[n] = 1
 		path = append(path, n)
 		for _, o := range sorted(s.Next) {
-			if n == "publish" && o == "requested" {
+			if n == "publish" && (o == "requested" || o == "approved") {
 				continue
 			}
 			if l := visit(s.Next[o]); l != nil {
@@ -448,6 +456,8 @@ func walkFlow(publish func() string) {
 		var o string
 		if at == "publish" {
 			o = publish()
+		} else if at == "land" {
+			o = landStep()
 		} else {
 			o = reach(at, s)
 		}
@@ -653,6 +663,13 @@ func reach(name string, s *step) string {
 	}
 	r, _ := parseResult(s.Result)
 	h := git("rev-parse", "HEAD")
+	// A head carried across a clean merge of the target is judged by the
+	// verdict of the head that passed review, and no agent is asked.
+	if r.verdict != "" && !exists(run+"/"+verdictName(r.verdict, h)) {
+		if c := carried(h); c != nil {
+			h = c[len(c)-1]
+		}
+	}
 	vars["head"] = h
 	vars["findings"] = str(get(lastV, "summary"))
 	rec := recordOf(name)

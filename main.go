@@ -379,10 +379,14 @@ func watch(repos []string) {
 					counted[k] = false
 				}
 			}
-			if counted[k] || !rerun(d) {
+			why := ""
+			if !counted[k] {
+				why = rerun(d)
+			}
+			if why == "" {
 				continue
 			}
-			say("changes requested on %s; running tend on %s", cat(d+"/pr"), a[1])
+			say("%s; running tend on %s", why, a[1])
 			again(a[0], a[1])
 		}
 		if os.Getenv("WATCH_ONCE") != "" {
@@ -427,16 +431,36 @@ func countIn(r string, sync bool) int {
 	return n
 }
 
-// Whether tend watch runs tend again on the attempt of run folder d: its pull
-// request is open with a change request on its head, from a person with write
-// access, not yet answered, and it waits for no person.
-func rerun(d string) bool {
+// Why tend watch runs tend again on the attempt of run folder d, or "": its
+// pull request is open with a change request on its head, from a person with
+// write access, not yet answered; or, where its flow's publish acts on an
+// approval (approves, written by its last run), the newest review on its head
+// by such a person that approves or requests changes approves; and it waits
+// for no person.
+func rerun(d string) string {
 	if !exists(d+"/pr") || !exists(d+"/attempt") || needsYou(d+"/status") || len(strings.Split(cat(d+"/attempt"), "\n")) < 2 {
-		return false
+		return ""
 	}
-	s, _ := quiet("gh", "pr", "view", cat(d+"/pr"), "--json", "state,headRefOid,reviews", "--jq",
-		`select(.state == "OPEN") | .headRefOid as $h | [.reviews[] | select(.state == "CHANGES_REQUESTED" and .commit.oid == $h and `+writer("authorAssociation")+`)] | last | .id // empty`)
-	return s != "" && !exists(d+"/answered-"+s)
+	p := cat(d + "/pr")
+	// An approval holds for a head carried from the approved one: carried-<head>
+	// names the head it came from, written once tend found it so in Git.
+	from := map[string]string{}
+	ms, _ := filepath.Glob(d + "/carried-*")
+	for _, m := range ms {
+		from[strings.TrimPrefix(filepath.Base(m), "carried-")] = cat(m)
+	}
+	c, _ := json.Marshal(from)
+	s, _ := quiet("gh", "pr", "view", p, "--json", "state,headRefOid,reviews", "--jq",
+		string(c)+` as $c | select(.state == "OPEN") | .headRefOid as $h | [.reviews[] | select((.state == "CHANGES_REQUESTED" or .state == "APPROVED") and `+writer("authorAssociation")+`)] |
+		(map(select(.state == "CHANGES_REQUESTED" and .commit.oid == $h)) | last | .id // ""), (map(select(.commit.oid == $h or .commit.oid == $c[$h])) | last | .state // "")`)
+	ls := strings.Split(s, "\n")
+	switch {
+	case ls[0] != "" && !exists(d+"/answered-"+ls[0]):
+		return "changes requested on " + p
+	case len(ls) > 1 && ls[1] == "APPROVED" && exists(d+"/approves"):
+		return p + " was approved"
+	}
+	return ""
 }
 
 // tend watch under a count: of repository r's attempts on this runner, at most
@@ -452,7 +476,7 @@ func keep(r string, n int, begin func(...string) chan struct{}, starts bool) {
 	busy := 0
 	ls, _ := filepath.Glob(lockFile(r, "*"))
 	for _, l := range ls {
-		if w := strings.TrimPrefix(l, lockFile(r, "")); w != "intake" && held(r, w) {
+		if w := strings.TrimPrefix(l, lockFile(r, "")); w != "intake" && w != "land" && held(r, w) {
 			busy++
 		}
 	}
@@ -462,10 +486,14 @@ func keep(r string, n int, begin func(...string) chan struct{}, starts bool) {
 		if free <= 0 {
 			return
 		}
-		if len(a) < 2 || lockFile(a[0], "") != lockFile(r, "") || !rerun(d) || held(a[0], a[1]) {
+		if len(a) < 2 || lockFile(a[0], "") != lockFile(r, "") || held(a[0], a[1]) {
 			continue
 		}
-		say("changes requested on %s; running tend on %s", cat(d+"/pr"), a[1])
+		why := rerun(d)
+		if why == "" {
+			continue
+		}
+		say("%s; running tend on %s", why, a[1])
 		begin(a[0], a[1])
 		free--
 	}
@@ -858,10 +886,23 @@ func setUp() {
 // choose nothing: never an update, never a model.
 // ponytail: trusts whatever repo the caller passed; the real tool should
 // answer only for repos the owner registered.
+var dialogs = []string{"Hooks can run outside the sandbox", "Yes, I trust this folder", "Yes, add it", "Trust and continue", "esc skip"}
+
+// The first of the dialogs tend knows that is on the agent's screen, or "".
+func dialogOn(name string) (string, string) {
+	screen := strings.Join(strings.Fields(term.read(name)), " ") // a hint or warning may wrap
+	for _, d := range dialogs {
+		if strings.Contains(screen, d) {
+			return d, screen
+		}
+	}
+	return "", screen
+}
+
 func start(name, kind string, fresh bool, args ...string) string {
 	p, err := term.start(name, kind, fresh, args)
 	for range 4 {
-		screen := strings.Join(strings.Fields(term.read(name)), " ") // a hint or warning may wrap
+		answered, screen := dialogOn(name)
 		switch {
 		case strings.Contains(screen, "Hooks can run outside the sandbox"):
 			stop("%s asks to review new or changed hooks, which run outside its sandbox once trusted; tend trusts none. Answer it in its pane, then run tend again", name)
@@ -884,10 +925,19 @@ func start(name, kind string, fresh bool, args ...string) string {
 			}
 			stop("%s did not start: %s", name, code)
 		}
-		// Codex comes out of its dialog as done, not idle.
-		err = nil
-		if _, why := term.wait(name, "60000", "idle", "done"); why != "" {
-			err = errors.New(why)
+		// Codex comes out of its dialog as done, not idle. Another dialog may
+		// follow at once, which no ready state comes before: it is answered
+		// without waiting for one.
+		err = errors.New("timeout")
+		for deadline := time.Now().Add(time.Minute); time.Now().Before(deadline); time.Sleep(500 * time.Millisecond) {
+			if st := term.status(name); st == "idle" || st == "done" {
+				err = nil
+				break
+			}
+			if d, _ := dialogOn(name); d != "" && d != answered {
+				err = nil
+				break
+			}
 		}
 	}
 	stop("%s did not start: its startup dialog would not take tend's answer", name)
@@ -1430,8 +1480,11 @@ func attempt() {
 		cd(repo)
 		proj := project()
 		target = str(get(proj, "target"))
+		was := gitQ("-C", repo, "rev-parse", target)
 		base = fetchTarget()
-		proj = project() // as the target now is, which the fetch may have moved
+		if gitQ("-C", repo, "rev-parse", target) != was {
+			proj = project() // as the target now is, which the fetch moved
+		}
 		loadFlow("build", base)
 		rec = itemRun(proj, cycle)
 		dir = str(get(rec, "checkout"))
@@ -1509,7 +1562,12 @@ func attempt() {
 		os.Rename(run+"/repaired", run+"/repair-asked")
 	}
 	write(run+"/attempt", repo+"\n"+cycle+"\n") // for tend watch
-	write(run+"/worktree", dir+"\n")            // for tidy and contained
+	if fl.Steps["publish"] != nil && fl.Steps["publish"].Next["approved"] != "" {
+		write(run+"/approves", "publish acts on an approval\n") // for tend watch
+	} else {
+		os.Remove(run + "/approves")
+	}
+	write(run+"/worktree", dir+"\n") // for tidy and contained
 	setUp()
 
 	// 2. The build flow: implement, review, repair, publish and requested
@@ -1525,9 +1583,15 @@ func attempt() {
 	}
 	verdict := parse(cat(v))
 	conclusion, h := str(get(verdict, "conclusion")), short(str(get(verdict, "head")))
-	term.notify("tend "+cycle+": "+conclusion, where+" at "+h+" is ready for you", "done")
-	stage("done", fmt.Sprintf("%s for %s at %s, verdict %s", conclusion, branch, h, v), "a person reviews "+where+" and decides whether to merge it")
-	say("done: %s, verdict %s", branch, v)
+	if landed != "" {
+		term.notify("tend "+cycle+": landed", landed+" is merged", "done")
+		stage("done", fmt.Sprintf("landed %s, %s at %s, verdict %s", landed, branch, short(git("rev-parse", "HEAD")), v), "nothing: it is merged")
+		say("done: landed %s, verdict %s", landed, v)
+	} else {
+		term.notify("tend "+cycle+": "+conclusion, where+" at "+h+" is ready for you", "done")
+		stage("done", fmt.Sprintf("%s for %s at %s, verdict %s", conclusion, branch, h, v), "a person reviews "+where+" and decides whether to merge it")
+		say("done: %s, verdict %s", branch, v)
+	}
 	var pretty bytes.Buffer
 	if json.Indent(&pretty, []byte(cat(v)), "", "  ") == nil {
 		fmt.Println(pretty.String())
@@ -1603,6 +1667,9 @@ func publishStep() string {
 		stop("could not read the reviews of %s", pr)
 	}
 	if req == nil || exists(run+"/answered-"+str(get(req, "node_id"))) {
+		if fl.Steps["publish"].Next["approved"] != "" && approved() {
+			return "approved"
+		}
 		return "ok"
 	}
 	rid := str(get(req, "id"))
@@ -1630,7 +1697,9 @@ func publishStep() string {
 // tend/review status on that head, so a later commit carries no passing
 // result. The PR and reviews are looked up on GitHub each run, never
 // remembered, so a rerun after any interruption repeats neither. Merging
-// stays a person's.
+// stays a person's unless the flow has a land step (landStep). A head carried
+// across a clean merge of the target gets its status here too, and keeps the
+// description written for the head it came from.
 func publish() {
 	if account == "" {
 		return
@@ -1653,8 +1722,11 @@ func publish() {
 			stop("could not open a pull request for %s; run tend again, and it looks for one before opening another", branch)
 		}
 		write(run+"/described", head+"\n")
-	} else if d := cat(run + "/described"); d != "" && d != head {
+	} else if d := cat(run + "/described"); d != "" && d != head && !slices.Contains(carried(head), d) {
 		redescribe(d)
+	}
+	if c := carried(head); c != nil {
+		carry(head, c)
 	}
 	// Every verdict of the attempt on a commit of the branch, oldest first, so
 	// a failure repaired within one run still shows.
@@ -1832,6 +1904,27 @@ func writer(field string) string {
 	return fmt.Sprintf(`(.%s | IN("OWNER", "MEMBER", "COLLABORATOR"))`, field)
 }
 
+// Whether the newest review that approves or requests changes, by a person
+// with write access, on the head or a head it is carried from, approves.
+func approved() bool {
+	hs := carried(head)
+	if hs == nil {
+		hs = []string{head}
+	}
+	q, _ := json.Marshal(hs)
+	s, err := out("gh", "api", reviewsAPI(), "--paginate", "--jq", fmt.Sprintf(`.[] | select((.state == "APPROVED" or .state == "CHANGES_REQUESTED") and (.commit_id | IN(%s[])) and %s) | .state + " " + .user.login`, q, writer("author_association")))
+	if err != nil {
+		stop("could not read the reviews of %s", pr)
+	}
+	ls := strings.Split(s, "\n")
+	last := strings.Fields(ls[len(ls)-1])
+	if len(last) == 2 && last[0] == "APPROVED" {
+		say("%s approved %s at %s", last[1], pr, short(head))
+		return true
+	}
+	return false
+}
+
 // The newest change request on the open PR's head by a person with write
 // access, or nothing; it says whose requests on that head it leaves.
 func requested() (any, error) {
@@ -1849,4 +1942,245 @@ func requested() (any, error) {
 		return nil, err
 	}
 	return parse(s), nil
+}
+
+// ---- landing
+
+var landed string // the pull request this run found merged at land
+
+// The verdict file a step names for head h, in the run folder.
+func verdictName(name, h string) string { return fill(strings.ReplaceAll(name, "{head}", h)) }
+
+// Whether head h passed review: each verdict the flow's steps wrote for it is
+// valid and a success, and there is one.
+func passed(h string) bool {
+	n := 0
+	for _, s := range fl.Steps {
+		r, _ := parseResult(s.Result)
+		if f := run + "/" + verdictName(r.verdict, h); r.verdict != "" && exists(f) {
+			if !valid(f, h) || get(parse(cat(f)), "conclusion") != "success" {
+				return false
+			}
+			n++
+		}
+	}
+	return n > 0
+}
+
+// The heads h is carried through, h first and the head that passed review
+// last, when h is a merge commit whose first parent passed review or is
+// itself carried, whose second parent is a commit of the target, and whose
+// tree is exactly Git's merge of the two; or nil. Read from Git, never from a
+// mark an agent could write.
+func carried(h string) []string {
+	p := strings.Fields(gitQ("rev-list", "--parents", "-n", "1", h))
+	if len(p) != 3 || !ok("git", "merge-base", "--is-ancestor", p[2], base) {
+		return nil
+	}
+	t, err := quiet("git", "merge-tree", "--write-tree", p[1], p[2])
+	if err != nil || strings.SplitN(t, "\n", 2)[0] != gitQ("rev-parse", h+"^{tree}") {
+		return nil
+	}
+	if passed(p[1]) {
+		return []string{h, p[1]}
+	}
+	if c := carried(p[1]); c != nil {
+		return append([]string{h}, c...)
+	}
+	return nil
+}
+
+// The tend/review status on carried head h, set once: success, carried from
+// the head that passed review. No review is posted and no reviewer asked.
+func carry(h string, c []string) {
+	mark := run + "/carried-" + h
+	if exists(mark) {
+		return
+	}
+	from := c[len(c)-1]
+	if _, err := out("gh", "api", "repos/{owner}/{repo}/statuses/"+h, "-f", "state=success", "-f", "context=tend/review",
+		"-f", "description=Carried from "+short(from)+", which passed independent review, by a clean merge of "+target, "-f", "target_url="+pr); err != nil {
+		stop("could not set the tend/review status on %s", short(h))
+	}
+	write(mark, from+"\n")
+}
+
+// One landing at a time for each repository on this runner: the lock, held
+// until it is closed or tend exits.
+func landingLock() *os.File {
+	f := lockFile(repo, "land")
+	l, err := os.OpenFile(f, os.O_WRONLY|os.O_CREATE, 0o644)
+	if err != nil {
+		stop("could not take the landing lock %s", f)
+	}
+	if syscall.Flock(int(l.Fd()), syscall.LOCK_EX|syscall.LOCK_NB) != nil {
+		stage("working", fmt.Sprintf("%s waits to land: another tend lands a candidate of %s", pr, repo), "tend lands it once that one is done")
+		say("waiting to land %s: another tend lands a candidate of %s", pr, repo)
+		for err = syscall.EINTR; err == syscall.EINTR; {
+			err = syscall.Flock(int(l.Fd()), syscall.LOCK_EX)
+		}
+		if err != nil {
+			stop("could not take the landing lock %s", f)
+		}
+	}
+	return l
+}
+
+// The checks GitHub reports on commit h, check runs and commit statuses
+// alike: each its name, pass, fail or pending, and its link.
+func checksOn(h string) [][]string {
+	runs, err := out("gh", "api", "repos/{owner}/{repo}/commits/"+h+"/check-runs", "--paginate", "--jq",
+		`.check_runs[] | [.name, (if .status != "completed" then "pending" elif (.conclusion | IN("success", "neutral", "skipped")) then "pass" else "fail" end), .html_url // ""] | @tsv`)
+	if err != nil {
+		stop("could not read the check runs on %s", short(h))
+	}
+	sts, err := out("gh", "api", "repos/{owner}/{repo}/commits/"+h+"/status", "--paginate", "--jq",
+		`.statuses[] | [.context, (if .state == "pending" then "pending" elif .state == "success" then "pass" else "fail" end), .target_url // ""] | @tsv`)
+	if err != nil {
+		stop("could not read the statuses on %s", short(h))
+	}
+	var cs [][]string
+	for _, l := range strings.Split(runs+"\n"+sts, "\n") {
+		if f := strings.Split(l, "\t"); len(f) == 3 {
+			cs = append(cs, f)
+		}
+	}
+	return cs
+}
+
+// How the checks on head h stand: failed, with the failed checks' names and
+// links in {checks}; passed; or "" while one is unfinished or none but
+// tend/review is reported, which stops for a person once the wait is over.
+func checked(h string, over bool) string {
+	var failed, pending []string
+	ci := 0
+	for _, c := range checksOn(h) {
+		if c[0] != "tend/review" {
+			ci++
+		}
+		switch c[1] {
+		case "fail":
+			failed = append(failed, c[0]+" "+c[2])
+		case "pending":
+			pending = append(pending, c[0])
+		}
+	}
+	switch {
+	case len(failed) > 0:
+		vars["checks"] = "The failed checks, each with its link: " + strings.Join(failed, "; ") + "."
+		say("checks failed on %s: %s", short(h), strings.Join(failed, "; "))
+		return "failed"
+	case ci > 0 && len(pending) == 0:
+		return "passed"
+	case over && ci == 0:
+		stop("%s at %s has no check but tend/review, so tend lands nothing: a project lands only with CI on its pull requests", branch, short(h))
+	case over:
+		stop("the checks %s on %s at %s were still unfinished after %sms, so tend landed nothing", and(pending), branch, short(h), timeout())
+	}
+	return ""
+}
+
+// The build flow's land: a head that passed review, or is carried from one
+// that did, with its pull request open, landed one at a time: the target
+// merged in when it moved, never by a forced push, every check on the head
+// waited for, then the pull request squash-merged at exactly that head by
+// the publishing account, its title and number the subject and its
+// description the body.
+func landStep() string {
+	if pr == "" {
+		stop("there is no pull request to land: the repository's origin is not listed in %s/publish", state)
+	}
+	h := git("rev-parse", "HEAD")
+	if !passed(h) && carried(h) == nil {
+		stop("%s at %s did not pass review, so tend lands nothing", branch, short(h))
+	}
+	token()
+	l := landingLock()
+	defer l.Close()
+	ms, _ := strconv.Atoi(timeout())
+	wait := time.Duration(ms) * time.Millisecond
+	poll := min(20*time.Second, wait/4)
+	until := time.Now().Add(wait)
+	// Each round reads the pull request, the head and the target afresh, so a
+	// merge by a person or a target that moved is seen while checks run.
+	for round := 0; ; round++ {
+		if round > 0 {
+			time.Sleep(poll)
+		}
+		s, err := out("gh", "pr", "view", pr, "--json", "state,headRefOid,baseRefName,number,title,body")
+		if err != nil {
+			stop("could not read %s", pr)
+		}
+		x := parse(s)
+		switch str(get(x, "state")) {
+		case "MERGED":
+			landed = pr
+			say("%s is merged", pr)
+			return "ok"
+		case "OPEN":
+		default:
+			stop("%s is closed, so tend lands nothing", pr)
+		}
+		if b := str(get(x, "baseRefName")); b != target {
+			stop("%s merges into %s, not %s, so tend lands nothing", pr, b, target)
+		}
+		h = git("rev-parse", "HEAD")
+		if o := str(get(x, "headRefOid")); o != h {
+			stop("%s's head is %s, not %s's %s, so tend lands nothing", pr, short(o), branch, short(h))
+		}
+		fetchTarget()
+		if !ok("git", "merge-base", "--is-ancestor", base, "HEAD") {
+			stage("working", fmt.Sprintf("merging %s into %s", base, branch), "tend waits for the merged head's checks, then lands it")
+			if _, err := both("git", "merge", "--no-ff", "--no-edit", "-m", "Merge "+target+" into "+branch, base); err != nil {
+				quiet("git", "merge", "--abort")
+				say("%s does not merge cleanly into %s; merged nothing", base, branch)
+				return "conflict"
+			}
+			if !pushAs(branch) {
+				stop("could not push %s to origin as %s; if it has commits this checkout lacks, look at them, then run tend again", branch, account)
+			}
+			h = git("rev-parse", "HEAD")
+			if c := carried(h); c != nil {
+				carry(h, c)
+			}
+			say("merged %s into %s at %s", base, branch, short(h))
+			until = time.Now().Add(wait)
+			round = -1 // the new head's checks are read at once
+			continue
+		}
+		switch checked(h, time.Now().After(until)) {
+		case "failed":
+			return "failed"
+		case "":
+			stage("working", fmt.Sprintf("waiting for the checks on %s at %s", branch, short(h)), "tend squash-merges "+pr+" once every check passes")
+			continue
+		}
+		stage("working", fmt.Sprintf("landing %s at %s", pr, short(h)), "GitHub squash-merges it")
+		// GitHub's merge itself, never gh pr merge, which may queue the pull
+		// request or defer the merge and refuses a blocked one in words of its own.
+		req, _ := json.Marshal(map[string]any{"sha": h, "merge_method": "squash",
+			"commit_title": fmt.Sprintf("%s (#%s)", str(get(x, "title")), str(get(x, "number"))), "commit_message": str(get(x, "body"))})
+		var refused bytes.Buffer
+		in := string(req)
+		m, err := sh(&in, &refused, false, "gh", "api", "-X", "PUT", "repos/{owner}/{repo}/pulls/"+str(get(x, "number"))+"/merge", "--input", "-", "--jq", ".merged")
+		if err == nil && m == "true" {
+			landed = pr
+			say("landed %s at %s", pr, short(h))
+			return "ok"
+		}
+		why := strings.Join(strings.Fields(refused.String()), " ")
+		if err == nil {
+			stop("GitHub did not merge %s: it answered merged %s", pr, m)
+		}
+		fetchTarget()
+		switch {
+		case !ok("git", "merge-base", "--is-ancestor", base, "HEAD"):
+			say("GitHub refused to merge %s, as %s moved: %s", pr, target, why)
+			round = -1 // merged in at once
+		case regexp.MustCompile(`(?i)required status check.*(expected|pending|in progress)`).MatchString(why) && time.Now().Before(until):
+			say("GitHub refused to merge %s for a check it still waits for: %s", pr, why)
+		default:
+			stop("GitHub refused to merge %s: %s", pr, why)
+		}
+	}
 }

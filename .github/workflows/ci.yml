@@ -13,10 +13,12 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # On macOS, where tend runs: the Go tests drive the binary with real Git and
-  # Grove and stand-ins in testdata/bin for herdr, rex, gh and curl.
+  # The Go tests drive the binary with real Git and Grove and stand-ins in
+  # testdata/bin for herdr, rex, gh and curl. They start tens of thousands of
+  # processes, which Linux does several times faster than macOS: pull
+  # requests run them on Linux, and pushes to main on macOS, where tend runs.
   check:
-    runs-on: macos-latest
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'macos-latest' }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -27,9 +29,9 @@ jobs:
           go-version-file: go.mod
       - name: Install Grove
         run: |
-          curl -fsSL https://raw.githubusercontent.com/mascah/grove/main/install.sh | sh -s -- v0.14.0
+          curl -fsSL https://raw.githubusercontent.com/mascah/grove/main/install.sh | sh -s -- v0.15.0
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
       - run: go vet ./...
       - run: go test ./...
-      - run: brew install shellcheck && shellcheck install.sh
+      - run: command -v shellcheck >/dev/null || brew install shellcheck; shellcheck install.sh
