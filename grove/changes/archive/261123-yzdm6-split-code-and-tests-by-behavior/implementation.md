@@ -148,8 +148,7 @@ with the engine in `flow_run.go`.
 
 Status: done
 
-- `tend_test.go` is renamed `scenario_test.go` (so Git shows it as the same
-  file) and keeps the fixtures every scenario shares, `TestMain`, `TestTend`
+- `tend_test.go` is renamed `scenario_test.go` with `git mv` and keeps the fixtures every scenario shares, `TestMain`, `TestTend`
   and the `version` and `usage` scenarios.
 - The one `scenarios` list became one list for each test file, each scenario
   kept in its order within its list: `attemptScenarios` (36),
@@ -195,4 +194,10 @@ reference scan made to place declarations.
 
 ## Scenarios
 
+None: the change has no change specs, as it changes no behavior. That
+behavior did not change is shown by `go test -count=1 -v ./...` on the final
+tree: passed, reporting the same 175 test and scenario names as `6ae5060`.
+
 ## Reconciliation
+
+None: the change has no change specs, so no maintained spec changes.
