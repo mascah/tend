@@ -61,6 +61,21 @@ and an issue attempt's run folder is named by `issueRun`. `contained` and
 file is complete) stayed in `main.go`, being used by publication, landing and
 flows alike.
 
+### T-03 — Watch and status have their own files
+
+Status: done
+
+- `watch.go`: `needsYou`, `watch`, `countIn`, `rerun`, `stopped`, `keep`,
+  `unattended`.
+- `status.go`: `overview`, `status`.
+- Shared and kept in `main.go`: `working` (watch's `stopped` and `status`),
+  `runDirs` (watch, `keep` and `overview`), `syncTarget` (`countIn` and
+  `fetchTarget`), `groveIn`, `groveJSON`, `project`, `itemRun`, `workState`.
+- Edit beyond moves: none.
+- Checks: `go build -o bin/tend .` succeeded; `go test -count=1 ./...`
+  passed; the reference scan found no `main.go` declaration used only by
+  `watch.go` or only by `status.go`.
+
 ## Scenarios
 
 ## Reconciliation
