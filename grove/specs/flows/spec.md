@@ -6,7 +6,7 @@ they differ, keep the rule and record the difference under "Known discrepancies"
 
 ## Purpose
 
-An attempt goes through a flow of steps, `build` or `propose`, built into tend or replaced by the project's `tend/flow.yaml` on its target branch. A step is an agent given a prompt, a result tend checks, and what each outcome of that result allows next. Owners rely on this to change how work flows through tend in a project by a pull request, with no change to tend.
+An attempt goes through a flow of steps, `build` or `propose`, built into tend or replaced by the project's `tend/flow.yaml` on its target branch. A step is an agent given a prompt, a result tend checks, and what each outcome of that result allows next. Owners rely on this to change how work flows through tend in a project by a pull request, with no change to tend. An agent is gone when the terminal holds no pane for it; an agent that is there may be working, idle, blocked or in a state tend does not know.
 
 ## Boundaries
 
@@ -120,9 +120,10 @@ step gives nothing for shall stop for a person.
 ### Requirement: A step is asked no more often than its limit
 
 Where a step has a limit, the system shall prompt it at most that many times
-in one attempt. When the flow reaches it again, the system shall not prompt
-it, and shall go to what the step gives for the outcome `spent`, or stop for
-a person where it gives nothing.
+in one attempt, not counting a second ask of a step whose agent was gone, as
+"Any step recovers without being prompted twice" says. When the flow reaches
+it again, the system shall not prompt it, and shall go to what the step gives
+for the outcome `spent`, or stop for a person where it gives nothing.
 
 #### Scenario: A second repair
 
@@ -140,15 +141,26 @@ a person where it gives nothing.
 - THEN one repair is asked, and tend exits 0 with the failed verdict, as the
   review spec's "One repair" says
 
+#### Scenario: A repair asked once more
+
+- GIVEN the built-in `build` flow, tend killed after asking the repair, no
+  commit since, the implementer's pane closed, and a reviewer that fails
+  both heads as actionable
+- WHEN the owner runs tend again
+- THEN the repair is asked a second time though its limit is 1, the head it
+  makes is reviewed, and no third repair is asked
+
 ### Requirement: Any step recovers without being prompted twice
 
 When tend is about to prompt a step, the system shall first record in the run
 folder that the step was asked, and at which head. On a later run, an agent
 still working on that prompt shall be waited for; a step recorded as asked
-whose result is there shall be taken as done; and a step recorded as asked
-with no result and no agent working shall stop for a person on every run,
-until the person supplies the result or deletes the record to have it asked
-once more.
+whose result is there shall be taken as done; a step recorded as asked with
+no result whose agent is gone shall be asked once more in a new session, that
+second ask recorded too and not counted toward the step's limit; and a step recorded as asked with no result whose
+agent is there and not working, or that has already been asked once more,
+shall stop for a person on every run, until the person supplies the result or
+deletes the record to have it asked once more.
 
 #### Scenario: tend is killed during a project's own step
 
@@ -160,10 +172,26 @@ once more.
 
 #### Scenario: The outcome of a step is unknown
 
-- GIVEN `check` recorded as asked, no result, and its agent not working
+- GIVEN `check` recorded as asked, no result, and its agent there and not
+  working
 - WHEN the owner runs tend again
 - THEN tend stops with exit 3 saying `check` was asked and left nothing, and
   prompts no agent
+
+#### Scenario: The agent is gone
+
+- GIVEN `check` recorded as asked, no result, and its agent's pane closed
+- WHEN the owner runs tend again
+- THEN `check` is prompted a second time, in a new session, its result is
+  taken, and the flow goes on
+
+#### Scenario: Gone a second time
+
+- GIVEN `check` asked once more because its agent was gone, still no result,
+  and its agent's pane closed again
+- WHEN the owner runs tend again
+- THEN tend stops with exit 3 saying `check` was asked twice and left
+  nothing, and prompts no agent
 
 ### Requirement: Publishing is tend's own and a flow places it
 
@@ -308,3 +336,4 @@ None.
 - [261121-gapde](../../changes/archive/261121-gapde-run-steps-from-a-flow-file/) Run steps from a flow file
 - [261122-9vbmc](../../changes/archive/261122-9vbmc-several-attempts-at-once/) Several attempts at once
 - [261122-rpkqa](../../changes/archive/261122-rpkqa-land-reviewed-candidates-one-at-a-time/) Land reviewed candidates one at a time
+- [261122-hjhmn](../../changes/archive/261122-hjhmn-recover-with-no-one-there/) Recover with no one there

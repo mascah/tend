@@ -220,10 +220,12 @@ association owner, member or collaborator.
 If the implementer commits nothing for a requested change but writes its
 reply, then the system shall post the reply once as a comment on the pull
 request by the account, saying tend will not ask again, record
-`answered-<review node id>`, review nothing again and exit 0; and if it
-neither commits nor replies and is not working, the system shall stop for a
+`answered-<review node id>`, review nothing again and exit 0; if it neither
+commits nor replies and is there and not working, the system shall stop for a
 person on every run until a person commits or deletes `request-<review id>`,
-which has the request asked once more.
+which has the request asked once more; and if it neither commits nor replies
+and is gone, the system shall ask the request once more of a new session, as
+the flows spec's "Any step recovers without being prompted twice" says.
 
 #### Scenario: Out of scope
 
@@ -243,6 +245,14 @@ which has the request asked once more.
   on them, without asking again; once a person deletes `request-<review id>`,
   the next run asks a second time and passes
 
+#### Scenario: The implementer is gone
+
+- GIVEN tend was killed after asking a requested change, the implementer
+  committed nothing and wrote no reply, and its pane is closed
+- WHEN the owner runs tend again
+- THEN the request is asked once more of a new implementer session, and the
+  new head is reviewed and published
+
 ## Known discrepancies
 
 None recorded.
@@ -256,3 +266,4 @@ None.
 - Written when tend adopted Grove (2026-11-16).
 - [261122-fh9h2](../../changes/archive/261122-fh9h2-requested-changes-count-only-from-write-access/) Requested changes count only from people with write access
 - [261122-rpkqa](../../changes/archive/261122-rpkqa-land-reviewed-candidates-one-at-a-time/) Land reviewed candidates one at a time
+- [261122-hjhmn](../../changes/archive/261122-hjhmn-recover-with-no-one-there/) Recover with no one there

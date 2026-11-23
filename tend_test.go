@@ -1449,19 +1449,19 @@ var scenarios = []scenario{
 	{"watch-killed", func(s *sc) {
 		s.project("main", false)
 		bg := s.background("IMPL_SLEEP=30")
-		w := s.watch()
+		w := s.watchrepo()
 		s.check("watch runs nothing for an attempt a tend is on", s.count(w.err, `running tend`) == 0)
 		killed(bg)
 		st := s.cat(s.runDir() + "/status")
 		s.write(s.runDir()+"/status", "x needs-you: something\nnext: a person\n")
-		w = s.watch()
+		w = s.watchrepo()
 		s.check("nor for one that needs a person", s.count(w.err, `running tend`) == 0)
 		s.write(s.runDir()+"/status", st+"\n")
-		w = s.watch()
+		w = s.watchrepo()
 		s.check("after a kill, watch says it runs the attempt again", w.said(`tend stopped on attempt [^ ]* before it finished; running tend on 261114-k0000`))
 		s.check("tend waits for the implementer, prompted once in all", s.prompts("/grove-implement") == 1)
 		s.check("and the head is reviewed", s.reviews() == 1 && strings.Contains(s.status(), "done: success"))
-		w = s.watch()
+		w = s.watchrepo()
 		s.check("a finished attempt is not run again", s.count(w.err, `running tend`) == 0)
 	}},
 	{"watch-killed-agents-gone", func(s *sc) {
@@ -1471,7 +1471,7 @@ var scenarios = []scenario{
 			syscall.Kill(pid, syscall.SIGKILL)
 		}
 		s.gone("impl-")
-		w := s.watch()
+		w := s.watchrepo()
 		s.check("with the agents gone too, watch runs the attempt again", w.said(`running tend on 261114-k0000`))
 		s.check("the implementer is asked once more in a new session", s.prompts("/grove-implement") == 2 && s.count(s.log(), `^agent start impl-`) == 2)
 		s.check("and the head is reviewed", s.reviews() == 1 && strings.Contains(s.status(), "done: success"))
@@ -1482,7 +1482,7 @@ var scenarios = []scenario{
 		s.git(s.repo, "worktree", "add", "-q", s.dir+"/other", "-b", "other")
 		s.sh(s.dir+"/other", "grove", "claim", "--retry", "261114-k0000")
 		s.check("the cycle is claimed again from another checkout", s.records() == 2)
-		w := s.watch()
+		w := s.watchrepo()
 		s.check("watch runs nothing for the earlier attempt", s.count(w.err, `running tend`) == 0 && s.prompts("/grove-implement") == 1)
 	}},
 	{"watch-at-once-killed", func(s *sc) {

@@ -173,11 +173,14 @@ record `linked`.
 
 The system shall write `asked` and `followed` in the intake folder just
 before sending the drafting and the follow-up prompts, never sending either
-again while its mark exists; a drafter still working shall be waited for;
-and if the follow-up was asked and the drafter neither committed a draft nor
-wrote `declined` and is not working, the system shall stop for a person on
-every pass until a person commits the draft, writes `declined`, or deletes
-`followed`.
+again while its mark exists, but for a follow-up whose drafter is gone; a
+drafter still working shall be waited for; if the follow-up was asked and the
+drafter neither committed a draft nor wrote `declined` and is there and not
+working, the system shall stop for a person on every pass until a person
+commits the draft, writes `declined`, or deletes `followed`; and if the
+follow-up was asked, left neither, and the drafter is gone, the system shall
+ask it once more of a new session, as the flows spec's "Any step recovers
+without being prompted twice" says.
 
 #### Scenario: The follow-up stalled
 
@@ -194,6 +197,14 @@ every pass until a person commits the draft, writes `declined`, or deletes
 - THEN it waits for the drafter, has it commit, opens the pull request, and
   asked for the draft once
 
+#### Scenario: The drafter is gone
+
+- GIVEN a pass was killed after asking the follow-up, the drafter committed
+  nothing and wrote no `declined`, and its pane is closed
+- WHEN the owner runs `tend propose` again
+- THEN the follow-up is asked once more of a new drafter session, and the
+  pull request opens or the request is told why there is none
+
 ## Known discrepancies
 
 None recorded.
@@ -205,3 +216,4 @@ None.
 ## History
 
 - Written when tend adopted Grove (2026-11-16).
+- [261122-hjhmn](../../changes/archive/261122-hjhmn-recover-with-no-one-there/) Recover with no one there

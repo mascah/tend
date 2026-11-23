@@ -47,6 +47,18 @@ Check: T-01's `flow.go`, `main.go`, `flow_test.go` and `tend_test.go` changed
 on main since the change's base in 261122-rpkqa (landing) and the two changes
 before it. I built on the files as main now has them. Landing's `land` step
 has no agent and prompts none, so the second ask never applies to it.
+Check: Grove's `check` found the change stale because its tasks' files had
+changed on main since its base. None of the five requirements it modifies had
+changed on main since that base. The tasks still name the right files and
+describe what main now holds. So the revision, made through Grove's propose
+instructions, only moved `base` in `.grove.yaml` to main at 0da41b8. No
+task's result changed.
+Found: the attempts spec's "Recover without prompting twice" says a prompt
+that timed out or stalled counts as possibly delivered, "so no rerun sends it
+again". This change does not modify the attempts spec. With this change, a
+rerun does send that prompt again, to a new session, when the agent's pane is
+gone, as the flows spec now says. I saw this while reconciling the specs. The
+attempts spec should say the same as the flows spec. I left it unchanged.
 
 ### T-02 — Watch runs again an attempt whose tend died
 
@@ -76,6 +88,11 @@ Check: the first version checked `stopped` before the pull request's reasons.
 an attempt whose tend was also killed. So the pull request's reasons now come
 first and `stopped` is the fallback. The change does not say which reason
 watch gives when both hold.
+Check: watch runs again an attempt whose tend died for every run folder on
+the runner, including those of repositories it was not given (`tend watch`
+with no repository). Requested changes already worked that way. The new
+requirement speaks only of a repository it was given, and its scenarios
+(`tend watch <repo>`) are the tests.
 Check: T-02's `main.go` and `tend_test.go` changed on main since the change's
 base, in landing (261122-rpkqa) and several attempts at once (261122-9vbmc).
 Those changes brought `keep` and its count. This task builds on them: the
@@ -134,3 +151,10 @@ reading it against the task's acceptance; every point it lists is stated.
 - watch-and-status "An attempt retried since": tend_test.go TestTend/watch-killed-retried, passed
 
 ## Reconciliation
+
+- flows: applied to grove/specs/flows/spec.md, with the change spec's
+  definition of a gone agent added to its Purpose
+- intake: applied to grove/specs/intake/spec.md
+- publication: applied to grove/specs/publication/spec.md
+- review: applied to grove/specs/review/spec.md
+- watch-and-status: applied to grove/specs/watch-and-status/spec.md
