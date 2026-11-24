@@ -27,7 +27,7 @@ var intakeScenarios = []scenario{
 		r := s.propose()
 		s.check("tend propose exits 0", r.code == 0)
 		s.check("each labelled issue is drafted once", s.drafts() == 2)
-		s.check("unattended, from the issue's words", s.has(s.log(), `^`+regexp.QuoteMeta("agent prompt prop-1 /grove-propose --unattended Request 1. Make thing 1 better. (GitHub issue https://example.test/issues/1)")))
+		s.check("unattended, from the issue's words", s.has(s.log(), `^`+regexp.QuoteMeta("agent prompt prop-1-"+s.cksum(s.repo)+" /grove-propose --unattended Request 1. Make thing 1 better. (GitHub issue https://example.test/issues/1)")))
 		s.check("an unlabelled issue is left alone", !exists(s.prOf("2")))
 		s.check("a pull request per draft, by the account", s.cat(s.prOf("1")+".by")+" "+s.cat(s.prOf("3")+".by") == "the-bot the-bot")
 		s.check("from the issue's branch, onto the target", s.has(s.log(), `^gh pr create --base main --head tend/issue-1 `))
@@ -170,5 +170,23 @@ var intakeScenarios = []scenario{
 		s.check("naming the first pass's pid", r.said(fmt.Sprintf("pid %d", p.c.Process.Pid)))
 		release()
 		s.check("the first finishes", p.wait().code == 0 && s.drafts() == 1)
+	}},
+	{"propose-same-number", func(s *sc) {
+		// Two repositories with an issue #1 each, in one Herdr: the second is
+		// drafted while the first's drafter is still open.
+		s.project("main", true)
+		s.allow()
+		s.issues("1:tend")
+		s.check("the first repository's issue is drafted", s.propose().code == 0 && s.drafts() == 1)
+		o := s.other()
+		o.project("main", true)
+		o.allow()
+		o.issues("1:tend")
+		r := o.propose()
+		a, b := "prop-1-"+s.cksum(s.repo), "prop-1-"+o.cksum(o.repo)
+		s.check("each repository's drafter has its own name", a != b && s.has(s.log(), "^agent start "+a+" "))
+		s.check("the second repository starts its own drafter", o.has(o.log(), "^agent start "+b+" "))
+		s.check("and prompts it, not the first's", o.count(o.log(), "^agent prompt "+b+" /grove-propose") == 1 && !o.has(o.log(), "^agent prompt "+a+" "))
+		s.check("its proposal is opened", r.code == 0 && exists(o.prOf("1")))
 	}},
 }

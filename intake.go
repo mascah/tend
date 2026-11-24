@@ -113,7 +113,9 @@ func draft(prefix string, r request) {
 	write(run+"/worktree", dir+"\n")
 	setUp()
 	cd(dir)
-	impl = "prop-" + r.agent
+	// Named after the repository too, as an issue's attempt is: Herdr finds an
+	// agent by its name alone, and two repositories can have an issue #1.
+	impl = fmt.Sprintf("prop-%s-%d", r.agent, cksum([]byte(repo)))
 
 	// The propose flow: the drafter drafts, then commits the draft or says why
 	// there is none, each asked once, as the built-in flow says or the

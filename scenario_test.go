@@ -413,6 +413,18 @@ func (s *sc) creates() int            { return s.count(s.log(), `^gh pr create`)
 func (s *sc) drafts() int             { return s.count(s.log(), `^agent prompt prop-[^ ]* /grove-propose`) }
 func (s *sc) follows() int            { return s.count(s.log(), `^agent prompt prop-[^ ]* Without asking anyone`) }
 
+// A second repository on the same machine, with its own GitHub and tend
+// state, in the same Herdr: the agents open in s are open for it too.
+func (s *sc) other() *sc {
+	d := s.dir + "/other"
+	o := &sc{t: s.t, dir: d, repo: d + "/repo", st: d + "/state", ts: d + "/tend"}
+	open, _ := filepath.Glob(s.st + "/agent-*")
+	for _, a := range open {
+		o.touch(o.st + "/" + filepath.Base(a))
+	}
+	return o
+}
+
 // An agent's state in the stand-ins, by the prefix of its name.
 func (s *sc) agent(status, prefix string) {
 	a := filepath.Base(glob(s.st + "/agent-" + prefix + "*"))
