@@ -1,0 +1,5 @@
+title: "An intake drafter is named after its request and its repository"
+created: 2026-11-24T04:54:01Z
+description: tend propose names its drafter prop-<n>-<cksum of the repository's path>, where today prop-<n> lets a pass on one repository prompt another repository's drafter of the same issue number
+schema: bugfix
+base: 63fc1a0fcd5a1b8d983e0944b18dbececb34102f
