@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.4.0](https://github.com/mascah/tend/compare/v0.3.0...v0.4.0) (2026-11-24)
+
+
+### Features
+
+* build an approved change by name (261122-nh8aa) ([#22](https://github.com/mascah/tend/issues/22)) ([6bd2c29](https://github.com/mascah/tend/commit/6bd2c29ccea03982619bd655f525b9a294a2694c))
+* land reviewed candidates one at a time (261122-rpkqa) ([#27](https://github.com/mascah/tend/issues/27)) ([0da41b8](https://github.com/mascah/tend/commit/0da41b84dee31414169a35948c60af30f8a6af3e))
+* recover with no one there (261122-hjhmn) ([#29](https://github.com/mascah/tend/issues/29)) ([43758c3](https://github.com/mascah/tend/commit/43758c3790079dd6f1a7a81a4c93d7e68ff1292c))
+* run steps from a flow file ([#15](https://github.com/mascah/tend/issues/15)) ([88e3361](https://github.com/mascah/tend/commit/88e3361455779fe4c1115662e1a5a506bc60903b))
+* several attempts at once (261122-9vbmc) ([#23](https://github.com/mascah/tend/issues/23)) ([7c6b272](https://github.com/mascah/tend/commit/7c6b272565e8bd18b799710f80a534043fbbef9b))
+* skip startup notices (261121-m9bxm) ([#18](https://github.com/mascah/tend/issues/18)) ([966731b](https://github.com/mascah/tend/commit/966731b72dae7553bcbd68c8345915867561dbf4))
+
+
+### Bug Fixes
+
+* answer the add-dir dialog under rex without waiting a minute ([#13](https://github.com/mascah/tend/issues/13)) ([d6b3e7e](https://github.com/mascah/tend/commit/d6b3e7ec4df2e870719880016948434e36a4bced))
+* requested changes count only from people with write access (261122-fh9h2) ([#21](https://github.com/mascah/tend/issues/21)) ([b9b2d31](https://github.com/mascah/tend/commit/b9b2d31be26b25c90fd49fb0253375ee673dc3b5))
+
 ## [0.3.0](https://github.com/mascah/tend/compare/v0.2.1...v0.3.0) (2026-11-21)
 
 
