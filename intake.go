@@ -1,0 +1,200 @@
+package main
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"slices"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+)
+
+// tend propose <repo>: one pass of intake from the repository's GitHub issues
+// and the Jira projects mapped to it. Each open request labelled tend, oldest
+// first, becomes a Grove change drafted by Claude with no one in the session,
+// on branch tend/issue-<n> or tend/jira-<KEY>, opened as a pull request by the
+// publishing account; or, when no change can be drafted from it, a comment on
+// it saying why, and the label taken off, so it is not tried again until a
+// person puts it back. The request's number or key is its identity: a pull
+// request from its branch, in any state, means it is not drafted again. A
+// handoff is finished when the run folder records linked: a folder with a pull
+// request and no linked is completed on every pass, whatever the cap or the
+// request's label. At most CAP (default 5) proposal pull requests stay open
+// per repository. Each prompt is marked just before it goes, as in an attempt,
+// so none is sent twice or skipped.
+func propose() {
+	cd(repo)
+	account = accountOf()
+	if account == "" {
+		o, err := quiet("git", "remote", "get-url", "origin")
+		if err != nil {
+			o = repo + " has no origin; it"
+		}
+		stop("%s is not listed in %s/publish, so tend takes no requests from it", o, state)
+	}
+	token()
+	proj := project()
+	target, root = str(get(proj, "target")), str(get(proj, "root"))
+	settingUp()
+	base = fetchTarget()
+	loadFlow("propose", base)
+	tidy()
+	setUp()
+	slug, err := out("gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner")
+	if err != nil {
+		stop("gh cannot see %s's repository", repo)
+	}
+	prefix := state + "/intake/" + strings.ReplaceAll(slug, "/", "_") + "-"
+	limit, err := strconv.Atoi(os.Getenv("CAP"))
+	if err != nil {
+		limit = 5
+	}
+	origin := gitQ("remote", "get-url", "origin")
+
+	// Handoffs a stopped pass left unfinished.
+	folders, _ := filepath.Glob(prefix + "*")
+	for _, f := range folders {
+		rest := strings.TrimPrefix(f, prefix)
+		if strings.Contains(rest, ".declined-") || !exists(f+"/pr") || exists(f+"/linked") {
+			continue
+		}
+		if k, isJ := strings.CutPrefix(rest, "jira-"); isJ {
+			draft(prefix, jiraGet(k))
+		} else {
+			draft(prefix, ghRequest(rest, "title,body,url"))
+		}
+	}
+
+	type pending struct {
+		branch string
+		get    func() request
+	}
+	var todo []pending
+	nums, _ := out("gh", "issue", "list", "--label", "tend", "--state", "open", "--json", "number", "--jq", "sort_by(.number) | .[].number")
+	for _, num := range strings.Fields(nums) {
+		todo = append(todo, pending{"tend/issue-" + num, func() request { return ghRequest(num, "title,body,url") }})
+	}
+	for _, m := range jiraMaps() {
+		if m.origin != origin {
+			continue
+		}
+		for _, x := range jiraSearch(m, fmt.Sprintf(`project = "%s" AND labels = "tend" AND statusCategory != Done ORDER BY created ASC`, m.project)) {
+			todo = append(todo, pending{"tend/jira-" + str(get(x, "key")), func() request { return jiraRequest(m, x) }})
+		}
+	}
+	for _, t := range todo {
+		if s, _ := out("gh", "pr", "list", "--head", t.branch, "--state", "all", "--json", "url", "--jq", ".[0].url // empty"); s != "" {
+			continue
+		}
+		o, _ := out("gh", "pr", "list", "--author", account, "--state", "open", "--json", "headRefName", "--jq", `[.[] | select(.headRefName | startswith("tend/issue-") or startswith("tend/jira-"))] | length`)
+		if open, _ := strconv.Atoi(o); open >= limit {
+			say("%d proposal pull requests are open, the cap; the rest wait", open)
+			break
+		}
+		draft(prefix, t.get())
+	}
+	os.Exit(0)
+}
+
+func draft(prefix string, r request) {
+	b := "tend/" + r.slug
+	run = prefix + r.folder
+	must("", os.MkdirAll(run, 0o755))
+	if !nonempty(run + "/id") {
+		write(run+"/id", strconv.FormatInt(time.Now().Unix(), 10)+"\n")
+	}
+	id = cat(run + "/id")
+	issue = r.fields
+	settingUp()
+	worktreeFor(b, base, "tend: "+r.ref)
+	write(run+"/worktree", dir+"\n")
+	setUp()
+	cd(dir)
+	impl = "prop-" + r.agent
+
+	// The propose flow: the drafter drafts, then commits the draft or says why
+	// there is none, each asked once, as the built-in flow says or the
+	// project's.
+	vars = map[string]string{"branch": b, "base": base, "run": run, "item": r.ref, "target": target,
+		"request": quoted(r.source), "refs": r.refs, "ref": r.ref}
+	walkFlow(func() string { proposal(r, b); return "ok" })
+	cd(repo)
+}
+
+// The propose flow's publish: the proposal opened as a pull request by the
+// account, or the request told why there is none.
+func proposal(r request, b string) {
+	switch {
+	case commits(base + "..HEAD"):
+		if !clean() {
+			stop("%s: %s left uncommitted files in %s", r.ref, impl, dir)
+		}
+		changed := "\n" + git("diff", "--name-only", base+"...HEAD")
+		if !strings.Contains(changed, "\n"+root+"/changes/") {
+			stop("%s: %s has commits but no change under %s/changes/", r.ref, b, root)
+		}
+		stage("working", "publishing the proposal from "+r.ref, "a person reviews it")
+		var err error
+		pr, err = out("gh", "pr", "list", "--head", b, "--state", "all", "--json", "url", "--jq", ".[0].url // empty")
+		if err != nil {
+			stop("could not look for %s's pull request", b)
+		}
+		// Pushed only to open the pull request: once it exists the branch is
+		// people's, and may be gone after a merge.
+		if pr == "" {
+			if !pushAs(b) {
+				stop("could not push %s as %s", b, account)
+			}
+			pr, err = input(git("log", "-1", "--format=%b")+"\n", "gh", "pr", "create", "--base", target, "--head", b, "--title", git("log", "-1", "--format=%s"), "--body-file", "-")
+			if err != nil {
+				stop("could not open a pull request for %s; run tend propose again, and it looks for one before opening another", b)
+			}
+		}
+		write(run+"/pr", pr+"\n")
+		head = git("rev-parse", "HEAD")
+		posted, _ := out("gh", "api", reviewsAPI(), "--paginate", "--jq", fmt.Sprintf(`.[] | select(.user.login == "%s" and .commit_id == "%s") | .id`, account, head))
+		if posted == "" {
+			re := regexp.MustCompile("^" + regexp.QuoteMeta(root) + `/changes/([0-9]*-[a-z0-9]*)-`)
+			var ids []string
+			for _, f := range strings.Split(git("diff", "--name-only", "--diff-filter=A", base+"...HEAD"), "\n") {
+				if m := re.FindStringSubmatch(f); m != nil && !slices.Contains(ids, m[1]) {
+					ids = append(ids, m[1])
+				}
+			}
+			sort.Strings(ids)
+			q := cat(run + "/summary")
+			if q == "" {
+				q = "The drafter wrote no summary of open questions; see the proposal."
+			}
+			body := fmt.Sprintf("**Proposal drafted from %s with no one in the session**\n\n%s\n\nMerging approves the change with any question still open, and its implementation may then choose those answers within Grove's rules. Answer the consequential ones before merging, by revising the proposal on `%s` (`/grove-propose %s`). Once merged, the change can be built by its ID, `tend <repo> <change-id>`, or planned into a cycle with others: `/grove-plan`.", r.from, q, b, strings.Join(ids, " "))
+			if postJSON(reviewsAPI(), map[string]any{"commit_id": head, "event": "COMMENT", "body": body}) != nil {
+				stop("could not post the summary on %s", pr)
+			}
+		}
+		if r.link != nil && r.link(pr) != nil {
+			stop("could not say on %s where its proposal is (%s); run tend propose again to finish", r.ref, pr)
+		}
+		write(run+"/linked", pr+"\n")
+		stage("done", "proposal from "+r.ref+" at "+pr, "a person answers its open questions, revises or merges it")
+		say("%s: %s", r.ref, pr)
+	case nonempty(run + "/declined"):
+		// Said on the request once, found by the attempt's marker, then the label off.
+		if r.decline(cat(run+"/declined"), id) != nil {
+			stop("could not comment on %s", r.ref)
+		}
+		if r.unlabel() != nil {
+			stop("could not take the tend label off %s", r.ref)
+		}
+		stage("done", "no proposal from "+r.ref+"; said why on it", "a person edits the request and labels it again")
+		must("", os.Rename(run, run+".declined-"+id)) // a fresh attempt when the label comes back
+		cd(repo)
+		removeWorktree(dir, b)
+		say("%s: no proposal, said why", r.ref)
+	default:
+		stop("%s: %s committed no change and wrote no reason. Look at its pane, then commit the draft or write %s/declined, or delete %s/followed to have it asked again", r.ref, impl, run, run)
+	}
+	cd(repo)
+}
