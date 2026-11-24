@@ -6,7 +6,7 @@ they differ, keep the rule and record the difference under "Known discrepancies"
 
 ## Purpose
 
-tend runs its agents in Herdr or rex, where the owner can watch and take over, and this covers which one, where a worktree's agents run, how an agent is started, found and observed, how a prompt is delivered, the dialogs tend answers, how tend tells a person, and how a worktree's place is closed. A place is where one worktree's agents run: a Herdr workspace, or a rex session. An agent is found by its name: `impl-<attempt>` implements, `rev-<short head>` reviews, `prop-<request>` drafts a proposal.
+tend runs its agents in Herdr or rex, where the owner can watch and take over, and this covers which one, where a worktree's agents run, how an agent is started, found and observed, how a prompt is delivered, the dialogs tend answers, how tend tells a person, and how a worktree's place is closed. A place is where one worktree's agents run: a Herdr workspace, or a rex session. An agent is found by its name: `impl-<attempt>` implements, `rev-<short head>` reviews, `prop-<request>-<cksum of the repository's path>` drafts a proposal.
 
 ## Boundaries
 
