@@ -192,11 +192,17 @@ before the proposals were written.
 2. Grove: reconcile stale requirements, then allow independent approved
    changes and optional cycles to be claimed by name. Built and released in
    Grove 0.14.0.
-3. tend: parallel work and the merge train, proposed as changes 261122-fh9h2,
-   261122-nh8aa, 261122-9vbmc, 261122-rpkqa and 261122-hjhmn; then the
-   autonomous flow's new steps (decompose a goal, check a proposal against
-   decision 3, plan); the standing agent. Each with its own tests.
+3. tend: parallel work and the merge train, built as changes 261122-fh9h2,
+   261122-nh8aa, 261122-9vbmc, 261122-rpkqa and 261122-hjhmn and released
+   in tend 0.4.0; then the autonomous flow's new steps (decompose a goal,
+   check a proposal against decision 3, plan); the standing agent. Each
+   with its own tests.
 4. The typing app, as the first project in the autonomous mode.
+
+Revised 2026-11-25 by the owner: the typing app starts before the
+autonomous flow's steps and the standing agent, supervised, and those are
+explored once it has produced real pitches. [Steps](steps.md#order-revised-2026-11-25)
+records the order.
 
 ## Step 2 review findings
 
