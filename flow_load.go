@@ -41,6 +41,9 @@ func flowsAt(rev string) (flowFile, map[string]string) {
 		if why := ff.Watch.fault(); why != "" {
 			stop("%s %s", flowPath, why)
 		}
+		if why := ff.protectFault(); why != "" {
+			stop("%s %s", flowPath, why)
+		}
 		has := func(p string) bool { _, ok := promptText(rev, p); return ok }
 		for name, f := range ff.named() {
 			if *f == nil {
@@ -84,7 +87,22 @@ func watchCount(rev string) (int, string) {
 	if why := ff.Watch.fault(); why != "" {
 		return -1, flowPath + " " + why
 	}
+	if why := ff.protectFault(); why != "" {
+		return -1, flowPath + " " + why
+	}
 	return ff.Watch.count(), ""
+}
+
+// The protected paths in effect at rev, the target as origin holds it, never
+// the attempt's branch, and where they came from: the project's flow file,
+// or built in. A flow file that is not valid stops tend, exit 3.
+func protectedAt(rev string) ([]string, string) {
+	ff, _ := flowsAt(rev)
+	ps, own := ff.protected()
+	if !own {
+		return ps, "built in"
+	}
+	return ps, flowPath + " on " + rev
 }
 
 // tend flow <repo>: the flows the repository's attempts would run, as a flow
@@ -112,6 +130,14 @@ func printFlows() {
 	if ff.Watch != nil {
 		fmt.Printf("\n# watch: %s on %s\nwatch:\n  at_once: %d\n", flowPath, rev, ff.Watch.count())
 	}
+	ps, own := ff.protected()
+	pfrom := "built in, tend's own list"
+	if own {
+		pfrom = flowPath + " on " + rev + ", the project's own, with tend/ always protected"
+	}
+	fmt.Printf("\n# protect: %s. A head whose change touches one of these\n# lands only once a person with write access approves it.\n", pfrom)
+	b, _ := yaml.Marshal(map[string][]string{"protect": ps})
+	os.Stdout.Write(b)
 	for _, name := range []string{"build", "propose"} {
 		fmt.Printf("\n# %s: %s\n", name, from[name])
 		if from[name] == "built in" {

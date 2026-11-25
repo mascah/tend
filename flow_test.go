@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -14,6 +15,9 @@ func faultOf(text string) string {
 		return why
 	}
 	if why := ff.Watch.fault(); why != "" {
+		return why
+	}
+	if why := ff.protectFault(); why != "" {
 		return why
 	}
 	for name, f := range ff.named() {
@@ -78,6 +82,55 @@ func TestFlowFaults(t *testing.T) {
 		got := faultOf(c.text)
 		if c.want == "" && got != "" || !strings.Contains(got, c.want) {
 			t.Errorf("%s: fault %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+func TestProtectFaults(t *testing.T) {
+	for _, c := range []struct{ name, text, want string }{
+		{"a list", "protect: [schema.sql, migrations/]\n", ""},
+		{"an empty list", "protect: []\n", ""},
+		{"an empty entry", "protect: [schema.sql, \"\"]\n", "gives protect an empty entry"},
+		{"a blank entry", "protect:\n  - \" \"\n", "gives protect an empty entry"},
+		{"the root", "protect: [/]\n", `gives protect the entry "/"`},
+		{"not a list", "protect: schema.sql\n", "into protect, a list of paths"},
+	} {
+		got := faultOf(c.text)
+		if c.want == "" && got != "" || !strings.Contains(got, c.want) {
+			t.Errorf("%s: fault %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+func TestProtectedPaths(t *testing.T) {
+	var ff flowFile
+	if ps, own := ff.protected(); own || !slices.Equal(ps, defaultProtect) {
+		t.Errorf("no protect gives %v, own %v; want tend's own list", ps, own)
+	}
+	ff.Protect = &[]string{"schema.sql", "migrations/"}
+	if ps, own := ff.protected(); !own || !slices.Equal(ps, []string{"schema.sql", "migrations/", "tend/"}) {
+		t.Errorf("a project's protect gives %v, own %v; want its entries and tend/", ps, own)
+	}
+	ff.Protect = &[]string{"tend/"}
+	if ps, _ := ff.protected(); !slices.Equal(ps, []string{"tend/"}) {
+		t.Errorf("a protect naming tend/ gives %v", ps)
+	}
+	paths := []string{
+		"main.go", "tend/flow.yaml", "tend/prompts/review.md", "tendency.md", ".github/workflows/ci.yml", ".github/CODEOWNERS",
+		"CLAUDE.md", "web/CLAUDE.md", "docs/CLAUDE.md.bak", "wrangler.toml", "web/wrangler.jsonc", "go.sum", "vendor/x/go.sum",
+		".claude/settings.json", "grove.yaml", "grove/specs/x/spec.md", "schema.sql", "db/schema.sql", "migrations/001.sql", "db/migrations/001.sql",
+	}
+	for _, c := range []struct {
+		entries, want []string
+	}{
+		{defaultProtect, []string{"tend/flow.yaml", "tend/prompts/review.md", ".github/workflows/ci.yml", ".github/CODEOWNERS", "CLAUDE.md", "web/CLAUDE.md",
+			"wrangler.toml", "web/wrangler.jsonc", "go.sum", "vendor/x/go.sum", ".claude/settings.json", "grove.yaml"}},
+		{[]string{"schema.sql", "migrations/"}, []string{"schema.sql", "db/schema.sql", "migrations/001.sql"}},
+		{[]string{"/schema.sql", "db/migrations/"}, []string{"schema.sql", "db/migrations/001.sql"}},
+		{[]string{"db/*.sql", ".github/*/"}, []string{".github/workflows/ci.yml", "db/schema.sql"}},
+	} {
+		if got := covered(c.entries, paths); !slices.Equal(got, c.want) {
+			t.Errorf("%v covers %v, want %v", c.entries, got, c.want)
 		}
 	}
 }
@@ -371,6 +424,32 @@ var flowScenarios = []scenario{
 		p = s.tendIn(nil, "flow", s.repo)
 		s.check("tend flow then says the flows are the project's", strings.Contains(p.out, "# build: tend/flow.yaml on origin/main"))
 		s.check("and still prints no watch", !strings.Contains(p.out, "watch"))
+	}},
+	{"flow-protect-default", func(s *sc) {
+		s.project("main", true)
+		p := s.tendIn(nil, "flow", s.repo)
+		s.check("tend flow prints protect, saying it is tend's own", p.code == 0 && strings.Contains(p.out, "\n# protect: built in, tend's own list."))
+		for _, e := range []string{"tend/", ".github/workflows/", "CODEOWNERS", "PRINCIPLES.md", "grove.yaml", "CLAUDE.md", "AGENTS.md", ".claude/", "wrangler.*", "Dockerfile", "go.sum", "package-lock.json", "Cargo.lock"} {
+			s.check("with "+e+" in tend's own list", regexp.MustCompile(`(?m)^ +- '?`+regexp.QuoteMeta(e)+`'?$`).MatchString(p.out))
+		}
+		var ff flowFile
+		s.check("which saved is a valid flow file, giving tend's own list as the project's", decode(p.out, &ff) == "" && ff.Protect != nil && slices.Equal(*ff.Protect, defaultProtect))
+	}},
+	{"flow-protect-own", func(s *sc) {
+		s.project("main", true)
+		s.commit("Protect the schema", map[string]string{"tend/flow.yaml": "protect:\n  - schema.sql\n  - migrations/\n"})
+		p := s.tendIn(nil, "flow", s.repo)
+		s.check("tend flow prints the project's protect, saying it is the project's", p.code == 0 && strings.Contains(p.out, "\n# protect: tend/flow.yaml on origin/main, the project's own, with tend/ always protected."))
+		s.check("holding its entries and tend/", strings.Contains(p.out, "\nprotect:\n    - schema.sql\n    - migrations/\n    - tend/\n"))
+		s.check("and not tend's own list", !strings.Contains(p.out, "go.sum"))
+		s.check("and the cycle is built as the built-in flow says", s.run().passed() && s.reviews() == 1)
+	}},
+	{"flow-protect-empty", func(s *sc) {
+		s.project("main", true)
+		s.commit("Protect nothing", map[string]string{"tend/flow.yaml": "protect:\n  - schema.sql\n  - \"\"\n"})
+		r := s.run()
+		s.check("an empty entry stops as not valid, naming the file and protect", r.code == 3 && r.said(`^tend: tend/flow\.yaml gives protect an empty entry, where each entry is a path from the repository's root$`))
+		s.check("and starts no agent", s.agentStarts() == 0)
 	}},
 	{"flow-watch-count", func(s *sc) {
 		s.project("main", true)
