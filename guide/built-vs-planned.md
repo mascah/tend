@@ -73,7 +73,9 @@ into requests, check a proposal, plan. With them, the owner would still hold:
 
 - the rules agents work under, as protected paths (the flow file, CI, the
   ruleset, CODEOWNERS, the principles file, `grove.yaml`, agent instructions,
-  skills, deploy config);
+  skills, deploy config). Built already for landing: a head that touches a
+  [protected path](flows-reference.md#protected-paths) lands only with a
+  person's approval;
 - what the product is, and the parts of money and data no file shows;
 - spend: a daily cap counting every prompt tend sends unattended;
 - agent ideas: work for an outcome the owner accepted flows; an outcome an

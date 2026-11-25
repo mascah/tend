@@ -1,6 +1,7 @@
 package main
 
 import (
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -44,6 +45,35 @@ func (s *sc) lands(supervised bool, ci string) {
 	s.allow()
 	s.commit("Land", landFlow(s.t, supervised))
 	s.ci(ci)
+}
+
+// As lands, with more files on the target, a flow file among them taking
+// the place of landFlow's.
+func (s *sc) landsWith(supervised bool, ci string, files map[string]string) {
+	s.project("main", true)
+	s.allow()
+	all := landFlow(s.t, supervised)
+	for p, b := range files {
+		all[p] = b
+	}
+	s.commit("Land", all)
+	s.ci(ci)
+}
+
+// Whether tend held the head, naming exactly the protected paths given.
+func (r res) held(paths string) bool {
+	return r.code == 3 && r.said(`^tend: [^ ]+ at [0-9a-f]+ changes the protected paths? `+regexp.QuoteMeta(paths)+`, so tend lands it only once a person with write access approves that head on https://`)
+}
+
+// The approving reviews on the pull request.
+func (s *sc) approvals() int {
+	n := 0
+	for _, r := range s.reviewList() {
+		if get(r, "state") == "APPROVED" {
+			n++
+		}
+	}
+	return n
 }
 
 func (s *sc) ci(checks string) { s.write(s.st+"/ci", checks+"\n") }
@@ -263,6 +293,152 @@ var landScenarios = []scenario{
 			merge = hs[1]
 		}
 		s.check("whose second parent holds the first", merge != "" && s.gitOK(s.repo+".git", "merge-base", "--is-ancestor", first, merge) && len(strings.Fields(s.git(s.repo+".git", "rev-list", "--parents", "-n", "1", merge))) == 3)
+	}},
+	{"protect-flow-file", func(s *sc) {
+		s.lands(false, "check success")
+		r := s.run(`BUILD_ALSO=echo "# ours" >>tend/flow.yaml && echo "package main" >main.go`)
+		s.check("an autonomous flow holds a head that edits the flow file, naming it and not main.go", r.held("tend/flow.yaml"))
+		s.check("the pull request stays open and nothing is merged", !s.merged() && s.merges() == 0 && s.creates() == 1)
+		reviewed, prompts := s.head(), s.count(s.log(), `^agent prompt `)
+		s.pushed() // the target moves, so a landing would merge it in
+		s.reviewOn(reviewed, "stranger", "NONE", "APPROVED")
+		r = s.run()
+		s.check("a stranger's approval releases nothing: tend exits 3 naming the flow file", r.held("tend/flow.yaml"))
+		s.check("merging nothing", !s.merged() && s.merges() == 0)
+		s.check("pushing no merge commit to the branch", s.git(s.repo+".git", "rev-parse", s.branch()) == reviewed && s.head() == reviewed)
+		s.check("and prompting no agent", s.count(s.log(), `^agent prompt `) == prompts)
+		s.approve(reviewed)
+		r = s.run()
+		s.check("once a teammate who is a collaborator approves the head, the next run lands it", r.passed() && s.merged())
+		s.check("after merging the target in", len(s.parents(s.mergedAt()[0])) == 3)
+	}},
+	{"protect-nested", func(s *sc) {
+		s.lands(false, "check success")
+		r := s.run(`BUILD_ALSO=mkdir -p web && echo "Be brief." >web/CLAUDE.md`)
+		s.check("a nested agent instruction file is held by tend's own list", r.held("web/CLAUDE.md"))
+		s.check("and nothing is merged", !s.merged() && s.merges() == 0)
+	}},
+	{"protect-renamed", func(s *sc) {
+		s.landsWith(false, "check success", map[string]string{".github/workflows/ci.yml": "on: pull_request\n"})
+		r := s.run(`BUILD_ALSO=git mv .github/workflows/ci.yml ci.yml.bak`)
+		s.check("a protected file moved away is held under its old name", r.held(".github/workflows/ci.yml"))
+		s.check("and nothing is merged", !s.merged() && s.merges() == 0)
+	}},
+	{"protect-unprotected", func(s *sc) {
+		s.landsWith(false, "check success", map[string]string{
+			"tend/flow.yaml": landFlow(s.t, false)["tend/flow.yaml"] + "protect:\n  - schema.sql\n",
+			"schema.sql":     "create table a (b int);\n",
+		})
+		r := s.run(`BUILD_ALSO=grep -v -e "^protect:" -e "^  - schema.sql" tend/flow.yaml >f && mv f tend/flow.yaml && echo "create table c (d int);" >>schema.sql`)
+		s.check("a candidate that drops schema.sql from its own protect is held by the target's, naming both", r.held("schema.sql and tend/flow.yaml"))
+		s.check("its own flow file holds no protect", !strings.Contains(s.git(s.worktree(), "show", "HEAD:tend/flow.yaml"), "protect"))
+		s.check("and nothing is merged", !s.merged() && s.merges() == 0)
+	}},
+	{"protect-carried", func(s *sc) {
+		s.lands(false, "check success")
+		r := s.run(`BUILD_ALSO=echo "Be brief." >>CLAUDE.md`)
+		s.check("a head that edits CLAUDE.md is held", r.held("CLAUDE.md"))
+		reviewed := s.head()
+		s.approve(reviewed)
+		theirs := s.pushed()
+		r = s.run()
+		m := s.head()
+		s.check("once approved, the head carried across a clean merge of the target lands", r.passed() && s.merged())
+		s.check("at the merge commit, approved only at the head it is carried from", slices.Equal(s.mergedAt(), []string{m}) && slices.Equal(s.parents(m), []string{m, reviewed, theirs}) && s.approvals() == 1)
+	}},
+	{"protect-run-folder", func(s *sc) {
+		s.lands(false, "check success")
+		r := s.run(`BUILD_ALSO=echo "Be brief." >>CLAUDE.md`)
+		s.check("a head that edits CLAUDE.md is held", r.held("CLAUDE.md"))
+		reviewed := s.head()
+		s.approve(reviewed)
+		s.pushed()
+		s.ci("check pending")
+		r = s.run("TIMEOUT_MS=400")
+		m1 := s.head()
+		s.check("approved, the target is merged in, and tend stops waiting for its checks", r.code == 3 && r.said(`still unfinished`) && s.parents(m1)[1] == reviewed)
+		// A verdict for the merge commit, as anything that writes the run
+		// folder could leave there, and the target moved again.
+		s.write(s.runDir()+"/verdict-"+m1+".json", `{"head": "`+m1+`", "conclusion": "success", "actionable": false, "summary": "Fine."}`)
+		s.bash(s.dir, `git clone -q "$t/repo.git" "$t/third" && cd "$t/third" && echo again >c.txt && git add c.txt && git commit -qm again && git push -q origin main`)
+		s.ci("check success")
+		r = s.run()
+		m2 := s.head()
+		s.check("the approval of the reviewed head still counts through both merges of the target: it lands", r.passed() && s.merged() && slices.Equal(s.mergedAt(), []string{m2}) && s.parents(m2)[1] == m1)
+	}},
+	{"protect-submodule-hidden", func(s *sc) {
+		s.lands(false, "check success")
+		r := s.run(`BUILD_ALSO=git config diff.ignoreSubmodules all && mkdir -p .claude/vendor && git update-index --add --cacheinfo "160000,$(git rev-parse HEAD),.claude/vendor"`)
+		s.check("a gitlink added under .claude/ is held, though the repository's config ignores submodules", r.held(".claude/vendor"))
+		s.check("the config was set where the worktree reads it", s.git(s.worktree(), "config", "diff.ignoreSubmodules") == "all")
+		s.check("and nothing is merged", !s.merged() && s.merges() == 0)
+	}},
+	{"protect-submodule-folder", func(s *sc) {
+		s.lands(false, "check success")
+		r := s.run(`BUILD_ALSO=mkdir -p .codex && git update-index --add --cacheinfo "160000,$(git rev-parse HEAD),.codex"`)
+		s.check("a gitlink at the protected folder .codex/'s own path is held", r.held(".codex"))
+		s.check("and nothing is merged", !s.merged() && s.merges() == 0)
+	}},
+	{"protect-target-own", func(s *sc) {
+		s.lands(false, "check success")
+		r := s.run(`BEFORE_MERGE=git clone -q "$t/repo.git" "$t/other" && cd "$t/other" && echo "FROM scratch" >Dockerfile && git add Dockerfile && git commit -qm theirs && git push -q origin main`)
+		s.check("a protected path the target's own commit touches is not the candidate's change: it lands", r.passed() && s.merged() && s.merges() == 2)
+	}},
+	{"protect-read-again", func(s *sc) {
+		s.lands(false, "check success")
+		r := s.run(`BEFORE_MERGE=git clone -q "$t/repo.git" "$t/other" && cd "$t/other" && printf "protect:\n  - a.txt\n  - grove/\n" >>tend/flow.yaml && git commit -qam theirs && git push -q origin main`)
+		s.check("a target that protects the candidate's paths before the merge holds it, read afresh", r.code == 3 && r.said(`changes the protected paths grove/`))
+		s.check("GitHub was asked once, and nothing is merged", s.merges() == 1 && !s.merged())
+	}},
+	{"protect-read-during-checks", func(s *sc) {
+		s.lands(false, "check success")
+		r := s.run(`DURING_CHECKS=git clone -q "$t/repo.git" "$t/other" && cd "$t/other" && printf "protect:\n  - a.txt\n  - grove/\n" >>tend/flow.yaml && git commit -qam theirs && git push -q origin main`)
+		s.check("a target that protects the candidate's paths while its checks are read holds it", r.code == 3 && r.said(`changes the protected paths grove/`))
+		s.check("before GitHub is asked to merge", s.merges() == 0 && !s.merged())
+		s.check("and before the target is merged in", s.git(s.repo+".git", "rev-parse", s.branch()) == s.head() && len(s.parents(s.head())) == 2)
+	}},
+	{"protect-approval-gone", func(s *sc) {
+		s.lands(false, "check failure")
+		r := s.run(`BUILD_ALSO=echo "Be brief." >>CLAUDE.md`)
+		s.check("a head that edits CLAUDE.md is held", r.held("CLAUDE.md"))
+		reviewed := s.head()
+		s.approve(reviewed)
+		// The approval is dismissed while the checks, which fail, are read.
+		r = s.run(`DURING_CHECKS=jq 'map(.state = "DISMISSED")' "$HERDR_STATE/reviews" >"$HERDR_STATE/r.new" && mv "$HERDR_STATE/r.new" "$HERDR_STATE/reviews"`)
+		s.check("its approval gone, a failed check stops for a person, naming the protected path", r.held("CLAUDE.md"))
+		s.check("prompting no agent to fix it", s.prompts("tend could not land") == 0)
+		s.check("and pushing nothing", s.head() == reviewed && s.git(s.repo+".git", "rev-parse", s.branch()) == reviewed)
+		s.check("and merging nothing", !s.merged() && s.merges() == 0)
+	}},
+	{"protect-fix", func(s *sc) {
+		s.lands(false, "check failure")
+		r := s.run(`FIX_ALSO=mkdir -p .github/workflows && echo "on: push" >.github/workflows/ci.yml`)
+		s.check("the fix for a failed check is reviewed", s.prompts("tend could not land") == 1 && s.reviews() == 2 && s.reviewed(s.head()) == 1)
+		s.check("and its head, which edits a workflow, is held", r.held(".github/workflows/ci.yml"))
+		s.check("and nothing is merged", !s.merged() && s.merges() == 0)
+	}},
+	{"protect-resolved", func(s *sc) {
+		s.lands(false, "check success")
+		r := s.run(`BUILD_ALSO=echo mine >a.txt && echo "# ours" >>grove.yaml`)
+		s.check("a head that edits grove.yaml is held", r.held("grove.yaml"))
+		reviewed := s.head()
+		s.approve(reviewed)
+		s.bash(s.dir, `git clone -q "$t/repo.git" "$t/other" && cd "$t/other" && echo theirs >a.txt && git commit -qam theirs && git push -q origin main`)
+		r = s.run()
+		s.check("approved, it meets a conflict the implementer resolves in a new head that is reviewed", s.prompts("tend could not land") == 1 && s.reviewed(s.head()) == 1 && s.head() != reviewed)
+		s.check("which is held, its approval being of the earlier head", r.held("grove.yaml"))
+		s.check("and nothing is merged", !s.merged() && s.merges() == 0)
+		s.approve(s.head())
+		r = s.run()
+		s.check("until a person with write access approves the new head", r.passed() && s.merged())
+	}},
+	{"protect-supervised", func(s *sc) {
+		s.lands(true, "check success")
+		r := s.run(`BUILD_ALSO=echo "# ours" >>tend/flow.yaml`)
+		s.check("a supervised flow publishes a head that edits the flow file, merging nothing", r.passed() && !s.merged())
+		s.approve(s.head())
+		r = s.run()
+		s.check("and lands it once a teammate approves, as before", r.passed() && s.merged())
 	}},
 	{"approve-stranger", func(s *sc) {
 		s.lands(true, "check success")

@@ -309,6 +309,13 @@ func approved() bool {
 	if hs == nil {
 		hs = []string{head}
 	}
+	return approvedOn(hs)
+}
+
+// Whether the newest review that approves or requests changes, by a person
+// with write access, on any of the heads hs, approves: hs[0] is the head,
+// the rest those it counts approvals of.
+func approvedOn(hs []string) bool {
 	q, _ := json.Marshal(hs)
 	s, err := out("gh", "api", reviewsAPI(), "--paginate", "--jq", fmt.Sprintf(`.[] | select((.state == "APPROVED" or .state == "CHANGES_REQUESTED") and (.commit_id | IN(%s[])) and %s) | .state + " " + .user.login`, q, writer("author_association")))
 	if err != nil {
@@ -317,7 +324,7 @@ func approved() bool {
 	ls := strings.Split(s, "\n")
 	last := strings.Fields(ls[len(ls)-1])
 	if len(last) == 2 && last[0] == "APPROVED" {
-		say("%s approved %s at %s", last[1], pr, short(head))
+		say("%s approved %s at %s", last[1], pr, short(hs[0]))
 		return true
 	}
 	return false

@@ -33,25 +33,37 @@ func passed(h string) bool {
 	return n > 0
 }
 
+// Head h and each head it was made from by a clean merge of the target,
+// newest first: while a head is a merge commit whose second parent is a
+// commit of the target and whose tree is exactly Git's merge of its two
+// parents, its first parent follows. Read from Git alone.
+func cleanMerges(h string) []string {
+	hs := []string{h}
+	for {
+		p := strings.Fields(gitQ("rev-list", "--parents", "-n", "1", h))
+		if len(p) != 3 || !ok("git", "merge-base", "--is-ancestor", p[2], base) {
+			return hs
+		}
+		t, err := quiet("git", "merge-tree", "--write-tree", p[1], p[2])
+		if err != nil || strings.SplitN(t, "\n", 2)[0] != gitQ("rev-parse", h+"^{tree}") {
+			return hs
+		}
+		h = p[1]
+		hs = append(hs, h)
+	}
+}
+
 // The heads h is carried through, h first and the head that passed review
 // last, when h is a merge commit whose first parent passed review or is
 // itself carried, whose second parent is a commit of the target, and whose
-// tree is exactly Git's merge of the two; or nil. Read from Git, never from a
-// mark an agent could write.
+// tree is exactly Git's merge of the two; or nil. Read from Git and the
+// verdicts tend validated, never from a mark an agent could write.
 func carried(h string) []string {
-	p := strings.Fields(gitQ("rev-list", "--parents", "-n", "1", h))
-	if len(p) != 3 || !ok("git", "merge-base", "--is-ancestor", p[2], base) {
-		return nil
-	}
-	t, err := quiet("git", "merge-tree", "--write-tree", p[1], p[2])
-	if err != nil || strings.SplitN(t, "\n", 2)[0] != gitQ("rev-parse", h+"^{tree}") {
-		return nil
-	}
-	if passed(p[1]) {
-		return []string{h, p[1]}
-	}
-	if c := carried(p[1]); c != nil {
-		return append([]string{h}, c...)
+	hs := cleanMerges(h)
+	for i := 1; i < len(hs); i++ {
+		if passed(hs[i]) {
+			return hs[:i+1]
+		}
 	}
 	return nil
 }
@@ -69,6 +81,38 @@ func carry(h string, c []string) {
 		stop("could not set the tend/review status on %s", short(h))
 	}
 	write(mark, from+"\n")
+}
+
+// The paths head h changes: those that differ between h and the commit
+// where h and the target's tip as fetched meet, a renamed file under both
+// its names. Read from Git alone.
+func changedPaths(h string) []string {
+	// --ignore-submodules=none and --no-relative, so no setting in the
+	// repository's config, which an implementer's worktree shares, hides a
+	// gitlink or a path outside a folder.
+	s := git("diff", "--no-renames", "--ignore-submodules=none", "--no-relative", "--name-only", "-z", base+"..."+h)
+	return strings.FieldsFunc(s, func(r rune) bool { return r == 0 })
+}
+
+// A head whose change touches a protected path of the target as now fetched
+// lands only once a person with write access approves it, or a head it was
+// made from by clean merges of the target; otherwise tend stops for one,
+// naming the paths. Decided from Git and GitHub's reviews alone, never from
+// a verdict or any file in the run folder.
+func hold(h string) {
+	ps, _ := protectedAt(base)
+	touched := covered(ps, changedPaths(h))
+	if len(touched) == 0 {
+		return
+	}
+	if approvedOn(cleanMerges(h)) {
+		return
+	}
+	what := "the protected path "
+	if len(touched) > 1 {
+		what = "the protected paths "
+	}
+	stop("%s at %s changes %s%s, so tend lands it only once a person with write access approves that head on %s", branch, short(h), what, and(touched), pr)
 }
 
 // One landing at a time for each repository on this runner: the lock, held
@@ -147,7 +191,8 @@ func checked(h string, over bool) string {
 }
 
 // The build flow's land: a head that passed review, or is carried from one
-// that did, with its pull request open, landed one at a time: the target
+// that did, with its pull request open, landed one at a time, held for a
+// person's approval while its change touches a protected path: the target
 // merged in when it moved, never by a forced push, every check on the head
 // waited for, then the pull request squash-merged at exactly that head by
 // the publishing account, its title and number the subject and its
@@ -167,6 +212,7 @@ func landStep() string {
 	wait := time.Duration(ms) * time.Millisecond
 	poll := min(20*time.Second, wait/4)
 	until := time.Now().Add(wait)
+	held := false // whether the head was held to its protected paths yet
 	// Each round reads the pull request, the head and the target afresh, so a
 	// merge by a person or a target that moved is seen while checks run.
 	for round := 0; ; round++ {
@@ -195,7 +241,12 @@ func landStep() string {
 			stop("%s's head is %s, not %s's %s, so tend lands nothing", pr, short(o), branch, short(h))
 		}
 		fetchTarget()
-		if !ok("git", "merge-base", "--is-ancestor", base, "HEAD") {
+		moved := !ok("git", "merge-base", "--is-ancestor", base, "HEAD")
+		if moved || !held {
+			hold(h)
+			held = true
+		}
+		if moved {
 			stage("working", fmt.Sprintf("merging %s into %s", base, branch), "tend waits for the merged head's checks, then lands it")
 			if _, err := both("git", "merge", "--no-ff", "--no-edit", "-m", "Merge "+target+" into "+branch, base); err != nil {
 				quiet("git", "merge", "--abort")
@@ -216,11 +267,25 @@ func landStep() string {
 		}
 		switch checked(h, time.Now().After(until)) {
 		case "failed":
+			// Only a head that may land goes on to fix: the hold, under the
+			// target as it stands now, decides before failed is given.
+			fetchTarget()
+			hold(h)
 			return "failed"
 		case "":
 			stage("working", fmt.Sprintf("waiting for the checks on %s at %s", branch, short(h)), "tend squash-merges "+pr+" once every check passes")
 			continue
 		}
+		// The target as it stands now, not as the round began: one that moved
+		// while the checks were read is merged in, and held first, before
+		// GitHub is asked; else the head is held to its protected paths now.
+		fetchTarget()
+		if !ok("git", "merge-base", "--is-ancestor", base, "HEAD") {
+			say("%s moved while the checks on %s were read", target, short(h))
+			round = -1 // merged in at once
+			continue
+		}
+		hold(h)
 		stage("working", fmt.Sprintf("landing %s at %s", pr, short(h)), "GitHub squash-merges it")
 		// GitHub's merge itself, never gh pr merge, which may queue the pull
 		// request or defer the merge and refuses a blocked one in words of its own.

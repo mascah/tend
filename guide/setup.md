@@ -129,7 +129,10 @@ The only difference is `publish`'s `next`. Both work today. (This
 "autonomous" landing shape is not the planned [autonomous flow](built-vs-planned.md#4-the-autonomous-flow),
 plan step 4, which is not built.)
 
-**Autonomous landing** (the file above): every head that passed review lands.
+**Autonomous landing** (the file above): every head that passed review lands,
+except one whose change touches a [protected path](flows-reference.md#protected-paths):
+that one waits for a person with write access to approve it on GitHub, and
+tend stops (exit 3) naming the paths until then.
 
 ```yaml
     publish:
@@ -162,7 +165,8 @@ person (exit 3), "did not pass review, so tend lands nothing".
 - The bot must be allowed to merge and must not be able to bypass the rule.
 - A rule that dismisses approvals on new commits undoes an approval whenever
   tend merges the target in.
-- tend reads an approval once, at `publish`. A supervised project that wants a
+- tend reads an approval at `publish`, and at `land` only for a head that
+  touches a protected path. A supervised project that wants a
   later withdrawal to hold the merge should require an approving review in
   the rule, so GitHub refuses and tend stops with its reason.
 

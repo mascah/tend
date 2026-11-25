@@ -22,6 +22,7 @@ local target without origin). Its top-level keys are:
 | `build` | Replaces the built-in `build` flow, which every attempt runs. |
 | `propose` | Replaces the built-in `propose` flow, which [intake](concepts/intake.md) runs. |
 | `watch` | `at_once: <N>`: [watch's count](concepts/watch.md). |
+| `protect` | The [protected paths](#protected-paths), in place of tend's own list. |
 
 A flow it does not name stays built in. Any other key is refused.
 
@@ -262,10 +263,38 @@ refused when the file:
 - names an outcome a step cannot have, or a next step the flow does not have;
 - loops through steps none of which has a limit. A loop through `publish`'s
   `requested` or `approved` is allowed: people bound it;
-- gives `watch` an `at_once` that is not a whole number of at least 1.
+- gives `watch` an `at_once` that is not a whole number of at least 1;
+- gives `protect` anything but a list of paths, or an empty entry.
 
 While it runs, a step reached again at the same head with nothing asked since
 stops for a person: the flow loops.
+
+## Protected paths
+
+At `land`, a head whose change against the target touches a protected path
+lands only once a person with write access approves that head on GitHub (or
+the head it is carried from by a clean merge of the target). Otherwise tend
+merges nothing and stops (exit 3), naming the paths. The changed paths come
+from Git, a renamed file counting under both names; no verdict or agent
+waives the hold.
+
+The protected paths are read from the target, never the candidate. With
+`protect` in the flow file, they are its entries plus `tend/`, which stays
+protected whatever the list says. Without it, tend's own list applies:
+
+```yaml
+protect: [tend/, .github/workflows/, CODEOWNERS, PRINCIPLES.md, grove.yaml,
+  CLAUDE.md, AGENTS.md, .claude/, .agents/, .codex/,
+  wrangler.*, fly.toml, vercel.json, netlify.toml, render.yaml, Procfile, Dockerfile,
+  go.sum, package-lock.json, npm-shrinkwrap.json, yarn.lock, pnpm-lock.yaml,
+  bun.lock, bun.lockb, Cargo.lock, Gemfile.lock, poetry.lock, uv.lock,
+  Pipfile.lock, composer.lock]
+```
+
+An entry is a path from the repository's root. One ending in `/` covers that
+folder, its own path (where a submodule may sit) and everything in it; one with no `/` matches a file of that name in
+any folder (`CLAUDE.md` covers `web/CLAUDE.md`); `*` matches within one path
+segment. `tend flow` prints the list in effect.
 
 ## Agents' flags
 
