@@ -53,7 +53,9 @@ pane of its own. Every `WATCH_SECONDS` (default 300) it does one pass:
   whoever started it. Intake runs outside the count. `AT_ONCE` in watch's
   environment can lower the count on this machine, never raise it;
   `AT_ONCE=0` starts nothing new and lets running work finish. An `at_once`
-  that is not a whole number of at least 1 starts nothing and says why.
+  that is not a whole number of at least 1 makes watch start nothing there
+  and say why; it also makes the flow file invalid, so every `tend` run in
+  that repository stops (exit 3) until it is fixed.
 - **No count means one at a time.** Without `at_once`, watch runs each tend
   itself (the unattended cycle, intake, each rerun) and waits for it to
   finish before going on. With a count, only the attempts it keeps going run

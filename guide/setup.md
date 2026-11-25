@@ -50,8 +50,9 @@ and choose "Yes, I trust this folder".
 
 ## 4. The bot account and the publish file
 
-1. Make a separate GitHub account (a bot user) with write access to the
-   repository, allowed to merge if tend will land.
+1. Make a separate GitHub account (a bot user) and add it to the repository
+   with write access (for example as a collaborator), allowed to merge if
+   tend will land.
 2. Sign it in to `gh` beside yours: `gh auth login` as the bot, then
    `gh auth switch` back to yourself.
 3. Add a line to `TEND_STATE/publish` with the exact origin URL and the bot:

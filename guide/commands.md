@@ -120,7 +120,8 @@ Implementations to review (review and merge):
 Requests waiting for tend propose:
 ```
 
-Proposals are open pull requests from `tend/issue-*` or `tend/jira-*`;
+The text after each change and cycle is Grove's own verdict on it, as
+`grove changes --json` gives it. Proposals are open pull requests from `tend/issue-*` or `tend/jira-*`;
 implementations are those from `grove/*` or `tend/build-*`, marked
 "changes requested: tend makes them on its next run" when GitHub says so.
 Without `gh`, it ends with `GitHub: not readable with gh here`.

@@ -100,7 +100,7 @@ propose:
 
 | Step | Flow | What it is |
 | --- | --- | --- |
-| `implement` | build | Claude builds the work item: `/grove-implement --runner <id>`, or `implement-issue.md` for an issue. It is the start, so its agent, `impl-<attempt-id>`, lasts the whole attempt. Asked whenever Git shows the branch unfinished, never when it is finished. |
+| `implement` | build | Claude builds the work item: `/grove-implement --runner <id>`, or `implement-issue.md` for an issue. It is the start, so its agent, `impl-<attempt-id>`, lasts the whole attempt. Asked whenever Git shows the branch unfinished, never when it is finished. A commit alone is not enough: before the flow goes past it, the work item must be built (a Grove change archived on the branch and a clean tree, or an issue's commit and notes; see [work items](concepts/work-items.md)). |
 | `review` | build | A fresh Codex, `rev-<short head>`, judges each head and writes `verdict-<head>.json`. |
 | `repair` | build | The implementer, given the findings, once (`limit: 1`). |
 | `publish` | build, propose | tend's own. In build: push, pull request, reviews, status ([publication](concepts/publication.md)). In propose: the proposal pull request, or the decline comment. |

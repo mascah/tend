@@ -12,6 +12,7 @@ sequenceDiagram
     participant GH as GitHub
     You->>T: tend #lt;repo#gt; #lt;change-id#gt;
     T->>T: take the work item's lock (exit 4 if held)
+    T->>T: take the setup lock (one tend sets up at a time)
     T->>GH: fetch origin's target
     T->>H: new worktree from origin/#lt;target#gt;
     T->>G: grove claim #lt;change-id#gt; (in the worktree)
@@ -78,8 +79,9 @@ way; only the claim and the scope differ (see [work items](concepts/work-items.m
    implementer make the changes, and the new head is reviewed and published
    again.
 9. **Land.** Only if the project's flow has a `land` step:
-   [landing](concepts/landing.md) waits for CI and squash-merges the pull
-   request at exactly the reviewed head.
+   [landing](concepts/landing.md) merges the target in if it moved (a clean
+   merge keeps the verdict), waits for CI, and squash-merges the pull request
+   at exactly the head whose checks passed.
 10. **Done.** tend prints the verdict JSON and exits 0. A Herdr notification
     says the pull request (or the branch, when nothing was published) is ready
     for you, or that it landed.
@@ -136,7 +138,9 @@ tend: done: grove/261125-18jsc, verdict ~/.local/state/tend/runs/261125-18jsc/ve
 
 A failure that is **not** actionable (a finding needs a decision from the
 owner) skips the repair and goes straight to publish, with the same result.
-Running tend again does not repair a second time.
+Running tend again does not repair a second time. What happens next is
+yours: change the branch yourself, use GitHub's "Request changes" on the pull
+request (the next run gives your review to the implementer), or close it.
 
 This is the built-in flow, which has no `land`. In a flow that lands every
 head (`publish: ok → land`), the failed head reaches `land`, which refuses it:
