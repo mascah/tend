@@ -1,0 +1,5 @@
+title: "Hold a candidate that touches a protected path for the owner"
+created: 2026-11-25T16:45:23Z
+description: At land, a head whose change touches a protected path named on the target lands only with a person's approval.
+schema: default
+base: 2a8ae80ca15308c8556fa7ba70821d16b6779a1c
