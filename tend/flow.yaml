@@ -1,0 +1,61 @@
+# tend's own flow, read from main as origin holds it. The build flow is
+# tend's built-in one with landing added, supervised: a head that passed
+# review lands once a person with write access approves it on GitHub. The
+# propose flow stays built in.
+watch:
+  at_once: 2
+build:
+  start: implement
+  steps:
+    implement:
+      agent: claude
+      prompt: prompts/implement-{kind}.md
+      result: commit
+      next:
+        ok: review
+    review:
+      agent: codex
+      prompt: prompts/review.md
+      result: verdict verdict-{head}.json
+      next:
+        success: publish
+        failure: publish
+        actionable: repair
+    repair:
+      continue: implement
+      prompt: prompts/repair.md
+      result: commit
+      limit: 1
+      next:
+        ok: review
+        spent: publish
+    publish:
+      next:
+        ok: end
+        approved: land
+        requested: request
+    request:
+      continue: implement
+      prompt: prompts/request.md
+      result: commit or file reply-{review_id}
+      next:
+        ok: review
+    land:
+      next:
+        ok: end
+        conflict: resolve
+        failed: fix
+    resolve:
+      continue: implement
+      prompt: prompts/conflict.md
+      result: commit
+      limit: 1
+      next:
+        ok: review
+    fix:
+      continue: implement
+      prompt: prompts/failed.md
+      result: commit
+      limit: 1
+      next:
+        ok: review
