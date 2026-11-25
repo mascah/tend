@@ -165,7 +165,10 @@ func (s *sc) overview() string { // tend status <repo>, both streams as 2>&1
 }
 
 // tend started in the background, its output in files so an agent that
-// outlives it holds no pipe of ours; with the first implementer prompt sent.
+// outlives it holds no pipe of ours; returned once the implementer holds its
+// first prompt, under IMPL_SLEEP, which every caller sets. The stand-in logs
+// the prompt before it writes the agent's status, pending turn and sleeper,
+// so the sleeper file, written last, is what is waited for.
 func (s *sc) background(env ...string) *exec.Cmd {
 	c := s.cmd(s.dir, env, tendBin, s.repo, "261114-k0000")
 	f, err := os.Create(s.dir + "/bg")
@@ -178,7 +181,7 @@ func (s *sc) background(env ...string) *exec.Cmd {
 		s.t.Fatal(err)
 	}
 	for range 100 {
-		if s.count(s.log(), `^agent prompt impl-`) > 0 {
+		if exists(s.st + "/sleeper") {
 			break
 		}
 		time.Sleep(100 * time.Millisecond)
