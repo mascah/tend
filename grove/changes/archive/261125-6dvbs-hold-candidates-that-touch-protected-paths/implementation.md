@@ -74,6 +74,7 @@ round fetches it and holds again before merging it in.
 Check: `hold` sets the global `head` to the landing head before calling
 `approved()`, which reads it; `head` is the branch's HEAD at that point
 either way.
+Found: the flows spec's scenario "The implementer's list is not read" says the head is held "as the landing change spec's" requirement says; folded into `grove/specs/flows/spec.md` word for word, as `grove archive` requires, it now names a change spec where it means the landing spec. Seen reconciling the specs.
 Also changed: `testdata/bin/turn.sh` — the implementer stand-in runs
 `BUILD_ALSO` before committing its build and `FIX_ALSO` in a repair or fix,
 so tests can have a head edit chosen files.
@@ -107,3 +108,6 @@ wholly planned; it now says the landing hold is built.
 - landing, decided again before the merge from the target read afresh: `landing_test.go` `TestLanding/protect-read-again`, passed
 
 ## Reconciliation
+
+- flows: applied to grove/specs/flows/spec.md
+- landing: applied to grove/specs/landing/spec.md
