@@ -39,6 +39,9 @@ claim keeps work apart.
 3. **Grove's claim.** Grove refuses a claim that overlaps work in flight (for
    example, a planned file another attempt holds), on any machine. tend stops
    with Grove's sentence and leaves no worktree or branch.
+   Issue builds (`issue-<n>`, Jira keys) have no Grove claim, so nothing checks
+   whether two of them touch the same files; at most a conflict shows when
+   the second lands (`conflict`, then `resolve`).
 4. **Separate places.** Each attempt has its own worktree, branch, run folder
    and agents, named after the attempt (`impl-<attempt-id>`) or head
    (`rev-<short head>`).

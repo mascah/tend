@@ -58,7 +58,7 @@ and choose "Yes, I trust this folder".
 3. Add a line to `TEND_STATE/publish` with the exact origin URL and the bot:
 
     ```sh
-    echo "$(git -C <repo> remote get-url origin) your-bot" >> ~/.local/state/tend/publish
+    echo "$(git -C <repo> remote get-url origin) your-bot" >> "${TEND_STATE:-${XDG_STATE_HOME:-$HOME/.local/state}/tend}/publish"
     ```
 
 Now `tend <repo> <id>` pushes the branch and opens the pull request as the bot

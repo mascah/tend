@@ -29,7 +29,8 @@ pane of its own. Every `WATCH_SECONDS` (default 300) it does one pass:
     ```
 
     - **With a count**, it keeps that many attempts of the repository going on
-      this runner: attempts to run again come first, then every cycle not done
+      this runner: attempts to run again (for the reasons in step 2 below)
+      come first, then every cycle not done
       and change in no cycle that Grove calls claimable, oldest first, marked
       unattended or not. Each is started in the background, and watch waits
       until Grove has recorded its claim before choosing the next.
