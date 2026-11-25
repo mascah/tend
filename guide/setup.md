@@ -157,6 +157,8 @@ person (exit 3), "did not pass review, so tend lands nothing".
 - Set a branch rule on the target that requires the project's CI and
   `tend/review`, and requires branches to be up to date. tend checks the head
   itself; the rule closes the moment between its check and GitHub's merge.
+- The repository must allow squash merging: tend merges with GitHub's squash
+  method, and a refusal stops for a person (exit 3).
 - The bot must be allowed to merge and must not be able to bypass the rule.
 - A rule that dismisses approvals on new commits undoes an approval whenever
   tend merges the target in.
@@ -202,5 +204,5 @@ stay on GitHub.
 - [ ] a bot account with write access and permission to merge, signed in to `gh`
 - [ ] `<origin-url> <bot>` in `TEND_STATE/publish`
 - [ ] `tend/flow.yaml` on origin's target holding the whole `build` flow with `land` (supervised or autonomous) and `resolve`/`fix`; `tend flow <repo>` accepts it
-- [ ] CI that runs on pull requests, and a branch rule requiring it and `tend/review`
+- [ ] CI that runs on pull requests, squash merging allowed, and a branch rule requiring CI and `tend/review`
 - [ ] `tend <repo> <id>` run in a Herdr pane or rex terminal, or `tend watch <repo>`

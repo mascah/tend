@@ -32,7 +32,7 @@ pane of its own. Every `WATCH_SECONDS` (default 300) it does one pass:
       this runner: attempts to run again come first, then every cycle not done
       and change in no cycle that Grove calls claimable, oldest first, marked
       unattended or not. Each is started in the background, and watch waits
-      for its claim to land before choosing the next.
+      until Grove has recorded its claim before choosing the next.
     - Then it runs `tend propose` on the repository ([intake](intake.md)),
       unless one of its requests waits for a person.
     - **Without a count**, it then starts only the oldest cycle Grove would
