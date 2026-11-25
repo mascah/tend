@@ -33,6 +33,18 @@ nothing (`/schema.sql` means the root's `schema.sql` only, as any entry with
 a `/` in it does), and an entry that is only `/`, or holds `//`, is not
 valid, since it names no path. `*` is the only wildcard; any other character
 matches itself.
+Check: an entry ending in `/` covers the folder's own path as well as all in
+it, so a gitlink added at `.claude` itself is held under `.claude/`. A path
+Git gives does not say whether it is a gitlink or a file, so a folder entry
+with `*` in its last segment also covers files at that level:
+`.github/*/` covers `.github/CODEOWNERS`. That holds more for a person, never
+less. The pull request's review found a gitlink at a protected folder's own
+path landing unheld; shown by `TestProtectedPaths` and
+`TestLanding/protect-submodule-folder`.
+Check: a YAML alias in `protect` resolves to what it names, so
+`protect: [&s schema.sql, *s]` is valid; an alias of a list or a map is
+refused as any such entry is. The pull request's review found aliases
+refused; shown by `TestProtectFaults`.
 Check: `protect:` with no value, or `protect: null`, is not valid: the key is
 there and holds no list, so tend exits 3 saying `tend/flow.yaml gives
 protect no list` (`decode` notes the key, as YAML decodes it to no
@@ -110,7 +122,8 @@ Also changed: `testdata/bin/turn.sh` — the implementer stand-in runs
 so tests can have a head edit chosen files.
 Also changed: `guide/flows-reference.md` — its table of top-level keys said
 any key but `build`, `propose` and `watch` is refused; it now lists
-`protect`, its fault, and a section on protected paths.
+`protect`, its fault, and a section on protected paths, a folder entry
+covering the folder's own path.
 Also changed: `guide/concepts/landing.md` — its steps and diagram said
 every reviewed head with passing checks lands; they now show the hold.
 Also changed: `guide/setup.md` — it said every head that passed review lands
@@ -132,7 +145,7 @@ wholly planned; it now says the landing hold is built.
 - landing "A protected file moved away": `landing_test.go` `TestLanding/protect-renamed`, passed
 - landing "The candidate unprotects a path": `landing_test.go` `TestLanding/protect-unprotected`, passed
 - landing "The target moves in a carried head": `landing_test.go` `TestLanding/protect-carried` and `TestLanding/protect-target-own`, passed; `TestLanding/protect-run-folder` (an approval counts through two merges of the target, whatever verdict files the run folder holds), passed
-- landing, changed paths from Git whatever the repository's config: `landing_test.go` `TestLanding/protect-submodule-hidden` (a gitlink under `.claude/` with `diff.ignoreSubmodules=all` set from the worktree), passed
+- landing, changed paths from Git whatever the repository's config: `landing_test.go` `TestLanding/protect-submodule-hidden` (a gitlink under `.claude/` with `diff.ignoreSubmodules=all` set from the worktree), passed; `TestLanding/protect-submodule-folder` (a gitlink at `.codex`, the protected folder's own path), passed
 - landing "A head made at fix": `landing_test.go` `TestLanding/protect-fix`, passed
 - landing "An approval before the implementer's new head": `landing_test.go` `TestLanding/protect-resolved`, passed
 - landing "A supervised flow": `landing_test.go` `TestLanding/protect-supervised`, passed

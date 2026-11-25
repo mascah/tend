@@ -292,7 +292,7 @@ protect: [tend/, .github/workflows/, CODEOWNERS, PRINCIPLES.md, grove.yaml,
 ```
 
 An entry is a path from the repository's root. One ending in `/` covers that
-folder and everything in it; one with no `/` matches a file of that name in
+folder, its own path (where a submodule may sit) and everything in it; one with no `/` matches a file of that name in
 any folder (`CLAUDE.md` covers `web/CLAUDE.md`); `*` matches within one path
 segment. `tend flow` prints the list in effect.
 

@@ -101,6 +101,9 @@ func (l *pathList) UnmarshalYAML(n *yaml.Node) error {
 	}
 	*l = make(pathList, 0, len(n.Content))
 	for _, e := range n.Content {
+		for e.Kind == yaml.AliasNode && e.Alias != nil {
+			e = e.Alias
+		}
 		switch {
 		case e.Kind == yaml.ScalarNode && e.Tag == "!!null":
 			*l = append(*l, "")
@@ -145,7 +148,7 @@ func (ff *flowFile) protected() ([]string, bool) {
 }
 
 // What an entry matches: from the repository's root (a leading / changes
-// nothing), a folder and all in it when it ends in /, a file of that name in
+// nothing), a folder, its own path and all in it, when it ends in /, a file of that name in
 // any folder when it has no / at all, * within one path segment.
 func entryRE(e string) *regexp.Regexp {
 	dir := strings.HasSuffix(e, "/")
@@ -156,7 +159,7 @@ func entryRE(e string) *regexp.Regexp {
 	re := strings.Join(segs, "/")
 	switch {
 	case dir:
-		re = "^" + re + "/"
+		re = "^" + re + "(/|$)" // the folder's own path too, as a gitlink may be
 	case !strings.Contains(e, "/"):
 		re = "(^|/)" + re + "$"
 	default:

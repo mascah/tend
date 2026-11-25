@@ -102,6 +102,8 @@ func TestProtectFaults(t *testing.T) {
 		{"a list in the list", "protect: [[a]]\n", "protect holds an entry that is not a path"},
 		{"a doubled slash", "protect: [\"//migrations//\"]\n", `gives protect the entry "//migrations//"`},
 		{"one leading slash", "protect: [/schema.sql]\n", ""},
+		{"an alias", "protect: [&s schema.sql, *s]\n", ""},
+		{"an alias of a list", "x: &l [a]\nprotect: [*l]\n", "protect holds an entry that is not a path"},
 	} {
 		got := faultOf(c.text)
 		if c.want == "" && got != "" || !strings.Contains(got, c.want) {
@@ -135,9 +137,23 @@ func TestProtectedPaths(t *testing.T) {
 			"wrangler.toml", "web/wrangler.jsonc", "go.sum", "vendor/x/go.sum", ".claude/settings.json", "grove.yaml"}},
 		{[]string{"schema.sql", "migrations/"}, []string{"schema.sql", "db/schema.sql", "migrations/001.sql"}},
 		{[]string{"/schema.sql", "db/migrations/"}, []string{"schema.sql", "db/migrations/001.sql"}},
-		{[]string{"db/*.sql", ".github/*/"}, []string{".github/workflows/ci.yml", "db/schema.sql"}},
+		// .github/*/ covers .github/CODEOWNERS too: a path at a folder
+		// entry's own place may be a gitlink, which Git's name does not tell.
+		{[]string{"db/*.sql", ".github/*/"}, []string{".github/workflows/ci.yml", ".github/CODEOWNERS", "db/schema.sql"}},
 	} {
 		if got := covered(c.entries, paths); !slices.Equal(got, c.want) {
+			t.Errorf("%v covers %v, want %v", c.entries, got, c.want)
+		}
+	}
+	// A folder entry covers the folder's own path, as a gitlink there is, and
+	// no path that only begins with its name.
+	for _, c := range []struct {
+		entries, want []string
+	}{
+		{defaultProtect, []string{".claude", "tend", ".github/workflows"}},
+		{[]string{"migrations/"}, []string{"migrations"}},
+	} {
+		if got := covered(c.entries, []string{".claude", ".clauderc", "tend", "tendency", ".github/workflows", ".github/workflows.md", "migrations", "db/migrations"}); !slices.Equal(got, c.want) {
 			t.Errorf("%v covers %v, want %v", c.entries, got, c.want)
 		}
 	}

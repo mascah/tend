@@ -373,6 +373,12 @@ var landScenarios = []scenario{
 		s.check("the config was set where the worktree reads it", s.git(s.worktree(), "config", "diff.ignoreSubmodules") == "all")
 		s.check("and nothing is merged", !s.merged() && s.merges() == 0)
 	}},
+	{"protect-submodule-folder", func(s *sc) {
+		s.lands(false, "check success")
+		r := s.run(`BUILD_ALSO=mkdir -p .codex && git update-index --add --cacheinfo "160000,$(git rev-parse HEAD),.codex"`)
+		s.check("a gitlink at the protected folder .codex/'s own path is held", r.held(".codex"))
+		s.check("and nothing is merged", !s.merged() && s.merges() == 0)
+	}},
 	{"protect-target-own", func(s *sc) {
 		s.lands(false, "check success")
 		r := s.run(`BEFORE_MERGE=git clone -q "$t/repo.git" "$t/other" && cd "$t/other" && echo "FROM scratch" >Dockerfile && git add Dockerfile && git commit -qm theirs && git push -q origin main`)
