@@ -83,8 +83,13 @@ request's review found the first version following `carried`, which read
 verdict files, and `git diff` honouring `diff.ignoreSubmodules`;
 otherwise it stops (exit 3) naming the paths. `landStep` calls it in the
 first round after fetching the target, before any merge-in, in every round
-where the target moved, before merging it in, and just before asking
-GitHub to merge.
+where the target moved, before merging it in (so before `conflict` can be
+given), before giving `failed` for a failed check, against the target
+fetched again, and just before asking GitHub to merge. So `conflict` and
+`failed` are given only for a head that may land: a held head prompts no
+agent at `resolve` or `fix` and pushes nothing. The pull request's review
+found `failed` given before the hold was read again, so a head whose
+approval was dismissed while its checks failed went to `fix`.
 
 Checks: `go test ./...`, passed (the existing landing tests unchanged). The
 new `TestLanding/protect-*` scenarios fail with the hold disabled, except
@@ -147,6 +152,7 @@ wholly planned; it now says the landing hold is built.
 - landing "The target moves in a carried head": `landing_test.go` `TestLanding/protect-carried` and `TestLanding/protect-target-own`, passed; `TestLanding/protect-run-folder` (an approval counts through two merges of the target, whatever verdict files the run folder holds), passed
 - landing, changed paths from Git whatever the repository's config: `landing_test.go` `TestLanding/protect-submodule-hidden` (a gitlink under `.claude/` with `diff.ignoreSubmodules=all` set from the worktree), passed; `TestLanding/protect-submodule-folder` (a gitlink at `.codex`, the protected folder's own path), passed
 - landing "A head made at fix": `landing_test.go` `TestLanding/protect-fix`, passed
+- landing, a held head is given no outcome that prompts an agent: `landing_test.go` `TestLanding/protect-approval-gone` (the approval dismissed while a failing check is read: tend stops naming `CLAUDE.md`, with no `fix` prompt and nothing pushed), passed
 - landing "An approval before the implementer's new head": `landing_test.go` `TestLanding/protect-resolved`, passed
 - landing "A supervised flow": `landing_test.go` `TestLanding/protect-supervised`, passed
 - landing, decided again before the merge from the target read afresh: `landing_test.go` `TestLanding/protect-read-during-checks` (the target protects the candidate's paths while its checks are read; no merge request and no merge-in), passed; `TestLanding/protect-read-again` (the target moves after the merge request, and the refused merge is held on retry), passed

@@ -397,6 +397,19 @@ var landScenarios = []scenario{
 		s.check("before GitHub is asked to merge", s.merges() == 0 && !s.merged())
 		s.check("and before the target is merged in", s.git(s.repo+".git", "rev-parse", s.branch()) == s.head() && len(s.parents(s.head())) == 2)
 	}},
+	{"protect-approval-gone", func(s *sc) {
+		s.lands(false, "check failure")
+		r := s.run(`BUILD_ALSO=echo "Be brief." >>CLAUDE.md`)
+		s.check("a head that edits CLAUDE.md is held", r.held("CLAUDE.md"))
+		reviewed := s.head()
+		s.approve(reviewed)
+		// The approval is dismissed while the checks, which fail, are read.
+		r = s.run(`DURING_CHECKS=jq 'map(.state = "DISMISSED")' "$HERDR_STATE/reviews" >"$HERDR_STATE/r.new" && mv "$HERDR_STATE/r.new" "$HERDR_STATE/reviews"`)
+		s.check("its approval gone, a failed check stops for a person, naming the protected path", r.held("CLAUDE.md"))
+		s.check("prompting no agent to fix it", s.prompts("tend could not land") == 0)
+		s.check("and pushing nothing", s.head() == reviewed && s.git(s.repo+".git", "rev-parse", s.branch()) == reviewed)
+		s.check("and merging nothing", !s.merged() && s.merges() == 0)
+	}},
 	{"protect-fix", func(s *sc) {
 		s.lands(false, "check failure")
 		r := s.run(`FIX_ALSO=mkdir -p .github/workflows && echo "on: push" >.github/workflows/ci.yml`)

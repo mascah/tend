@@ -267,6 +267,10 @@ func landStep() string {
 		}
 		switch checked(h, time.Now().After(until)) {
 		case "failed":
+			// Only a head that may land goes on to fix: the hold, under the
+			// target as it stands now, decides before failed is given.
+			fetchTarget()
+			hold(h)
 			return "failed"
 		case "":
 			stage("working", fmt.Sprintf("waiting for the checks on %s at %s", branch, short(h)), "tend squash-merges "+pr+" once every check passes")
