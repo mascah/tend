@@ -1,0 +1,65 @@
+# The documentation site: zensical build (or zensical serve to preview).
+# The pages are in guide/; docs/work/ and grove/ are history and specs, and
+# stay out of the site.
+[project]
+site_name = "tend"
+site_description = "How tend takes agreed work through coding agents to a reviewed, published branch."
+site_url = "https://mascah.github.io/tend/"
+repo_url = "https://github.com/mascah/tend"
+repo_name = "mascah/tend"
+docs_dir = "guide"
+site_dir = "site"
+strict = true
+
+nav = [
+  { "Home" = "index.md" },
+  { "How a run goes" = "run.md" },
+  { "Concepts" = [
+    "concepts/index.md",
+    "concepts/work-items.md",
+    "concepts/attempts.md",
+    "concepts/flows.md",
+    "concepts/publication.md",
+    "concepts/landing.md",
+    "concepts/watch.md",
+    "concepts/intake.md",
+    "concepts/recovery.md",
+    "concepts/locks.md",
+    "concepts/tend-state.md",
+    "concepts/publish-file.md",
+  ] },
+  { "Commands" = "commands.md" },
+  { "Flows reference" = "flows-reference.md" },
+  { "Setup" = "setup.md" },
+  { "What's built vs planned" = "built-vs-planned.md" },
+  { "Glossary" = "glossary.md" },
+]
+
+[project.theme]
+features = [
+  "navigation.sections",
+  "navigation.indexes",
+  "navigation.top",
+  "content.code.copy",
+]
+
+[[project.theme.palette]]
+scheme = "default"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to dark mode"
+
+[[project.theme.palette]]
+scheme = "slate"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to light mode"
+
+[project.markdown_extensions]
+admonition = {}
+attr_list = {}
+tables = {}
+toc.permalink = true
+pymdownx.details = {}
+pymdownx.tasklist.custom_checkbox = true
+pymdownx.superfences.custom_fences = [
+  { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" },
+]
