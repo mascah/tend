@@ -10,6 +10,7 @@ turn() { # name text
 			for d in grove/changes/*/; do
 				[ "$d" = grove/changes/archive/ ] || grove archive "$(basename "$d" | cut -d- -f1-2)" >/dev/null 2>&1
 			done
+			eval "${BUILD_ALSO:-}" # more the build changes, as a test gives it
 			git add -A && git commit -qm build
 			case ${STRAY:-} in # work left outside the attempt, as memex's cycle did
 			worktree) git worktree add -q "../stray-$1" -b "stray-$1" >/dev/null 2>&1 ;;
@@ -36,7 +37,7 @@ turn() { # name text
 		*"does not merge into it cleanly"*) # how the branch was left, then the target merged in, keeping ours
 			{ git rev-parse HEAD; git rev-parse -q --verify MERGE_HEAD || true; git status --porcelain; } >"$s/at-conflict"
 			git merge -q -X ours --no-edit origin/main >/dev/null 2>&1 ;;
-		*) echo fix >>a.txt && git commit -qam repair ;;
+		*) echo fix >>a.txt && { [ -z "${FIX_ALSO:-}" ] || { eval "$FIX_ALSO" && git add -A; }; } && git commit -qam repair ;;
 		esac ;;
 	prop-*)
 		case $2 in

@@ -71,6 +71,35 @@ func carry(h string, c []string) {
 	write(mark, from+"\n")
 }
 
+// The paths head h changes: those that differ between h and the commit
+// where h and the target's tip as fetched meet, a renamed file under both
+// its names. Read from Git alone.
+func changedPaths(h string) []string {
+	s := git("diff", "--no-renames", "--name-only", "-z", base+"..."+h)
+	return strings.FieldsFunc(s, func(r rune) bool { return r == 0 })
+}
+
+// A head whose change touches a protected path of the target as now fetched
+// lands only once a person with write access approves it, or a head it is
+// carried from; otherwise tend stops for one, naming the paths. Decided from
+// Git and GitHub's reviews alone, never from a verdict or a file an agent writes.
+func hold(h string) {
+	ps, _ := protectedAt(base)
+	touched := covered(ps, changedPaths(h))
+	if len(touched) == 0 {
+		return
+	}
+	head = h
+	if approved() {
+		return
+	}
+	what := "the protected path "
+	if len(touched) > 1 {
+		what = "the protected paths "
+	}
+	stop("%s at %s changes %s%s, so tend lands it only once a person with write access approves that head on %s", branch, short(h), what, and(touched), pr)
+}
+
 // One landing at a time for each repository on this runner: the lock, held
 // until it is closed or tend exits.
 func landingLock() *os.File {
@@ -147,7 +176,8 @@ func checked(h string, over bool) string {
 }
 
 // The build flow's land: a head that passed review, or is carried from one
-// that did, with its pull request open, landed one at a time: the target
+// that did, with its pull request open, landed one at a time, held for a
+// person's approval while its change touches a protected path: the target
 // merged in when it moved, never by a forced push, every check on the head
 // waited for, then the pull request squash-merged at exactly that head by
 // the publishing account, its title and number the subject and its
@@ -167,6 +197,7 @@ func landStep() string {
 	wait := time.Duration(ms) * time.Millisecond
 	poll := min(20*time.Second, wait/4)
 	until := time.Now().Add(wait)
+	held := false // whether the head was held to its protected paths yet
 	// Each round reads the pull request, the head and the target afresh, so a
 	// merge by a person or a target that moved is seen while checks run.
 	for round := 0; ; round++ {
@@ -195,7 +226,12 @@ func landStep() string {
 			stop("%s's head is %s, not %s's %s, so tend lands nothing", pr, short(o), branch, short(h))
 		}
 		fetchTarget()
-		if !ok("git", "merge-base", "--is-ancestor", base, "HEAD") {
+		moved := !ok("git", "merge-base", "--is-ancestor", base, "HEAD")
+		if moved || !held {
+			hold(h)
+			held = true
+		}
+		if moved {
 			stage("working", fmt.Sprintf("merging %s into %s", base, branch), "tend waits for the merged head's checks, then lands it")
 			if _, err := both("git", "merge", "--no-ff", "--no-edit", "-m", "Merge "+target+" into "+branch, base); err != nil {
 				quiet("git", "merge", "--abort")
@@ -221,6 +257,7 @@ func landStep() string {
 			stage("working", fmt.Sprintf("waiting for the checks on %s at %s", branch, short(h)), "tend squash-merges "+pr+" once every check passes")
 			continue
 		}
+		hold(h)
 		stage("working", fmt.Sprintf("landing %s at %s", pr, short(h)), "GitHub squash-merges it")
 		// GitHub's merge itself, never gh pr merge, which may queue the pull
 		// request or defer the merge and refuses a blocked one in words of its own.

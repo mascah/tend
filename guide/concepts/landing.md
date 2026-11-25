@@ -6,7 +6,9 @@ flowchart TD
     P -- "no PR (origin not listed)" --> N["exit 3"]
     P -- "head did not pass" --> N
     P -- yes --> L["take the landing lock<br/>(one landing per repository)"]
-    L --> M{"head has origin's target?"}
+    L --> H{"touches a protected path,<br/>no person's approval?"}
+    H -- yes --> N
+    H -- no --> M{"head has origin's target?"}
     M -- no --> MG["merge target into branch, push"]
     MG -- conflict --> C(["outcome: conflict"])
     MG -- clean --> CR["tend/review carried to the merge commit"]
@@ -15,7 +17,9 @@ flowchart TD
     W -- "any failed" --> F(["outcome: failed"])
     W -- "pending" --> W
     W -- "only tend/review, or still pending after TIMEOUT_MS" --> N
-    W -- "all passed" --> SQ["squash-merge at exactly that head,<br/>as the bot"]
+    W -- "all passed" --> H2{"protected path checked again"}
+    H2 -- "held" --> N
+    H2 -- "clear" --> SQ["squash-merge at exactly that head,<br/>as the bot"]
     SQ -- "merged" --> OK(["outcome: ok"])
     SQ -- "target moved" --> M
     SQ -- "other refusal" --> N
@@ -30,6 +34,12 @@ At `land`, tend takes a head that passed review (or one carried from it) whose
 pull request is open, and, one landing at a time per repository on this
 runner:
 
+0. **Holds a head that touches a protected path.** If the head's change
+   against the target touches a [protected path](../flows-reference.md#protected-paths),
+   it lands only once a person with write access has approved that head (or
+   the head it is carried from). Otherwise tend merges nothing and stops
+   (exit 3), naming the paths. This is checked again just before the merge,
+   with the protected paths read afresh from the target.
 1. **Merges the target in** when the head lacks the target's tip, as a merge
    commit pushed without force. A clean merge keeps the verdict: the merge
    commit gets `tend/review` "carried from" the reviewed head, with no new
