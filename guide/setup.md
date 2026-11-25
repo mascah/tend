@@ -70,7 +70,7 @@ To have tend merge, commit `tend/flow.yaml` to the target branch and push it
 (tend reads `origin/<target>`). A flow the file names replaces the built-in
 one **whole**, so the file holds the entire `build` flow: the built-in steps
 (as `tend flow <repo>` prints them) plus `land`, `resolve` and `fix`. This
-complete file lands every reviewed head and keeps two attempts going under
+complete file lands every head that passed review and keeps two attempts going under
 watch; `tend flow` accepts it:
 
 ```yaml
@@ -125,9 +125,11 @@ wrong.
 
 ### Supervised or autonomous
 
-The only difference is `publish`'s `next`.
+The only difference is `publish`'s `next`. Both work today. (This
+"autonomous" landing shape is not the planned [autonomous flow](built-vs-planned.md#4-the-autonomous-flow),
+plan step 4, which is not built.)
 
-**Autonomous** (the file above): every head that passed review lands.
+**Autonomous landing** (the file above): every head that passed review lands.
 
 ```yaml
     publish:

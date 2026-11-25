@@ -63,6 +63,11 @@ After publishing, the step's outcome is:
   head approves.
 - `ok` otherwise.
 
+**Afterwards.** Once the pull request is merged or closed, the next `tend` or
+`tend propose` in that repository removes the worktree, its local branch and
+the agents' place, if the worktree's head is the pull request's and it holds
+no uncommitted files; otherwise it leaves it and says why.
+
 tend does not wait for people at `publish`. [Watch](watch.md) runs the attempt
 again when a change request or approval arrives. Merging stays a person's,
 unless the flow has a [`land`](landing.md) step.

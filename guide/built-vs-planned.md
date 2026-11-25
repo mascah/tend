@@ -64,7 +64,9 @@ Also built on the way: skipping startup notices (261121-m9bxm), the rex
 
 ### 4. The autonomous flow
 
-Status: not started.
+Status: not started. (Not the same as the "autonomous" landing shape in
+[Setup](setup.md#supervised-or-autonomous), which exists today: that only
+merges reviewed pull requests without a person's approval.)
 
 Steps a project opts into so work flows without a person: decompose a goal
 into requests, check a proposal, plan. With them, the owner would still hold:
