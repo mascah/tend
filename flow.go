@@ -36,10 +36,11 @@ type flow struct {
 }
 
 type flowFile struct {
-	Watch   *watchSetting `yaml:"watch,omitempty"`
-	Protect *pathList     `yaml:"protect,omitempty"` // the protected paths, nil for tend's own
-	Build   *flow         `yaml:"build,omitempty"`
-	Propose *flow         `yaml:"propose,omitempty"`
+	Watch       *watchSetting `yaml:"watch,omitempty"`
+	Protect     *pathList     `yaml:"protect,omitempty"` // the protected paths, nil for tend's own
+	nullProtect bool          // protect given with no list, which YAML decodes as no protect
+	Build       *flow         `yaml:"build,omitempty"`
+	Propose     *flow         `yaml:"propose,omitempty"`
 }
 
 // How many attempts tend watch keeps going in the repository: with it, watch
@@ -114,6 +115,9 @@ func (l *pathList) UnmarshalYAML(n *yaml.Node) error {
 
 // Why protect is not valid, said after the file's name, or "".
 func (ff *flowFile) protectFault() string {
+	if ff.nullProtect {
+		return "gives protect no list, where protect is a list of paths"
+	}
 	if ff.Protect == nil {
 		return ""
 	}
@@ -374,6 +378,11 @@ func decode(s string, ff *flowFile) string {
 		return "is not a flow file tend can read: " + strings.NewReplacer("unmarshal errors: ", "",
 			"in type main.step", "in a step", "in type main.flowFile", "at the top, where a flow is build or propose",
 			"in type main.flow", "in a flow", "in type main.watchSetting", "in watch").Replace(msg)
+	}
+	if ff.Protect == nil { // protect: or protect: null, which is there and no list
+		var top map[string]any
+		yaml.Unmarshal([]byte(s), &top)
+		_, ff.nullProtect = top["protect"]
 	}
 	return ""
 }

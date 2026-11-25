@@ -346,6 +346,33 @@ var landScenarios = []scenario{
 		s.check("once approved, the head carried across a clean merge of the target lands", r.passed() && s.merged())
 		s.check("at the merge commit, approved only at the head it is carried from", slices.Equal(s.mergedAt(), []string{m}) && slices.Equal(s.parents(m), []string{m, reviewed, theirs}) && s.approvals() == 1)
 	}},
+	{"protect-run-folder", func(s *sc) {
+		s.lands(false, "check success")
+		r := s.run(`BUILD_ALSO=echo "Be brief." >>CLAUDE.md`)
+		s.check("a head that edits CLAUDE.md is held", r.held("CLAUDE.md"))
+		reviewed := s.head()
+		s.approve(reviewed)
+		s.pushed()
+		s.ci("check pending")
+		r = s.run("TIMEOUT_MS=400")
+		m1 := s.head()
+		s.check("approved, the target is merged in, and tend stops waiting for its checks", r.code == 3 && r.said(`still unfinished`) && s.parents(m1)[1] == reviewed)
+		// A verdict for the merge commit, as anything that writes the run
+		// folder could leave there, and the target moved again.
+		s.write(s.runDir()+"/verdict-"+m1+".json", `{"head": "`+m1+`", "conclusion": "success", "actionable": false, "summary": "Fine."}`)
+		s.bash(s.dir, `git clone -q "$t/repo.git" "$t/third" && cd "$t/third" && echo again >c.txt && git add c.txt && git commit -qm again && git push -q origin main`)
+		s.ci("check success")
+		r = s.run()
+		m2 := s.head()
+		s.check("the approval of the reviewed head still counts through both merges of the target: it lands", r.passed() && s.merged() && slices.Equal(s.mergedAt(), []string{m2}) && s.parents(m2)[1] == m1)
+	}},
+	{"protect-submodule-hidden", func(s *sc) {
+		s.lands(false, "check success")
+		r := s.run(`BUILD_ALSO=git config diff.ignoreSubmodules all && mkdir -p .claude/vendor && git update-index --add --cacheinfo "160000,$(git rev-parse HEAD),.claude/vendor"`)
+		s.check("a gitlink added under .claude/ is held, though the repository's config ignores submodules", r.held(".claude/vendor"))
+		s.check("the config was set where the worktree reads it", s.git(s.worktree(), "config", "diff.ignoreSubmodules") == "all")
+		s.check("and nothing is merged", !s.merged() && s.merges() == 0)
+	}},
 	{"protect-target-own", func(s *sc) {
 		s.lands(false, "check success")
 		r := s.run(`BEFORE_MERGE=git clone -q "$t/repo.git" "$t/other" && cd "$t/other" && echo "FROM scratch" >Dockerfile && git add Dockerfile && git commit -qm theirs && git push -q origin main`)

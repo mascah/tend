@@ -95,6 +95,9 @@ func TestProtectFaults(t *testing.T) {
 		{"the root", "protect: [/]\n", `gives protect the entry "/"`},
 		{"not a list", "protect: schema.sql\n", "protect is not a list of paths"},
 		{"a null entry", "protect: [null]\n", "gives protect an empty entry"},
+		{"null", "protect: null\n", "gives protect no list"},
+		{"no value", "protect:\n", "gives protect no list"},
+		{"no protect", "watch: {at_once: 1}\n", ""},
 		{"a null among others", "protect:\n  - schema.sql\n  -\n", "gives protect an empty entry"},
 		{"a list in the list", "protect: [[a]]\n", "protect holds an entry that is not a path"},
 		{"a doubled slash", "protect: [\"//migrations//\"]\n", `gives protect the entry "//migrations//"`},
@@ -455,6 +458,11 @@ var flowScenarios = []scenario{
 		r := s.run()
 		s.check("an empty entry stops as not valid, naming the file and protect", r.code == 3 && r.said(`^tend: tend/flow\.yaml gives protect an empty entry, where each entry is a path from the repository's root$`))
 		s.check("and starts no agent", s.agentStarts() == 0)
+		s.commit("Protect null", map[string]string{"tend/flow.yaml": "protect: null\n"})
+		r = s.run()
+		s.check("a protect of null stops as not valid, naming the file and protect", r.code == 3 && r.said(`^tend: tend/flow\.yaml gives protect no list, where protect is a list of paths$`))
+		s.check("and still starts no agent", s.agentStarts() == 0)
+		s.check("and tend flow refuses it too", s.tendIn(nil, "flow", s.repo).code == 3)
 	}},
 	{"flow-watch-count", func(s *sc) {
 		s.project("main", true)

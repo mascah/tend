@@ -33,9 +33,12 @@ nothing (`/schema.sql` means the root's `schema.sql` only, as any entry with
 a `/` in it does), and an entry that is only `/`, or holds `//`, is not
 valid, since it names no path. `*` is the only wildcard; any other character
 matches itself.
-Check: `protect:` with no value (YAML null) counts as no `protect`, so tend's
-own list applies; `protect: []` is the project's empty list, leaving only
-`tend/` protected. A null entry in the list (`protect: [null]`) is an empty
+Check: `protect:` with no value, or `protect: null`, is not valid: the key is
+there and holds no list, so tend exits 3 saying `tend/flow.yaml gives
+protect no list` (`decode` notes the key, as YAML decodes it to no
+`protect`; shown by `TestProtectFaults` and `TestFlows/flow-protect-empty`,
+after the pull request's review found it falling back to tend's own list).
+`protect: []` is the project's empty list, leaving only `tend/` protected. A null entry in the list (`protect: [null]`) is an empty
 entry and not valid: `protect` decodes through its own type, `pathList`,
 since YAML's decoding into a list of strings drops a null entry silently.
 An entry that is a list or a map is not valid either. Shown by
@@ -49,13 +52,23 @@ implementer.
 
 Status: done
 
-`landing.go` gains `changedPaths(h)` (`git diff --no-renames --name-only -z
-<target>...<head>`: the paths that differ from where the head and the
-fetched target meet, a rename under both names) and `hold(h)`, which reads
-the protected paths afresh with `protectedAt` on the fetched target, and
-where the head touches one, lands it only if publication's `approved()`
-finds the newest approving or change-requesting review by a person with
-write access, on that head or a head it is carried from, approving;
+`landing.go` gains `changedPaths(h)` (`git diff --no-renames
+--ignore-submodules=none --no-relative --name-only -z <target>...<head>`:
+the paths that differ from where the head and the fetched target meet, a
+rename under both names, a gitlink included whatever the repository's
+config says, which an implementer's worktree shares and can set),
+`cleanMerges(h)` (the head and each head it was made from by a clean merge
+of the target, followed through Git alone: parents, `merge-tree`, ancestry
+of the target) and `hold(h)`, which reads the protected paths afresh with
+`protectedAt` on the fetched target, and where the head touches one, lands
+it only if publication's `approvedOn` finds the newest approving or
+change-requesting review by a person with write access, on any head of
+`cleanMerges(h)`, approving. The hold never asks whether a head passed
+review, so no verdict or other file in the run folder changes its outcome;
+`carried`, which the review gate and the `tend/review` status still use,
+is now `cleanMerges` cut at the first head that passed review. The pull
+request's review found the first version following `carried`, which read
+verdict files, and `git diff` honouring `diff.ignoreSubmodules`;
 otherwise it stops (exit 3) naming the paths. `landStep` calls it in the
 first round after fetching the target, before any merge-in, in every round
 where the target moved, before merging it in, and just before asking
@@ -83,9 +96,11 @@ merge if the branch rule requires an up-to-date branch, and tend fetches and
 holds again before trying once more. The independent review found the first
 version reused the round's earlier fetch, so a target that added protection
 while the checks were read still got one merge request.
-Check: `hold` sets the global `head` to the landing head before calling
-`approved()`, which reads it; `head` is the branch's HEAD at that point
-either way.
+Check: publication's `approved()` is split so that `approvedOn(heads)` reads
+the reviews for the heads it is given; `approved()` gives it `carried`'s
+heads as before, and `hold` gives it `cleanMerges`.
+Also changed: `publication.go` — `approvedOn` split out of `approved`, so the
+hold can count approvals on heads followed through Git alone.
 Found: the flows spec's scenario "The implementer's list is not read" says the head is held "as the landing change spec's" requirement says; folded into `grove/specs/flows/spec.md` word for word, as `grove archive` requires, it now names a change spec where it means the landing spec. Seen reconciling the specs.
 Also changed: `testdata/bin/gh` — the GitHub stand-in runs `DURING_CHECKS`
 once as check runs are first read, so a test can move the target while the
@@ -116,7 +131,8 @@ wholly planned; it now says the landing hold is built.
 - landing "A nested agent instruction file": `landing_test.go` `TestLanding/protect-nested`, passed
 - landing "A protected file moved away": `landing_test.go` `TestLanding/protect-renamed`, passed
 - landing "The candidate unprotects a path": `landing_test.go` `TestLanding/protect-unprotected`, passed
-- landing "The target moves in a carried head": `landing_test.go` `TestLanding/protect-carried` and `TestLanding/protect-target-own`, passed
+- landing "The target moves in a carried head": `landing_test.go` `TestLanding/protect-carried` and `TestLanding/protect-target-own`, passed; `TestLanding/protect-run-folder` (an approval counts through two merges of the target, whatever verdict files the run folder holds), passed
+- landing, changed paths from Git whatever the repository's config: `landing_test.go` `TestLanding/protect-submodule-hidden` (a gitlink under `.claude/` with `diff.ignoreSubmodules=all` set from the worktree), passed
 - landing "A head made at fix": `landing_test.go` `TestLanding/protect-fix`, passed
 - landing "An approval before the implementer's new head": `landing_test.go` `TestLanding/protect-resolved`, passed
 - landing "A supervised flow": `landing_test.go` `TestLanding/protect-supervised`, passed
