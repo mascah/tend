@@ -6,8 +6,8 @@ sequenceDiagram
     participant B as tend B (change Y)
     participant K as TEND_STATE/locks
     participant G as Grove
-    A->>K: flock locks/#lt;repo#gt;-X
-    B->>K: flock locks/#lt;repo#gt;-Y (a different file: no wait)
+    A->>K: flock locks/#lt;cksum#gt;-X
+    B->>K: flock locks/#lt;cksum#gt;-Y (a different file: no wait)
     A->>K: flock setup (one tend sets up at a time)
     B-->>K: waits for setup
     A->>G: fetch, tidy, worktree, grove claim X
@@ -20,10 +20,12 @@ sequenceDiagram
     and
         B->>B: impl-#lt;attempt B#gt;, rev-#lt;head#gt;
     end
-    A->>K: flock locks/#lt;repo#gt;-land (one landing at a time)
+    A->>K: flock locks/#lt;cksum#gt;-land (one landing at a time)
 ```
 
-Tends on different work items run at once. Four things keep them apart:
+Tends on different work items run at once. Four things keep them apart.
+The locks cover one runner (one `TEND_STATE`); across machines, only Grove's
+claim keeps work apart.
 
 1. **One tend per work item.** Each tend holds an `flock` on
    `TEND_STATE/locks/<cksum>-<work item>`. The `<cksum>` names the

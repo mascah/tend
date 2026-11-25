@@ -48,8 +48,8 @@ way; only the claim and the scope differ (see [work items](concepts/work-items.m
 1. **Lock.** tend takes the [lock](concepts/locks.md) for this work item in
    this repository. If another tend holds it, tend exits 4 and does nothing.
 2. **Set up.** One tend at a time on this [TEND_STATE](concepts/tend-state.md)
-   fetches origin's target, fast-forwards the local one, tidies finished
-   worktrees, and makes its worktree.
+   fetches origin's target, fast-forwards the local one, and tidies finished
+   worktrees. It holds the setup lock until it has claimed.
 3. **Claim.** If Grove already has an attempt at this work item whose checkout
    still holds its branch, tend carries on that
    [attempt](concepts/attempts.md). Otherwise it makes a worktree from
@@ -72,9 +72,11 @@ way; only the claim and the scope differ (see [work items](concepts/work-items.m
    account, opens one pull request (draft if the head failed review), sets the
    `tend/review` status and posts each verdict as a review comment. If not, it
    says `not publishing` and keeps the verdict local.
-8. **Requested changes.** If a person with write access used GitHub's
-   "Request changes" on the head, the implementer makes the changes, the new
-   head is reviewed and published again.
+8. **Requested changes (a later run).** tend does not wait for people. If a
+   person with write access later uses GitHub's "Request changes" on the
+   head, the next run (yours, or [watch](concepts/watch.md)'s) has the
+   implementer make the changes, and the new head is reviewed and published
+   again.
 9. **Land.** Only if the project's flow has a `land` step:
    [landing](concepts/landing.md) waits for CI and squash-merges the pull
    request at exactly the reviewed head.
@@ -135,6 +137,17 @@ tend: done: grove/261125-18jsc, verdict ~/.local/state/tend/runs/261125-18jsc/ve
 A failure that is **not** actionable (a finding needs a decision from the
 owner) skips the repair and goes straight to publish, with the same result.
 Running tend again does not repair a second time.
+
+This is the built-in flow, which has no `land`. In a flow that lands every
+head (`publish: ok → land`), the failed head reaches `land`, which refuses it:
+tend stops for a person (exit 3) with "did not pass review, so tend lands
+nothing".
+
+Codex never uses GitHub's "Request changes": its verdicts are posted as
+comment reviews. A **person's** "Request changes" is different: each such
+review goes to the implementer once, at the `request` step. There is no cap
+on how many reviews a person may send, since people bound that loop (see
+[publication](concepts/publication.md)).
 
 ## Exit codes
 

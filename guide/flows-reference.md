@@ -110,9 +110,22 @@ propose:
 | `follow` | propose | The drafter commits the change and writes `summary`, or writes `declined`. |
 
 `end` and `person` are reserved: they are what follows a step, never step
-names. A project may add its own steps with any other name; the README's
-examples are `check` (a second Codex verdict), `resolve` (after a `land`
-conflict) and `fix` (after failed checks).
+names. A project may add its own steps with any other name, such as `resolve` and
+`fix` after `land` ([Setup](setup.md#5-a-flow-that-lands)), or a second
+reviewer:
+
+```yaml
+    review:
+      agent: codex
+      prompt: prompts/review.md
+      result: verdict verdict-{head}.json
+      next: {success: check, failure: publish, actionable: repair}
+    check:                      # its prompt in tend/prompts/check.md
+      agent: codex
+      prompt: prompts/check.md
+      result: verdict check-{head}.json
+      next: {success: publish}
+```
 
 ## Step fields
 

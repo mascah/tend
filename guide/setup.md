@@ -21,7 +21,7 @@ without you.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/mascah/tend/main/install.sh | sh
-curl -fsSL https://raw.githubusercontent.com/mascah/tend/main/install.sh | sh -s -- v0.1.0
+curl -fsSL https://raw.githubusercontent.com/mascah/tend/main/install.sh | sh -s -- v0.4.0   # a given version
 ```
 
 This installs a release into `~/.local/bin` (`TEND_INSTALL_DIR` changes it).
@@ -35,9 +35,10 @@ Herdr pane, or a rex terminal (`TEND_TERMINAL=herdr` or `rex` chooses).
 ## 2. TEND_STATE
 
 Optional. tend keeps its files in `$TEND_STATE`, else `$XDG_STATE_HOME/tend`,
-else `~/.local/state/tend` ([TEND_STATE](concepts/tend-state.md)). To skip
-Claude's dialog for adding each run folder, trust that folder once: run
-`claude` in it and choose "Yes, I trust this folder".
+else `~/.local/state/tend` ([TEND_STATE](concepts/tend-state.md)). Claude
+asks whether to add each new run folder; tend answers that dialog itself. To
+have Claude not ask at all, trust the state folder once: run `claude` in it
+and choose "Yes, I trust this folder".
 
 ## 3. The repository
 
@@ -65,30 +66,39 @@ Now `tend <repo> <id>` pushes the branch and opens the pull request as the bot
 ## 5. A flow that lands
 
 To have tend merge, commit `tend/flow.yaml` to the target branch and push it
-(tend reads `origin/<target>`). Start from `tend flow <repo>`, saved as that
-file, and add a `land` step with `resolve` and `fix` after it. You choose one of
-two shapes.
-
-### Supervised or autonomous
-
-**Supervised:** a person with write access approves each head on GitHub before
-it lands. `tend watch` sees the approval and runs the attempt again.
+(tend reads `origin/<target>`). A flow the file names replaces the built-in
+one **whole**, so the file holds the entire `build` flow: the built-in steps
+(as `tend flow <repo>` prints them) plus `land`, `resolve` and `fix`. This
+complete file lands every reviewed head and keeps two attempts going under
+watch; `tend flow` accepts it:
 
 ```yaml
-    publish:
-      next: {ok: end, approved: land, requested: request}
-```
-
-**Autonomous:** every head that passed review lands.
-
-```yaml
+build:
+  start: implement
+  steps:
+    implement:
+      agent: claude
+      prompt: prompts/implement-{kind}.md
+      result: commit
+      next: {ok: review}
+    review:
+      agent: codex
+      prompt: prompts/review.md
+      result: verdict verdict-{head}.json
+      next: {success: publish, failure: publish, actionable: repair}
+    repair:
+      continue: implement
+      prompt: prompts/repair.md
+      result: commit
+      limit: 1
+      next: {ok: review, spent: publish}
     publish:
       next: {ok: land, requested: request}
-```
-
-Both then need:
-
-```yaml
+    request:
+      continue: implement
+      prompt: prompts/request.md
+      result: commit or file reply-{review_id}
+      next: {ok: review}
     land:
       next: {ok: end, conflict: resolve, failed: fix}
     resolve:
@@ -103,10 +113,39 @@ Both then need:
       result: commit
       limit: 1
       next: {ok: review}
+watch:
+  at_once: 2
 ```
 
-`prompts/conflict.md` and `prompts/failed.md` are tend's own; put files of
-those names under `tend/prompts/` on the target to use yours instead.
+Every prompt named is tend's own; a file of the same name under
+`tend/prompts/` on the target is used instead. Run `tend flow <repo>` after
+pushing: it prints the flows in effect, or stops (exit 3) saying what is
+wrong.
+
+### Supervised or autonomous
+
+The only difference is `publish`'s `next`.
+
+**Autonomous** (the file above): every head that passed review lands.
+
+```yaml
+    publish:
+      next: {ok: land, requested: request}
+```
+
+**Supervised:** a person with write access approves each head on GitHub
+before it lands. tend ends at `publish` (`ok: end`) until then, and
+`tend watch` sees the approval and runs the attempt again, which goes to
+`land`.
+
+```yaml
+    publish:
+      next: {ok: end, approved: land, requested: request}
+```
+
+In the autonomous shape, a head that failed review (a non-actionable failure,
+or the repair spent) still reaches `land`, which refuses it: tend stops for a
+person (exit 3), "did not pass review, so tend lands nothing".
 
 ## 6. CI and a branch rule
 
@@ -159,6 +198,6 @@ stay on GitHub.
 - [ ] the repository has a GitHub `origin` and uses Grove (or builds `issue-<n>` without it)
 - [ ] a bot account with write access and permission to merge, signed in to `gh`
 - [ ] `<origin-url> <bot>` in `TEND_STATE/publish`
-- [ ] `tend/flow.yaml` on origin's target with `land` (supervised or autonomous) and `resolve`/`fix`
+- [ ] `tend/flow.yaml` on origin's target holding the whole `build` flow with `land` (supervised or autonomous) and `resolve`/`fix`; `tend flow <repo>` accepts it
 - [ ] CI that runs on pull requests, and a branch rule requiring it and `tend/review`
 - [ ] `tend <repo> <id>` run in a Herdr pane or rex terminal, or `tend watch <repo>`

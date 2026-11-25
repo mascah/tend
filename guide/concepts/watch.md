@@ -65,6 +65,9 @@ pane of its own. Every `WATCH_SECONDS` (default 300) it does one pass:
   and only where `gh` can see the repository and Grove answers. It reruns
   attempts of other repositories found in this runner's run folders, but
   starts nothing there.
+- **Grove.** A repository without Grove has no count and no unattended
+  cycles, so watch starts nothing there; its `tend propose` stops each pass,
+  since intake needs Grove. It still reruns that repository's issue builds.
 - **Only this runner.** Each runner counts its own attempts, under its own
   [TEND_STATE](tend-state.md). Grove's claim still refuses an overlap
   whichever machine asks.
