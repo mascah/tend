@@ -257,6 +257,15 @@ func landStep() string {
 			stage("working", fmt.Sprintf("waiting for the checks on %s at %s", branch, short(h)), "tend squash-merges "+pr+" once every check passes")
 			continue
 		}
+		// The target as it stands now, not as the round began: one that moved
+		// while the checks were read is merged in, and held first, before
+		// GitHub is asked; else the head is held to its protected paths now.
+		fetchTarget()
+		if !ok("git", "merge-base", "--is-ancestor", base, "HEAD") {
+			say("%s moved while the checks on %s were read", target, short(h))
+			round = -1 // merged in at once
+			continue
+		}
 		hold(h)
 		stage("working", fmt.Sprintf("landing %s at %s", pr, short(h)), "GitHub squash-merges it")
 		// GitHub's merge itself, never gh pr merge, which may queue the pull

@@ -93,7 +93,12 @@ func TestProtectFaults(t *testing.T) {
 		{"an empty entry", "protect: [schema.sql, \"\"]\n", "gives protect an empty entry"},
 		{"a blank entry", "protect:\n  - \" \"\n", "gives protect an empty entry"},
 		{"the root", "protect: [/]\n", `gives protect the entry "/"`},
-		{"not a list", "protect: schema.sql\n", "into protect, a list of paths"},
+		{"not a list", "protect: schema.sql\n", "protect is not a list of paths"},
+		{"a null entry", "protect: [null]\n", "gives protect an empty entry"},
+		{"a null among others", "protect:\n  - schema.sql\n  -\n", "gives protect an empty entry"},
+		{"a list in the list", "protect: [[a]]\n", "protect holds an entry that is not a path"},
+		{"a doubled slash", "protect: [\"//migrations//\"]\n", `gives protect the entry "//migrations//"`},
+		{"one leading slash", "protect: [/schema.sql]\n", ""},
 	} {
 		got := faultOf(c.text)
 		if c.want == "" && got != "" || !strings.Contains(got, c.want) {
@@ -107,11 +112,11 @@ func TestProtectedPaths(t *testing.T) {
 	if ps, own := ff.protected(); own || !slices.Equal(ps, defaultProtect) {
 		t.Errorf("no protect gives %v, own %v; want tend's own list", ps, own)
 	}
-	ff.Protect = &[]string{"schema.sql", "migrations/"}
+	ff.Protect = &pathList{"schema.sql", "migrations/"}
 	if ps, own := ff.protected(); !own || !slices.Equal(ps, []string{"schema.sql", "migrations/", "tend/"}) {
 		t.Errorf("a project's protect gives %v, own %v; want its entries and tend/", ps, own)
 	}
-	ff.Protect = &[]string{"tend/"}
+	ff.Protect = &pathList{"tend/"}
 	if ps, _ := ff.protected(); !slices.Equal(ps, []string{"tend/"}) {
 		t.Errorf("a protect naming tend/ gives %v", ps)
 	}
@@ -433,7 +438,7 @@ var flowScenarios = []scenario{
 			s.check("with "+e+" in tend's own list", regexp.MustCompile(`(?m)^ +- '?`+regexp.QuoteMeta(e)+`'?$`).MatchString(p.out))
 		}
 		var ff flowFile
-		s.check("which saved is a valid flow file, giving tend's own list as the project's", decode(p.out, &ff) == "" && ff.Protect != nil && slices.Equal(*ff.Protect, defaultProtect))
+		s.check("which saved is a valid flow file, giving tend's own list as the project's", decode(p.out, &ff) == "" && ff.Protect != nil && slices.Equal([]string(*ff.Protect), defaultProtect))
 	}},
 	{"flow-protect-own", func(s *sc) {
 		s.project("main", true)

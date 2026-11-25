@@ -19,7 +19,9 @@ only through `flowsAt`, so never from the attempt's branch; `tend flow`
 prints `protect` after `watch`, saying whether it is tend's own list or the
 project's.
 
-Checks: `go test -run 'TestProtect|TestFlowFaults|TestLandFaults'` and
+Checks: `go test -run 'TestProtect|TestFlowFaults|TestLandFaults'` (with
+`protect: [null]` and `protect: ["//migrations//"]` refused, both found
+accepted by the independent review and fixed) and
 `go test -run 'TestFlows/flow-(protect|print|watch)'`, passed. `tend flow .`
 on this repository prints tend's own list.
 
@@ -33,7 +35,11 @@ valid, since it names no path. `*` is the only wildcard; any other character
 matches itself.
 Check: `protect:` with no value (YAML null) counts as no `protect`, so tend's
 own list applies; `protect: []` is the project's empty list, leaving only
-`tend/` protected.
+`tend/` protected. A null entry in the list (`protect: [null]`) is an empty
+entry and not valid: `protect` decodes through its own type, `pathList`,
+since YAML's decoding into a list of strings drops a null entry silently.
+An entry that is a list or a map is not valid either. Shown by
+`TestProtectFaults`, after an independent review found `[null]` accepted.
 Check: `tend flow` prints the list under the comment `# protect: built in,
 tend's own list.` or `# protect: tend/flow.yaml on <rev>, the project's own,
 with tend/ always protected.`, a wording open question 6 leaves to the
@@ -67,14 +73,23 @@ who approves it runs tend again. The watch-and-status spec is unchanged.
 Check: the stop reads `<branch> at <head> changes the protected path(s) <paths>,
 so tend lands it only once a person with write access approves that head on
 <pull request>`, a wording open question 6 leaves to the implementer.
-Check: the check before the merge reuses the target the round fetched at its
-start, not a second fetch; between the two only the check reads run. A
-target that moves after that makes GitHub refuse the merge, and the next
-round fetches it and holds again before merging it in.
+Check: just before GitHub is asked to merge, tend fetches the target again
+rather than trusting the fetch at the start of the round. If the target moved
+while the checks were read, tend goes back to merging it in, holding the head
+first under the protected paths the moved target gives. Otherwise it holds the
+head under those paths. Between that fetch and the merge request only the
+reviews are read; a target that moves in that moment makes GitHub refuse the
+merge if the branch rule requires an up-to-date branch, and tend fetches and
+holds again before trying once more. The independent review found the first
+version reused the round's earlier fetch, so a target that added protection
+while the checks were read still got one merge request.
 Check: `hold` sets the global `head` to the landing head before calling
 `approved()`, which reads it; `head` is the branch's HEAD at that point
 either way.
 Found: the flows spec's scenario "The implementer's list is not read" says the head is held "as the landing change spec's" requirement says; folded into `grove/specs/flows/spec.md` word for word, as `grove archive` requires, it now names a change spec where it means the landing spec. Seen reconciling the specs.
+Also changed: `testdata/bin/gh` — the GitHub stand-in runs `DURING_CHECKS`
+once as check runs are first read, so a test can move the target while the
+checks are read.
 Also changed: `testdata/bin/turn.sh` — the implementer stand-in runs
 `BUILD_ALSO` before committing its build and `FIX_ALSO` in a repair or fix,
 so tests can have a head edit chosen files.
@@ -105,7 +120,7 @@ wholly planned; it now says the landing hold is built.
 - landing "A head made at fix": `landing_test.go` `TestLanding/protect-fix`, passed
 - landing "An approval before the implementer's new head": `landing_test.go` `TestLanding/protect-resolved`, passed
 - landing "A supervised flow": `landing_test.go` `TestLanding/protect-supervised`, passed
-- landing, decided again before the merge from the target read afresh: `landing_test.go` `TestLanding/protect-read-again`, passed
+- landing, decided again before the merge from the target read afresh: `landing_test.go` `TestLanding/protect-read-during-checks` (the target protects the candidate's paths while its checks are read; no merge request and no merge-in), passed; `TestLanding/protect-read-again` (the target moves after the merge request, and the refused merge is held on retry), passed
 
 ## Reconciliation
 

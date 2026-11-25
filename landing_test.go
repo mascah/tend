@@ -357,6 +357,13 @@ var landScenarios = []scenario{
 		s.check("a target that protects the candidate's paths before the merge holds it, read afresh", r.code == 3 && r.said(`changes the protected paths grove/`))
 		s.check("GitHub was asked once, and nothing is merged", s.merges() == 1 && !s.merged())
 	}},
+	{"protect-read-during-checks", func(s *sc) {
+		s.lands(false, "check success")
+		r := s.run(`DURING_CHECKS=git clone -q "$t/repo.git" "$t/other" && cd "$t/other" && printf "protect:\n  - a.txt\n  - grove/\n" >>tend/flow.yaml && git commit -qam theirs && git push -q origin main`)
+		s.check("a target that protects the candidate's paths while its checks are read holds it", r.code == 3 && r.said(`changes the protected paths grove/`))
+		s.check("before GitHub is asked to merge", s.merges() == 0 && !s.merged())
+		s.check("and before the target is merged in", s.git(s.repo+".git", "rev-parse", s.branch()) == s.head() && len(s.parents(s.head())) == 2)
+	}},
 	{"protect-fix", func(s *sc) {
 		s.lands(false, "check failure")
 		r := s.run(`FIX_ALSO=mkdir -p .github/workflows && echo "on: push" >.github/workflows/ci.yml`)

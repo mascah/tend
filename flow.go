@@ -37,7 +37,7 @@ type flow struct {
 
 type flowFile struct {
 	Watch   *watchSetting `yaml:"watch,omitempty"`
-	Protect *[]string     `yaml:"protect,omitempty"` // the protected paths, nil for tend's own
+	Protect *pathList     `yaml:"protect,omitempty"` // the protected paths, nil for tend's own
 	Build   *flow         `yaml:"build,omitempty"`
 	Propose *flow         `yaml:"propose,omitempty"`
 }
@@ -90,6 +90,28 @@ var defaultProtect = []string{
 	"Cargo.lock", "Gemfile.lock", "poetry.lock", "uv.lock", "Pipfile.lock", "composer.lock",
 }
 
+// A list of paths in the flow file. An entry YAML gives as null is kept as
+// an empty one, which protectFault refuses, where a []string would drop it.
+type pathList []string
+
+func (l *pathList) UnmarshalYAML(n *yaml.Node) error {
+	if n.Kind != yaml.SequenceNode {
+		return fmt.Errorf("line %d: protect is not a list of paths", n.Line)
+	}
+	*l = make(pathList, 0, len(n.Content))
+	for _, e := range n.Content {
+		switch {
+		case e.Kind == yaml.ScalarNode && e.Tag == "!!null":
+			*l = append(*l, "")
+		case e.Kind == yaml.ScalarNode:
+			*l = append(*l, e.Value)
+		default:
+			return fmt.Errorf("line %d: protect holds an entry that is not a path", e.Line)
+		}
+	}
+	return nil
+}
+
 // Why protect is not valid, said after the file's name, or "".
 func (ff *flowFile) protectFault() string {
 	if ff.Protect == nil {
@@ -99,7 +121,7 @@ func (ff *flowFile) protectFault() string {
 		if strings.TrimSpace(e) == "" {
 			return "gives protect an empty entry, where each entry is a path from the repository's root"
 		}
-		if t := strings.Trim(e, "/"); t == "" || strings.Contains(t, "//") {
+		if strings.Trim(e, "/") == "" || strings.Contains(e, "//") {
 			return fmt.Sprintf("gives protect the entry %q, where each entry is a path from the repository's root", e)
 		}
 	}
@@ -111,7 +133,7 @@ func (ff *flowFile) protected() ([]string, bool) {
 	if ff.Protect == nil {
 		return defaultProtect, false
 	}
-	ps := slices.Clone(*ff.Protect)
+	ps := slices.Clone([]string(*ff.Protect))
 	if !slices.Contains(ps, "tend/") {
 		ps = append(ps, "tend/")
 	}
@@ -351,7 +373,7 @@ func decode(s string, ff *flowFile) string {
 		msg := strings.Join(strings.Fields(strings.TrimPrefix(err.Error(), "yaml: ")), " ")
 		return "is not a flow file tend can read: " + strings.NewReplacer("unmarshal errors: ", "",
 			"in type main.step", "in a step", "in type main.flowFile", "at the top, where a flow is build or propose",
-			"in type main.flow", "in a flow", "in type main.watchSetting", "in watch", "into []string", "into protect, a list of paths").Replace(msg)
+			"in type main.flow", "in a flow", "in type main.watchSetting", "in watch").Replace(msg)
 	}
 	return ""
 }
