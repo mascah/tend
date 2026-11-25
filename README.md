@@ -1,5 +1,7 @@
 # tend
 
+How tend works, with diagrams: the [documentation site](https://mascah.github.io/tend/) (source in [`guide/`](guide/index.md)).
+
 A small loop that takes agreed work through coding agents and brings back a
 reviewed branch. Today it does one pass for one [Grove](https://github.com/mascah/grove)
 cycle, or one approved change no cycle lists:
