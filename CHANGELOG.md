@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/mascah/tend/compare/v0.4.0...v0.4.1) (2026-11-24)
+
+
+### Bug Fixes
+
+* name an intake drafter after its repository (261124-60tny) ([#32](https://github.com/mascah/tend/issues/32)) ([9f3c79b](https://github.com/mascah/tend/commit/9f3c79b3a04db36d898434dcc5f6fea142b81a99))
+
 ## [0.4.0](https://github.com/mascah/tend/compare/v0.3.0...v0.4.0) (2026-11-24)
 
 
