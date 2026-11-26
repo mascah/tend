@@ -102,6 +102,9 @@ func TestProtectFaults(t *testing.T) {
 		{"a list in the list", "protect: [[a]]\n", "protect holds an entry that is not a path"},
 		{"a doubled slash", "protect: [\"//migrations//\"]\n", `gives protect the entry "//migrations//"`},
 		{"one leading slash", "protect: [/schema.sql]\n", ""},
+		{"a leading dot", "protect: [./schema.sql]\n", `gives protect the entry "./schema.sql"`},
+		{"a dot-dot", "protect: [db/../schema.sql]\n", `gives protect the entry "db/../schema.sql"`},
+		{"a dot folder", "protect: [.claude/, .env]\n", ""},
 		{"an alias", "protect: [&s schema.sql, *s]\n", ""},
 		{"an alias of a list", "x: &l [a]\nprotect: [*l]\n", "protect holds an entry that is not a path"},
 	} {

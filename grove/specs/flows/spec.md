@@ -333,7 +333,8 @@ folder and everything in it, an entry with no `/` matches a file of that
 name in any folder, and `*` matches within one path segment. `tend flow`
 shall print the protected paths in effect and say whether they are the
 project's or tend's own. If `protect` is not a list of entries that are not
-empty, the system shall stop as "A flow that is not valid" says.
+empty, or an entry has a `.` or `..` segment, the system shall stop as "A
+flow that is not valid" says.
 
 #### Scenario: The default list
 

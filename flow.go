@@ -128,7 +128,8 @@ func (ff *flowFile) protectFault() string {
 		if strings.TrimSpace(e) == "" {
 			return "gives protect an empty entry, where each entry is a path from the repository's root"
 		}
-		if strings.Trim(e, "/") == "" || strings.Contains(e, "//") {
+		// A . or .. segment would be matched literally and so never match.
+		if t := strings.Trim(e, "/"); t == "" || strings.Contains(e, "//") || slices.ContainsFunc(strings.Split(t, "/"), func(g string) bool { return g == "." || g == ".." }) {
 			return fmt.Sprintf("gives protect the entry %q, where each entry is a path from the repository's root", e)
 		}
 	}
