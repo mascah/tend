@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -308,6 +309,26 @@ var publicationScenarios = []scenario{
 		r := s.run("TIMEOUT_MS=800", "CHECKS_SLEEP=2")
 		s.check("a pass read only after the wait ended is not taken: tend stops for a person", r.code == 3 && r.said(`the checks on .* were not read finished within 800ms`))
 		s.check("and the head is not reported done", r.conclusion() == "")
+	}},
+	{"ci-wait-bound", func(s *sc) {
+		s.waitsForCI("test pending")
+		r := s.run("TIMEOUT_MS=4000", "CHECKS_SLEEP=0.1")
+		var ts []float64
+		for _, l := range strings.Fields(s.cat(s.st + "/check-reads")) {
+			f, _ := strconv.ParseFloat(l, 64)
+			ts = append(ts, f)
+		}
+		s.check("with a check unfinished, tend stops for a person", r.code == 3 && r.said(`were still unfinished after 4000ms`))
+		s.check("its last read starting no later than the wait's end, the sleep before it no longer than the time left", len(ts) > 1 && ts[len(ts)-1]-ts[0] < 4.35)
+	}},
+	{"ci-fix-no-commit", func(s *sc) {
+		s.waitsForCI("test failure")
+		r := s.run(`FIX_ALSO=git checkout -q a.txt; false`)
+		s.check("a fix that settles with no commit stops for a person", r.code == 3 && s.prompts("Checks GitHub ran on") == 1)
+		r = s.run()
+		s.check("run again, the fix is spent: it is not asked again", s.prompts("Checks GitHub ran on") == 1)
+		s.check("the pull request has one comment saying the checks failed after it", s.ciComments() == 1 && s.has(s.ciComment(), `^\*\*Checks failed on `+short(s.head())+` after the one fix`))
+		s.check("and tend exits 0 waiting for a person", r.code == 0 && !s.merged())
 	}},
 	{"ci-no-flow", func(s *sc) {
 		s.project("main", true)

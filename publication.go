@@ -103,7 +103,8 @@ func publishStep() string {
 // link, or nil once every check passed, decided only once every check has
 // finished; with none but tend/review, or one unfinished, when the wait
 // ends, tend stops for a person. A read that ends after the wait does not
-// decide: the checks were not all seen finished within it.
+// decide: the checks were not all seen finished within it. The deadline is
+// checked before each sleep, which is no longer than the time left.
 func waitChecks() []string {
 	ms, _ := strconv.Atoi(timeout())
 	wait := time.Duration(ms) * time.Millisecond
@@ -111,22 +112,29 @@ func waitChecks() []string {
 	until := time.Now().Add(wait)
 	var pending []string // as the last read within the wait saw them
 	ci := 0
+	over := func() {
+		switch {
+		case ci == 0:
+			stop("%s at %s has no check but tend/review, so tend asks no one to approve it: a flow whose publish waits for checks needs CI on its pull requests", branch, short(head))
+		case len(pending) == 0:
+			stop("the checks on %s at %s were not read finished within %sms, so tend asks no one to approve it yet", branch, short(head), timeout())
+		}
+		stop("the checks %s on %s at %s were still unfinished after %sms, so tend asks no one to approve it yet", and(pending), branch, short(head), timeout())
+	}
 	for round := 0; ; round++ {
 		if round > 0 {
-			time.Sleep(poll)
+			left := time.Until(until)
+			if left <= 0 {
+				over()
+			}
+			time.Sleep(min(poll, left))
 		}
 		f, p, c := readChecks(head, true)
 		if time.Now().After(until) {
 			if round == 0 { // no read ended within the wait: what this one saw
 				pending, ci = p, c
 			}
-			switch {
-			case ci == 0:
-				stop("%s at %s has no check but tend/review, so tend asks no one to approve it: a flow whose publish waits for checks needs CI on its pull requests", branch, short(head))
-			case len(pending) == 0:
-				stop("the checks on %s at %s were not read finished within %sms, so tend asks no one to approve it yet", branch, short(head), timeout())
-			}
-			stop("the checks %s on %s at %s were still unfinished after %sms, so tend asks no one to approve it yet", and(pending), branch, short(head), timeout())
+			over()
 		}
 		pending, ci = p, c
 		switch standing(head, f, p, c) {
@@ -141,15 +149,23 @@ func waitChecks() []string {
 }
 
 // Whether the step a failure leads to can still be asked: it has no limit,
-// it has not reached it, or it was asked at this head and is still working
-// on it.
+// it has not reached it, or it was asked at this head and its agent is
+// still working on it, or is gone and may be asked once more in a new
+// session. Asked at this head and settled with no commit, it is spent.
 func canAsk(name string) bool {
 	s := fl.Steps[name]
 	if s == nil || s.Limit == 0 {
 		return true
 	}
 	rec := recordOf(name)
-	return timesAsked(name, rec) < s.Limit || slices.Contains(asks(rec), head)
+	if timesAsked(name, rec) < s.Limit {
+		return true
+	}
+	if !slices.Contains(asks(rec), head) {
+		return false
+	}
+	agent, _, _ := agentOf(name)
+	return term.status(agent) == "working" || term.gone(agent) && !slices.Contains(asks(againOf(rec)), head)
 }
 
 // Failed checks on the head once the step for them is spent: said once on

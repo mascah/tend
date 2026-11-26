@@ -27,14 +27,15 @@ Status: done
 - `flows/prompts/failed.md`: worded for a failure found at either step.
 - Tests: `publication_test.go` ci-red, ci-pass, ci-failed-review,
   ci-requested-first, ci-approved-red, ci-none, ci-unfinished, ci-mixed,
-  ci-past-deadline, ci-no-flow,
+  ci-past-deadline, ci-wait-bound, ci-fix-no-commit, ci-no-flow,
   ci-still-red, ci-one-fix, ci-rerun; `flow_test.go` flow-publish-failed;
   `watch_test.go` watch-at-once-checks; `landing_test.go` updated for the
   prompt's new wording. `go test ./...` passed. Breaking the `tend/review`
   exclusion made ci-failed-review fail, so that test catches it.
 
 Check: Main changed `publication.go`, `landing.go`, `flow.go`, `landing_test.go`, `flow_test.go` and `testdata/bin/gh` after this change's base, in the protected-path change 261125-6dvbs (`hold`, `approvedOn`, `protect`, `DURING_CHECKS`). The work builds on those files as they are now and changes none of that behavior; `testdata/bin/gh` needed no change, since `FIX_ALSO` in `testdata/bin/turn.sh` lets a test's fix make the checks pass.
-Check: When a step can still be asked (open question 8): it can when it has no limit or is under it, and also when it was asked at this very head and is still working on it. Without that last part, a rerun during the fix would read the fix as spent.
+Check: When a step can still be asked (open question 8): it can when it has no limit or is under it. It can also when it was asked at this very head and its agent is either still working or gone and not yet asked once more in a new session. Without that, a rerun during the fix would read the fix as spent. A fix asked at this head that settled with no commit is spent: a rerun comments on the pull request and asks a person (ci-fix-no-commit). The run in which the fix settles still stops for a person, as any step that settles with no commit does.
+Check: Following a person's requested changes, `waitChecks` checks the deadline before each sleep and sleeps no longer than the time left (ci-wait-bound). A slow GitHub read can still end after `TIMEOUT_MS`; that read decides nothing, as above.
 Check: The spent-fix comment is found on GitHub by a `<!-- tend:checks-failed <head> -->` marker, and a `checks-said-<head>` file in the run folder skips the lookup. Its wording names the head, the failed checks with their links, and the step's limit.
 Check: The status while waiting is "waiting for the checks on <branch> at <head>". `publish` does not apply the protected-path hold before sending a failure to fix (`land` does). The change does not ask for that, and in a supervised flow a person approves the head anyway.
 Check: Before archiving, Grove's `check` called the change stale because files its tasks name changed on main. It was re-based on this branch through propose: `base` moved to 98f4515, and the proposal's out-of-scope line on the protected-path check now says that check is on main, that `land` keeps its hold and that `publish` adds none. No task or requirement changed, so this task stays done.
