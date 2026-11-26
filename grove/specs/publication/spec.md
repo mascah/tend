@@ -143,11 +143,13 @@ set them, it shall leave them, say so, and not rewrite them again.
 For each valid verdict of the attempt, oldest first, whose head is on the
 branch and that the account has not reviewed, the system shall set the
 `tend/review` commit status on that head, `success` for a passing verdict and
-`failure` otherwise, then post a comment review on that commit by the account
-giving the conclusion and summary, whether a failure was judged repairable or
-needs a person's decision, the implementer's reply to a requested change, and,
-on the head of a Grove cycle, what `grove review` says merging approves; and
-it shall post no review twice.
+`failure` otherwise, whatever the verdict's notes hold, then post a comment
+review on that commit by the account giving the conclusion and summary, the
+verdict's notes, when it has any, under a heading saying they do not fail the
+head, whether a failure was judged repairable or needs a person's decision,
+the implementer's reply to a requested change, and, on the head of a Grove
+cycle, what `grove review` says merging approves; and it shall post no review
+twice.
 
 #### Scenario: A passing head
 
@@ -155,6 +157,20 @@ it shall post no review twice.
 - THEN the head has one comment review by the account saying the review
   passed and showing what merging approves, and the status `tend/review`
   `success`
+
+#### Scenario: A passing head with notes
+
+- GIVEN a head whose verdict concludes `success` with `notes` naming a minor
+  finding
+- WHEN tend publishes it
+- THEN the status `tend/review` is `success`, and the head's one review
+  shows the note under a heading saying it does not fail the head
+
+#### Scenario: A verdict without notes
+
+- GIVEN a head whose verdict has no `notes`
+- WHEN tend publishes it
+- THEN its review has no notes heading
 
 #### Scenario: A repair within one run
 
@@ -365,3 +381,4 @@ None.
 - [261122-rpkqa](../../changes/archive/261122-rpkqa-land-reviewed-candidates-one-at-a-time/) Land reviewed candidates one at a time
 - [261122-hjhmn](../../changes/archive/261122-hjhmn-recover-with-no-one-there/) Recover with no one there
 - [261125-rf036](../../changes/archive/261125-rf036-fix-failing-ci-before-a-person-is-asked/) Fix failing CI before a person is asked
+- [261126-5xkrh](../../changes/archive/261126-5xkrh-fail-a-head-only-for-findings-that-matter/) Fail a head in review only for findings that matter

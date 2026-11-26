@@ -95,3 +95,6 @@ All run with `go test ./...` on the final head, which passed.
 - publication "A later commit that needs a decision": publication_test.go TestTend/publish-new-head, passed
 
 ## Reconciliation
+
+- review: applied to grove/specs/review/spec.md, its Purpose's "actionable" now "every finding that fails the head", as the proposal asks
+- publication: applied to grove/specs/publication/spec.md

@@ -6,7 +6,7 @@ they differ, keep the rule and record the difference under "Known discrepancies"
 
 ## Purpose
 
-Each candidate head of an attempt is reviewed by a fresh Codex session apart from the implementer, whose only output is a verdict file tend validates, and a failure the reviewer judges repairable gets one repair in the implementer's conversation before the new head is reviewed. A verdict is `verdict-<head>.json` in the attempt's run folder; actionable means every finding is an in-scope code fix that needs no decision from the owner. The owner, and anyone reading a published review, rely on a verdict meaning a review of exactly that commit happened.
+Each candidate head of an attempt is reviewed by a fresh Codex session apart from the implementer, whose only output is a verdict file tend validates, and a failure the reviewer judges repairable gets one repair in the implementer's conversation before the new head is reviewed. A verdict is `verdict-<head>.json` in the attempt's run folder; actionable means every finding that fails the head is an in-scope code fix that needs no decision from the owner. The owner, and anyone reading a published review, rely on a verdict meaning a review of exactly that commit happened.
 
 ## Boundaries
 
@@ -28,11 +28,12 @@ merge" says, the system shall start reviewer `rev-<short head>` as Codex with
 `-s workspace-write -c sandbox_workspace_write.network_access=true -a never
 --add-dir <run folder>`, reusing one an earlier run left, and prompt it once
 with the branch, the head, the change as `git diff <base>...HEAD`, what the
-work item must do and where the implementer's claims are, asking for material
-findings only, no edits or commits, and the verdict written to
-`verdict-<head>.json` in the run folder as `head`, `conclusion`, `actionable`
-and `summary`; and once the verdict is valid it shall close the reviewer's
-pane.
+work item must do, where the implementer's claims are and the attempt's
+earlier verdicts, asking it to fail the head only as "Fail a head only for
+findings that matter" says, for no edits or commits, and for the verdict
+written to `verdict-<head>.json` in the run folder as `head`, `conclusion`,
+`actionable`, `summary` and `notes`; and once the verdict is valid it shall
+close the reviewer's pane.
 
 #### Scenario: The reviewer's one writable folder
 
@@ -59,10 +60,11 @@ pane.
 
 The system shall count a verdict, new or cached, only when its file is valid
 JSON naming the head it is for, with `conclusion` `success` or `failure`,
-`actionable` a boolean and `summary` a string; if a cached verdict is not
-valid, it shall keep it as `verdict-<head>.json.rejected-<time>` and review
-the head again; and if the reviewer settles without writing a valid verdict,
-it shall stop for a person, naming the reviewer's pane.
+`actionable` a boolean, `summary` a string, and `notes`, where present, a
+string; if a cached verdict is not valid, it shall keep it as
+`verdict-<head>.json.rejected-<time>` and review the head again; and if the
+reviewer settles without writing a valid verdict, it shall stop for a person,
+naming the reviewer's pane.
 
 #### Scenario: A cached verdict for another head
 
@@ -82,6 +84,91 @@ it shall stop for a person, naming the reviewer's pane.
 - GIVEN a reviewer that writes a verdict with no `conclusion`
 - WHEN the owner runs tend
 - THEN tend exits 3, saying the reviewer settled without a valid verdict
+
+#### Scenario: A verdict without notes
+
+- GIVEN a reviewer that writes a passing verdict with no `notes`
+- WHEN the owner runs tend
+- THEN the verdict counts, and tend exits 0
+
+#### Scenario: Notes that are not text
+
+- GIVEN a reviewer that writes a verdict whose `notes` is a list
+- WHEN the owner runs tend
+- THEN tend exits 3, saying the reviewer settled without a valid verdict
+
+### Requirement: Fail a head only for findings that matter
+
+The system's built-in review prompt shall ask the reviewer to conclude
+`failure` only for a defect a realistic use would hit, a requirement missed
+in its main case, a security or data hole that can be reached, or a claim in
+the implementer's notes the code does not support; to write every other
+finding, such as a corner that needs contrived setup to reach, which of two
+reasons a stop gives, wording or polish, in the verdict's `notes` and
+conclude `success`; and to judge `actionable` on the findings that fail the
+head alone; and when a verdict concludes `success`, the system shall go on
+as from a passing review whatever its `notes` hold, passing no note to the
+repair.
+
+#### Scenario: The bar in the prompt
+
+- WHEN tend prompts a reviewer with its built-in review prompt
+- THEN the prompt names the four kinds of finding that fail a head, says
+  that contrived corners, the reason a stop gives, wording and polish do
+  not, and asks for those in `notes`
+
+#### Scenario: A passing head with notes
+
+- GIVEN a reviewer that writes a verdict concluding `success` with `notes`
+  naming a minor finding
+- WHEN the owner runs tend on the cycle
+- THEN no repair is asked, `status` says `done: success`, and tend exits 0
+
+#### Scenario: A failure with notes
+
+- GIVEN a reviewer that fails the first head as actionable, with `notes`
+  naming a minor finding, and passes the next
+- WHEN tend asks the repair
+- THEN the repair prompt holds the verdict's `summary` and not its `notes`
+
+#### Scenario: A project's own bar
+
+- GIVEN a project whose flow names `prompts/review.md` and whose
+  `tend/prompts/review.md` on its target branch states another bar
+- WHEN tend has a head reviewed
+- THEN the reviewer is prompted with the project's text, not the built-in
+  bar
+
+### Requirement: A later review judges what changed
+
+When tend prompts a review of a head and the attempt holds a valid verdict
+for an earlier commit of the branch, the system shall fill `{earlier}` with
+each such verdict's head, conclusion and file, and the built-in review prompt
+shall ask the reviewer to judge whether the findings that failed an earlier
+head are fixed and what the commits since the latest earlier head changed,
+and not to fail the head for code unchanged since a head an earlier review
+saw, unless it is a security or data hole that can be reached; and when the
+attempt holds no such verdict, `{earlier}` shall say there is none.
+
+#### Scenario: The review after a repair
+
+- GIVEN a reviewer that fails the first head as actionable, and a repair
+  that commits
+- WHEN tend prompts the review of the new head
+- THEN the prompt names the first head, its conclusion `failure` and its
+  verdict file, and asks for the commits since that head to be judged
+
+#### Scenario: The first review
+
+- WHEN tend prompts the first review of an attempt
+- THEN the prompt says there is no earlier verdict
+
+#### Scenario: A verdict for a commit no longer on the branch
+
+- GIVEN an attempt whose run folder holds a verdict for a commit the branch
+  no longer contains
+- WHEN tend prompts the review of the head
+- THEN that verdict is not named in the prompt
 
 ### Requirement: The reviewer changes nothing
 
@@ -180,3 +267,4 @@ None.
 - Written when tend adopted Grove (2026-11-16).
 - [261122-rpkqa](../../changes/archive/261122-rpkqa-land-reviewed-candidates-one-at-a-time/) Land reviewed candidates one at a time
 - [261122-hjhmn](../../changes/archive/261122-hjhmn-recover-with-no-one-there/) Recover with no one there
+- [261126-5xkrh](../../changes/archive/261126-5xkrh-fail-a-head-only-for-findings-that-matter/) Fail a head in review only for findings that matter
