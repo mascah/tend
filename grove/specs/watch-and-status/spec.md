@@ -243,6 +243,15 @@ set it shall wait for what it started and then exit.
 - THEN it runs tend on the attempt, whose request is asked of the
   implementer, and does not start B in that pass
 
+#### Scenario: Waiting for checks counts
+
+- GIVEN a flow file with `at_once: 1` whose `publish` gives a step for
+  `failed`, A's attempt published and its tend waiting for the checks on
+  A's head, and claimable change B, which shares nothing with A
+- WHEN a pass of `tend watch <repo>` runs, then another once A's checks
+  passed and its tend exited waiting for a person's approval
+- THEN the first starts nothing, and the second starts B
+
 #### Scenario: No setting
 
 - GIVEN a repository with no flow file, an approved change in no cycle and a
@@ -441,3 +450,4 @@ None.
 - [261122-9vbmc](../../changes/archive/261122-9vbmc-several-attempts-at-once/) Several attempts at once
 - [261122-rpkqa](../../changes/archive/261122-rpkqa-land-reviewed-candidates-one-at-a-time/) Land reviewed candidates one at a time
 - [261122-hjhmn](../../changes/archive/261122-hjhmn-recover-with-no-one-there/) Recover with no one there
+- [261125-rf036](../../changes/archive/261125-rf036-fix-failing-ci-before-a-person-is-asked/) Fix failing CI before a person is asked
