@@ -56,7 +56,7 @@ spent, and then the pull request says so. A flow that does not name
 - Running a failed check again, or telling a flaky check from a real failure.
 - How long a wait for a first check should be before tend says a project has
   no CI: landing's own open question, shared here, not answered here.
-- The protected-path check of issue #36, built separately.
+- The protected-path check of issue #36, built separately and on main since 98f4515: `land` keeps its hold, and `publish` adds none.
 
 ## Decisions
 

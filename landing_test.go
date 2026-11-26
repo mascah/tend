@@ -212,7 +212,7 @@ var landScenarios = []scenario{
 		s.approve(reviewed)
 		r := s.run()
 		s.check("a check failing on the merged head merges nothing", r.code == 0 && !s.merged() && s.merges() == 0)
-		s.check("the implementer is asked with tend's own prompt, naming the failed check and its link", s.has(s.log(), `^agent prompt impl-[^ ]* tend could not land .*check https://example\.test/checks/check`))
+		s.check("the implementer is asked with tend's own prompt, naming the failed check and its link", s.has(s.log(), `^agent prompt impl-[^ ]* Checks GitHub ran on .*check https://example\.test/checks/check`))
 		s.check("the head it makes is reviewed", s.reviews() == 2 && s.reviewed(s.head()) == 1)
 		s.ci("check success")
 		s.run()
@@ -225,7 +225,7 @@ var landScenarios = []scenario{
 		s.lands(false, "build success\ncheck cancelled")
 		r := s.run()
 		s.check("a cancelled check merges nothing", !s.merged() && s.merges() == 0)
-		s.check("and the prompt names the cancelled check, not the one that passed", s.prompts("tend could not land") >= 1 && s.has(s.log(), `^agent prompt impl-[^ ]* tend could not land .*: check https://`) && !s.has(s.log(), `^agent prompt impl-[^ ]* tend could not land .*build https://`))
+		s.check("and the prompt names the cancelled check, not the one that passed", s.prompts("Checks GitHub ran on") >= 1 && s.has(s.log(), `^agent prompt impl-[^ ]* Checks GitHub ran on .*: check https://`) && !s.has(s.log(), `^agent prompt impl-[^ ]* Checks GitHub ran on .*build https://`))
 		s.check("tend stops once the step is spent", r.code == 3 && r.said(`fix was asked 1 times, its limit`))
 	}},
 	{"land-skipped", func(s *sc) {
@@ -406,14 +406,14 @@ var landScenarios = []scenario{
 		// The approval is dismissed while the checks, which fail, are read.
 		r = s.run(`DURING_CHECKS=jq 'map(.state = "DISMISSED")' "$HERDR_STATE/reviews" >"$HERDR_STATE/r.new" && mv "$HERDR_STATE/r.new" "$HERDR_STATE/reviews"`)
 		s.check("its approval gone, a failed check stops for a person, naming the protected path", r.held("CLAUDE.md"))
-		s.check("prompting no agent to fix it", s.prompts("tend could not land") == 0)
+		s.check("prompting no agent to fix it", s.prompts("Checks GitHub ran on") == 0)
 		s.check("and pushing nothing", s.head() == reviewed && s.git(s.repo+".git", "rev-parse", s.branch()) == reviewed)
 		s.check("and merging nothing", !s.merged() && s.merges() == 0)
 	}},
 	{"protect-fix", func(s *sc) {
 		s.lands(false, "check failure")
 		r := s.run(`FIX_ALSO=mkdir -p .github/workflows && echo "on: push" >.github/workflows/ci.yml`)
-		s.check("the fix for a failed check is reviewed", s.prompts("tend could not land") == 1 && s.reviews() == 2 && s.reviewed(s.head()) == 1)
+		s.check("the fix for a failed check is reviewed", s.prompts("Checks GitHub ran on") == 1 && s.reviews() == 2 && s.reviewed(s.head()) == 1)
 		s.check("and its head, which edits a workflow, is held", r.held(".github/workflows/ci.yml"))
 		s.check("and nothing is merged", !s.merged() && s.merges() == 0)
 	}},

@@ -1,7 +1,9 @@
 # tend's own flow, read from main as origin holds it. The build flow is
 # tend's built-in one with landing added, supervised: a head that passed
-# review lands once a person with write access approves it on GitHub. The
-# propose flow stays built in.
+# review lands once a person with write access approves it on GitHub. Before
+# a person is asked, publish waits for the checks on the head, and a failed
+# one goes to fix, the one fix it shares with land. The propose flow stays
+# built in.
 watch:
   at_once: 2
 build:
@@ -34,6 +36,7 @@ build:
         ok: end
         approved: land
         requested: request
+        failed: fix
     request:
       continue: implement
       prompt: prompts/request.md

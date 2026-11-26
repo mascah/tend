@@ -5,7 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
+	"testing"
 )
 
 var publicationScenarios = []scenario{
@@ -240,4 +242,168 @@ var publicationScenarios = []scenario{
 		s.check("and tend says why", r.said("could not push"))
 		s.check("their commit is still on origin", s.git(s.repo+".git", "log", "-1", "--format=%s", s.branch()) == "theirs")
 	}},
+	{"ci-red", func(s *sc) {
+		s.waitsForCI("test failure")
+		r := s.run(fixesCI)
+		s.check("a failed check sends the head to fix, naming the check and its link", s.prompts("Checks GitHub ran on") == 1 && s.has(s.log(), `^agent prompt impl-[^ ]* Checks GitHub ran on .*test https://example\.test/checks/test`))
+		s.check("the head fix makes is reviewed and published", s.reviews() == 2 && s.reviewed(s.head()) == 1 && s.git(s.repo+".git", "rev-parse", s.branch()) == s.head())
+		s.check("its checks are waited for", s.has(s.log(), `^gh api repos/.*/commits/`+s.head()+`/check-runs`))
+		s.check("and once they pass tend exits 0 with the pull request open", r.passed() && s.creates() == 1 && !s.merged() && s.merges() == 0)
+		s.check("saying nothing on it of a spent fix", s.ciComments() == 0)
+	}},
+	{"ci-pass", func(s *sc) {
+		s.waitsForCI("test success")
+		r := s.run()
+		s.check("with every check passed no fix is prompted", s.prompts("Checks GitHub ran on") == 0)
+		s.check("and tend exits 0 with the pull request open", r.passed() && s.creates() == 1 && !s.merged())
+		s.check("having read the head's checks", s.has(s.log(), `^gh api repos/.*/commits/`+s.head()+`/check-runs`))
+	}},
+	{"ci-failed-review", func(s *sc) {
+		s.waitsForCI("test success")
+		r := s.run("REVIEW=decision")
+		s.check("the head's tend/review status is failure", s.has(s.cat(s.st+"/statuses"), `^`+s.head()+` failure the-bot$`))
+		s.check("a failed review is not a failed check: no fix is prompted", s.prompts("Checks GitHub ran on") == 0)
+		s.check("and tend exits 0 with the failed verdict", r.code == 0 && r.conclusion() == "failure")
+	}},
+	{"ci-requested-first", func(s *sc) {
+		s.waitsForCI("test success")
+		s.run()
+		first := s.head()
+		reads := s.count(s.log(), `^gh api repos/.*/commits/`+first+`/check-runs`)
+		s.ci("test pending")
+		s.request()
+		s.run("TIMEOUT_MS=400")
+		s.check("a change requested on a head whose checks run is asked of the implementer", s.prompts("teammate") == 1 && s.head() != first)
+		s.check("without waiting for that head's checks", s.count(s.log(), `^gh api repos/.*/commits/`+first+`/check-runs`) == reads)
+	}},
+	{"ci-approved-red", func(s *sc) {
+		s.waitsForCI("test success")
+		s.run()
+		first := s.head()
+		s.ci("test failure")
+		s.approve(first)
+		r := s.run(fixesCI)
+		s.check("an approved head whose check fails goes to fix", s.prompts("Checks GitHub ran on") == 1 && s.head() != first)
+		s.check("nothing is merged", !s.merged() && s.merges() == 0)
+		s.check("and the new head, its checks passed, waits for a new approval", r.passed() && s.reviewed(s.head()) == 1)
+	}},
+	{"ci-none", func(s *sc) {
+		s.waitsForCI("")
+		r := s.run("TIMEOUT_MS=400")
+		s.check("with no check but tend/review, tend stops for a person saying so", r.code == 3 && r.said(`has no check but tend/review, so tend asks no one to approve it`))
+		s.check("and prompts no fix", s.prompts("Checks GitHub ran on") == 0)
+	}},
+	{"ci-unfinished", func(s *sc) {
+		s.waitsForCI("test pending")
+		r := s.run("TIMEOUT_MS=400")
+		s.check("with a check unfinished when the wait ends, tend stops for a person naming it", r.code == 3 && r.said(`the checks test on .* were still unfinished after 400ms`))
+	}},
+	{"ci-mixed", func(s *sc) {
+		s.waitsForCI("test failure\nslow pending")
+		r := s.run("TIMEOUT_MS=400")
+		s.check("with one check failed and another unfinished, no fix is prompted before every check finishes", s.prompts("Checks GitHub ran on") == 0)
+		s.check("and when the wait ends tend stops for a person naming the unfinished check", r.code == 3 && r.said(`the checks slow on .* were still unfinished after 400ms`))
+	}},
+	{"ci-past-deadline", func(s *sc) {
+		s.waitsForCI("test success")
+		r := s.run("TIMEOUT_MS=800", "CHECKS_SLEEP=2")
+		s.check("a pass read only after the wait ended is not taken: tend stops for a person", r.code == 3 && r.said(`the checks on .* were not read finished within 800ms`))
+		s.check("and the head is not reported done", r.conclusion() == "")
+	}},
+	{"ci-wait-bound", func(s *sc) {
+		s.waitsForCI("test pending")
+		r := s.run("TIMEOUT_MS=4000", "CHECKS_SLEEP=0.1")
+		var ts []float64
+		for _, l := range strings.Fields(s.cat(s.st + "/check-reads")) {
+			f, _ := strconv.ParseFloat(l, 64)
+			ts = append(ts, f)
+		}
+		s.check("with a check unfinished, tend stops for a person", r.code == 3 && r.said(`were still unfinished after 4000ms`))
+		s.check("its last read starting no later than the wait's end, the sleep before it no longer than the time left", len(ts) > 1 && ts[len(ts)-1]-ts[0] < 4.35)
+	}},
+	{"ci-fix-no-commit", func(s *sc) {
+		s.waitsForCI("test failure")
+		r := s.run(`FIX_ALSO=git checkout -q a.txt; false`)
+		s.check("a fix that settles with no commit stops for a person", r.code == 3 && s.prompts("Checks GitHub ran on") == 1)
+		r = s.run()
+		s.check("run again, the fix is spent: it is not asked again", s.prompts("Checks GitHub ran on") == 1)
+		s.check("the pull request has one comment saying the checks failed after it", s.ciComments() == 1 && s.has(s.ciComment(), `^\*\*Checks failed on `+short(s.head())+` after the one fix`))
+		s.check("and tend exits 0 waiting for a person", r.code == 0 && !s.merged())
+	}},
+	{"ci-no-flow", func(s *sc) {
+		s.project("main", true)
+		s.allow()
+		s.ci("test failure")
+		r := s.run()
+		s.check("without a flow file tend reads no check", s.count(s.log(), `/check-runs`) == 0)
+		s.check("and exits 0 as before", r.passed() && s.prompts("Checks GitHub ran on") == 0)
+	}},
+	{"ci-still-red", func(s *sc) {
+		first := s.stillRed()
+		s.check("fix is prompted once", s.prompts("Checks GitHub ran on") == 1 && s.head() != first)
+		s.check("the pull request has one comment naming the failed check on the second head", s.ciComments() == 1 && s.has(s.ciComment(), `^\*\*Checks failed on `+short(s.head())+` after the one fix`) && s.has(s.ciComment(), `^- test https://example\.test/checks/test$`))
+	}},
+	{"ci-one-fix", func(s *sc) {
+		s.stillRed()
+		s.approve(s.head())
+		r := s.run()
+		s.check("land finding the check still failed prompts no second fix", s.prompts("Checks GitHub ran on") == 1)
+		s.check("merges nothing", !s.merged() && s.merges() == 0)
+		s.check("and stops saying fix was asked once, its limit", r.code == 3 && r.said(`fix was asked 1 times, its limit`))
+	}},
+	{"ci-rerun", func(s *sc) {
+		s.stillRed()
+		at := s.head()
+		r := s.run()
+		s.check("a rerun with no new commit publishes the same head", r.code == 0 && s.head() == at)
+		s.check("and the pull request still has one such comment", s.ciComments() == 1)
+		os.Remove(s.runDir() + "/checks-said-" + at)
+		s.run()
+		s.check("found on GitHub when the run folder's mark is gone", s.ciComments() == 1)
+	}},
+}
+
+// The supervised flow with land that also waits for checks at publish,
+// sending a failure there to the same fix land uses, and the checks every
+// commit gets.
+func (s *sc) waitsForCI(ci string) {
+	s.project("main", true)
+	s.allow()
+	s.commit("Wait for CI", map[string]string{"tend/flow.yaml": ciFlow(s.t)})
+	s.ci(ci)
+}
+
+func ciFlow(t *testing.T) string {
+	return strings.Replace(landFlow(t, true)["tend/flow.yaml"], "        approved: land\n", "        approved: land\n        failed: fix\n", 1)
+}
+
+// A fix that makes every check pass.
+const fixesCI = `FIX_ALSO=echo "test success" >"$HERDR_STATE/ci"`
+
+// A check that fails on the head and on the head fix makes, run once; the
+// first head.
+func (s *sc) stillRed() string {
+	s.waitsForCI("test failure")
+	r := s.run()
+	s.check("still red after the fix, tend exits 0 waiting for a person", r.code == 0 && !s.merged())
+	return s.parents(s.head())[1]
+}
+
+// tend's comments on the pull request that say a fix was spent, and the last.
+func (s *sc) ciComments() int { return len(s.ciCommentList()) }
+func (s *sc) ciComment() string {
+	l := s.ciCommentList()
+	if len(l) == 0 {
+		return ""
+	}
+	return l[len(l)-1]
+}
+func (s *sc) ciCommentList() []string {
+	var bs []string
+	for _, x := range list(s.readJSON(s.st + "/comments")) {
+		if b := str(get(x, "body")); str(get(x, "issue")) == filepath.Base(s.pr())[len("pr-"):] && strings.Contains(b, "<!-- tend:checks-failed ") {
+			bs = append(bs, b)
+		}
+	}
+	return bs
 }
