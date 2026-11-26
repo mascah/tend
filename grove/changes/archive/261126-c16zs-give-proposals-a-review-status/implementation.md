@@ -63,7 +63,4 @@ Also changed: `guide/concepts/intake.md` — intake now sets a status on each pr
 
 ## Reconciliation
 
-<!-- One line per change spec, once applied to its maintained spec:
-
-    - record-editing: applied to specs/record-editing/spec.md
--->
+- intake: applied to grove/specs/intake/spec.md
