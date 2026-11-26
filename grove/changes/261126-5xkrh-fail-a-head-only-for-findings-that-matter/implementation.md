@@ -54,6 +54,21 @@ Status: done
 
 Check: empty `notes` (`""` or blanks) shows no heading, as the prompt asks for notes "or empty"; the heading's wording is the implementer's, as the proposal's open question allows.
 
+### T-03 — Retire tend's own review prompt
+
+Status: done
+
+- `tend/prompts/review.md` deleted; `tend/flow.yaml` still names
+  `prompts/review.md` and is unchanged.
+- Checked with a throwaway scenario (not committed) that committed this
+  repository's `tend/flow.yaml` to a test project with no
+  `tend/prompts/review.md` and ran tend: exit 0, `success`, and the reviewer
+  was prompted with the built-in text (the bar and "and file: none.").
+  `flow_test.go` TestFlows/flow-land-faults already covers a flow
+  naming tend's own prompts with none beside it.
+
+Check: `tend/prompts/review.md` is a protected path, so merging this needs the owner's admin bypass, as the proposal says.
+
 ## Scenarios
 
 ## Reconciliation
