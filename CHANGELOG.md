@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.0](https://github.com/mascah/tend/compare/v0.5.0...v0.6.0) (2026-11-26)
+
+
+### Features
+
+* fail a head in review only for findings that matter (261126-5xkrh) ([#57](https://github.com/mascah/tend/issues/57)) ([51dd65f](https://github.com/mascah/tend/commit/51dd65fc5b38a7f84b59a685e18bb33b3871b570))
+* give proposal pull requests a tend/review status ([#59](https://github.com/mascah/tend/issues/59)) ([8ff7362](https://github.com/mascah/tend/commit/8ff73626cf92ef8652edb35c584e7921c51d9878))
+
 ## [0.5.0](https://github.com/mascah/tend/compare/v0.4.1...v0.5.0) (2026-11-26)
 
 
