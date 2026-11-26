@@ -53,9 +53,19 @@ turn() { # name text
 		esac ;;
 	rev-*)
 		local v h
-		v=$(grep -oE '[^ ]*/[a-z]+-[0-9a-f]{40}\.json' <<<"$2" | head -1)
+		v=$(grep -oE '[^ ]*/[a-z]+-[0-9a-f]{40}\.json' <<<"$2" | while read -r f; do [ -e "$f" ] || { echo "$f"; break; }; done) # not an earlier verdict the prompt names
+		[ -n "$v" ] || v=$(grep -oE '[^ ]*/[a-z]+-[0-9a-f]{40}\.json' <<<"$2" | tail -1)
 		h=${v##*-} h=${h%.json}
 		case ${REVIEW:-success} in
+		notes) jq -n --arg h "$h" '{head: $h, conclusion: "success", actionable: false, summary: "ok", notes: "a.txt:1 could read better."}' ;;
+		badnotes) jq -n --arg h "$h" '{head: $h, conclusion: "success", actionable: false, summary: "ok", notes: ["a.txt:1 could read better."]}' ;;
+		repairable-notes) # as repairable, with a note on the failed head
+			if [ -e "$s/failed-once" ]; then
+				jq -n --arg h "$h" '{head: $h, conclusion: "success", actionable: false, summary: "ok"}'
+			else
+				touch "$s/failed-once"
+				jq -n --arg h "$h" '{head: $h, conclusion: "failure", actionable: true, summary: "a.txt:1 lacks the fix.", notes: "a.txt:2 could read better."}'
+			fi ;;
 		success) jq -n --arg h "$h" '{head: $h, conclusion: "success", actionable: false, summary: "ok"}' ;;
 		noconclusion) jq -n --arg h "$h" '{head: $h, actionable: false, summary: "ok"}' ;;
 		decision) jq -n --arg h "$h" '{head: $h, conclusion: "failure", actionable: false, summary: "a.txt:1 needs an owner decision."}' ;;

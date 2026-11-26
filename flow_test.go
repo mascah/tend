@@ -321,6 +321,18 @@ var flowScenarios = []scenario{
 		s.check("saying check wrote no check-<head>.json", r.said(`check wrote no check-[0-9a-f]{40}\.json`))
 		s.check("and no later step runs", s.creates() == 0 && s.count(s.log(), `^gh `) == 0)
 	}},
+	{"flow-own-review-bar", func(s *sc) {
+		s.project("main", false)
+		s.commit("Our own bar", map[string]string{
+			"tend/flow.yaml":         buildFlow(s.t),
+			"tend/prompts/review.md": "Review {head} by our own bar; write only the verdict {result}.\n",
+		})
+		r := s.run()
+		s.check("a project's own review prompt reaches a verdict", r.passed())
+		p := s.reviewPrompt(s.head())
+		s.check("the reviewer is prompted with the project's text", strings.HasPrefix(p, "Review "+s.head()+" by our own bar"))
+		s.check("not the built-in bar", !strings.Contains(p, "realistic use"))
+	}},
 	{"flow-repair-continues", func(s *sc) {
 		s.project("main", false)
 		r := s.run("REVIEW=repairable")

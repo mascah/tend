@@ -12,6 +12,15 @@ import (
 func (s *sc) build(env ...string) res { return s.tendIn(env, s.repo, "issue-7") }
 func (s *sc) verdict() string         { return glob(s.ts + "/runs/*/verdict-*.json") }
 
+// The text of the prompt the reviewer of head h was given.
+func (s *sc) reviewPrompt(h string) string {
+	m := regexp.MustCompile(`(?m)^agent prompt rev-` + short(h) + ` (.*)$`).FindStringSubmatch(s.log())
+	if m == nil {
+		return ""
+	}
+	return m[1]
+}
+
 // The worktree of the issue build's branch.
 func (s *sc) bworktree() string { return s.worktreeOf("refs/heads/tend/build-7") }
 
@@ -259,6 +268,59 @@ var attemptScenarios = []scenario{
 		s.check("a failed actionable review is repaired once and passes", r.passed())
 		s.check("the repair was asked once", s.prompts("An") == 1)
 		s.check("status says done", strings.Contains(s.status(), "done: success"))
+	}},
+	{"review-bar", func(s *sc) {
+		s.project("main", false)
+		r := s.run()
+		s.check("a verdict without notes counts, and tend exits 0", r.passed())
+		p := s.reviewPrompt(s.head())
+		s.check("the built-in prompt names the four kinds of finding that fail a head",
+			strings.Contains(p, "a defect a realistic use would hit, a requirement missed in its main case, a security or data hole that can be reached, or a claim in "))
+		s.check("says contrived corners, the reason a stop gives, wording and polish do not, and asks for them in notes",
+			strings.Contains(p, "a corner that needs contrived setup to reach, which of two reasons a stop gives, wording or polish, goes in notes and does not fail the head") && strings.Contains(p, `"notes": `))
+		s.check("and says the first review has no earlier verdict", strings.Contains(p, "Earlier verdicts of this attempt, each its head, conclusion and file: none."))
+	}},
+	{"review-notes", func(s *sc) {
+		s.project("main", false)
+		r := s.run("REVIEW=notes")
+		s.check("a passing verdict with notes exits 0 as a success", r.passed())
+		s.check("and asks no repair", s.prompts("An independent review") == 0)
+		s.check("status says done", strings.Contains(s.status(), "done: success"))
+	}},
+	{"review-notes-not-text", func(s *sc) {
+		s.project("main", false)
+		r := s.run("REVIEW=badnotes")
+		s.check("a new verdict whose notes are a list stops for a person", r.code == 3)
+		s.check("saying the reviewer settled without a valid verdict", r.said("without a valid verdict"))
+	}},
+	{"repair-notes", func(s *sc) {
+		s.project("main", false)
+		r := s.run("REVIEW=repairable-notes")
+		s.check("a failure with notes is repaired once and passes", r.passed())
+		s.check("the repair is given the summary", s.count(s.log(), `^agent prompt impl-[^ ]* An independent review .*a\.txt:1 lacks the fix\.`) == 1)
+		s.check("and not the notes", !strings.Contains(s.log(), "a.txt:2 could read better"))
+		vs, _ := filepath.Glob(s.runDir() + "/verdict-*.json")
+		first := ""
+		for _, v := range vs {
+			if get(s.readJSON(v), "conclusion") == "failure" {
+				first = v
+			}
+		}
+		h := str(get(s.readJSON(first), "head"))
+		p := s.reviewPrompt(s.head())
+		s.check("the review of the repaired head names the failed head, its conclusion and its verdict file",
+			first != "" && strings.Contains(p, short(h)+" failure "+first))
+		s.check("and asks for the commits since it to be judged", strings.Contains(p, "what the commits since the latest earlier head changed"))
+	}},
+	{"review-earlier-gone", func(s *sc) {
+		s.project("main", false)
+		s.run()
+		gone := s.verdict()
+		s.bash(s.worktree(), `echo more >>a.txt && git commit -q --amend -a --no-edit`)
+		r := s.run()
+		s.check("a head whose earlier verdict is off the branch is reviewed and passes", r.passed() && s.reviews() == 2)
+		s.check("and that verdict is not named in its prompt", !strings.Contains(s.reviewPrompt(s.head()), gone) &&
+			strings.Contains(s.reviewPrompt(s.head()), "and file: none."))
 	}},
 	{"repair-undelivered", func(s *sc) {
 		s.project("main", false)
