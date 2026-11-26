@@ -178,6 +178,23 @@ var watchScenarios = []scenario{
 		release()
 		a.wait()
 	}},
+	{"watch-at-once-checks", func(s *sc) {
+		s.project("main", true)
+		s.allow()
+		s.issues()
+		s.commit("Wait for CI", map[string]string{"tend/flow.yaml": "watch:\n  at_once: 1\n" + ciFlow(s.t)})
+		s.change("261016-c0001", "Another", "")
+		s.ci("test pending")
+		a := s.bg([]string{"TIMEOUT_MS=8000"}, `^gh api repos/.*/check-runs`, s.repo, "261114-k0000")
+		s.waitFor(func() bool { return strings.Contains(s.status(), "waiting for the checks on ") }, "status to say it waits for the checks")
+		w := s.watchrepo()
+		s.check("an attempt whose tend waits for the checks on its head holds the slot", s.count(w.err, `starting`) == 0 && s.changeRecords("261016-c0001") == 0)
+		s.ci("test success")
+		r := a.wait()
+		s.check("its checks passed, its tend exits waiting for a person's approval", r.code == 0 && strings.Contains(s.status(), "a person reviews https://example.test/pr/"))
+		w = s.watchrepo()
+		s.check("which frees the slot for the next", w.said(`starting 261016-c0001`) && s.changeRecords("261016-c0001") == 1)
+	}},
 	{"watch-at-once-cycle", func(s *sc) {
 		s.atOnce(1)
 		w := s.watchrepo()

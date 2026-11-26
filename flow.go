@@ -221,7 +221,7 @@ func (s *step) outcomes(name, flowName string) []string {
 	r, _ := parseResult(s.Result)
 	switch {
 	case name == "publish" && flowName == "build":
-		o = []string{"ok", "requested", "approved"}
+		o = []string{"ok", "requested", "approved", "failed"}
 	case name == "land":
 		o = []string{"ok", "conflict", "failed"}
 	case r.verdict != "":
