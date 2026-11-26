@@ -63,7 +63,10 @@ way; only the claim and the scope differ (see [work items](concepts/work-items.m
    on the branch.
 5. **Review.** A fresh Codex session, `rev-<short head>`, judges the head and
    writes `verdict-<head>.json` in the run folder: `conclusion` (`success` or
-   `failure`), `actionable` and a `summary`. It must not change the checkout.
+   `failure`), `actionable`, a `summary` and, optionally, `notes`. It fails
+   the head only for findings that matter; the rest go in `notes`, which
+   never reach the repair. A later review is given the earlier verdicts and
+   judges what changed since. It must not change the checkout.
 6. **Repair.** If the verdict is a failure the reviewer calls actionable,
    the implementer's own session is given the findings once. Its new commit
    goes back to step 5 with a fresh reviewer. A second actionable failure

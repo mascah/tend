@@ -147,7 +147,7 @@ reviewer:
 | --- | --- |
 | `commit` | The branch has a new commit since the ask. |
 | `file <name>` | `<name>` in the run folder exists and is not empty. |
-| `verdict <name>` | `<name>` in the run folder is a valid verdict for this head: `head` (this head), `conclusion` (`success` or `failure`), `actionable` (true or false) and `summary` (text). |
+| `verdict <name>` | `<name>` in the run folder is a valid verdict for this head: `head` (this head), `conclusion` (`success` or `failure`), `actionable` (true or false), `summary` (text, the findings that fail the head) and, optionally, `notes` (text, the findings that do not). |
 | `commit or file <name>` | Either of the two. |
 | (none) | The agent's turn ends. |
 
@@ -162,14 +162,14 @@ request.
 | `publish` in build | `ok`, `requested` (a person with write access requested changes on the head), `approved` (the newest such review on the head approves; only if the flow names it), `failed` (a check on the head failed; only if the flow names it, which has `publish` wait for the checks) |
 | `publish` in propose | `ok` |
 | `land` | `ok` (merged), `conflict` (the target does not merge in cleanly), `failed` (a check failed) |
-| a step with a `verdict` result | `success`, `actionable` (failure the reviewer calls an in-scope fix), `failure` |
+| a step with a `verdict` result | `success`, `actionable` (failure whose failing findings the reviewer calls in-scope fixes), `failure` |
 | any other step | `ok` |
 | any step with a `limit` | also `spent` |
 
 ## Placeholders
 
-Filled into prompts. `{head}`, `{findings}` and `{result}` are set for every
-step.
+Filled into prompts. `{head}`, `{findings}`, `{earlier}` and `{result}` are
+set for every step.
 
 | Placeholder | Value |
 | --- | --- |
@@ -180,7 +180,8 @@ step.
 | `{item}` | The work item ID; in propose, `issue #<n>` or `issue <KEY>`. |
 | `{head}` | The head the step is asked at. |
 | `{result}` | The path of the step's result file. |
-| `{findings}` | The last verdict's summary. |
+| `{findings}` | The last verdict's summary, never its notes. |
+| `{earlier}` | The attempt's valid verdicts for earlier commits of the branch, oldest first, each as `<short head> <conclusion> <file>`, joined by `; `; or `none`. |
 | `{what}` | What the change must do: the Grove change folders the diff archives, or the quoted issue and the implementer's notes. |
 | `{notes}` | Where the implementer's claims are: `implementation.md`, or `<run>/implemented` for an issue. |
 | `{kind}` | `grove` or `issue`. |
@@ -206,7 +207,7 @@ Implement {named} in this repository, asking no one. Its title and description a
 `prompts/review.md`
 
 ```text
-You are the independent reviewer of branch {branch} at commit {head}. You did not write it and nobody can answer questions. The change is 'git diff {base}...HEAD'; what it must do is {what}. Check the code against those requirements and run the project's tests. Report only material findings: a defect, an unmet requirement, or a claim in {notes} the code does not support. Edit, stage and commit nothing. Your only output is the file {result}, exactly this JSON shape: {"head": "{head}", "conclusion": "success or failure", "actionable": true or false, "summary": "findings with file:line and what you ran"}. actionable is true only when every finding is an in-scope code fix that needs no decision from the owner.
+You are the independent reviewer of branch {branch} at commit {head}. You did not write it and nobody can answer questions. The change is 'git diff {base}...HEAD'; what it must do is {what}. Check the code against those requirements and run the project's tests. Edit, stage and commit nothing. Conclude failure only for a finding that matters: a defect a realistic use would hit, a requirement missed in its main case, a security or data hole that can be reached, or a claim in {notes} the code does not support. Every other finding, such as a corner that needs contrived setup to reach, which of two reasons a stop gives, wording or polish, goes in notes and does not fail the head; do not build elaborate reproductions to hunt for such corners. Earlier verdicts of this attempt, each its head, conclusion and file: {earlier}. Where there are any, read them, judge whether the findings that failed an earlier head are fixed and what the commits since the latest earlier head changed ('git diff <that head>...HEAD'), and do not fail this head for code unchanged since a head an earlier review saw, unless it is a security or data hole that can be reached. Your only output is the file {result}, exactly this JSON shape: {"head": "{head}", "conclusion": "success or failure", "actionable": true or false, "summary": "the findings that fail the head, with file:line, and what you ran", "notes": "findings that do not fail the head, or empty"}. actionable is true only when every finding that fails the head is an in-scope code fix that needs no decision from the owner.
 ```
 
 `prompts/repair.md`
