@@ -13,17 +13,23 @@ Status: done
 Evidence: `intake.go` gains `vouchOpen` and `vouch`. `vouchOpen` runs on each
 pass after unfinished handoffs and before new requests, whatever the cap. It
 covers every open pull request the account opened from a `tend/issue-` or
-`tend/jira-` branch, taking the head that `gh pr list` reports as
-`headRefOid` and fetching it from origin when it is missing. `vouch` reads the
+`tend/jira-` branch, read from `repos/{owner}/{repo}/pulls` with
+`--paginate` so no page limit hides one, taking each head's `head.sha` and
+fetching it from origin when it is missing. The cap's count of open
+proposals reads the same list, through `openProposals`. `vouch` reads the
 commit's statuses and skips a head the account already set `tend/review` on.
 Otherwise it sets `success`, "Grove documents only: merging approves this
 change", or `failure` naming why, linking the pull request. The publish step
-calls `vouch` on the head it just opened or found. The decision, `notDocs`,
+calls `vouch` on the head of a pull request it just opened. One it found
+instead, as when a stopped pass resumes, may have moved on, so its real head
+is left to `vouchOpen`. The decision, `notDocs`,
 uses landing's `changedPaths` (Git alone, against the target as fetched):
 every path must lie under one `<root>/changes/<id>-<slug>/` folder. The gh
 stand-in now reports `headRefOid` in `pr list` and serves
 `commits/<sha>/statuses` with each status's creator. New tests
-`propose-vouch` and `propose-vouch-open` are in `intake_test.go`.
+`propose-vouch`, `propose-vouch-open` and `propose-vouch-resumed` are in
+`intake_test.go`; the last covers a resumed pass whose branch a person moved
+on, with the stand-in's new `STATUS_FAIL`.
 `go test ./...` passed (119s), including every intake, publication and
 landing scenario.
 
@@ -31,7 +37,7 @@ Check: the proposal's first open question was marked "must be answered before
 review": with this change the publishing account can merge a docs-only
 proposal head, because the rule no longer stops it. The change does not answer
 it. I built its recommendation (accept it), since the change is approved as
-written and is easy to revert. The owner should confirm before merging.
+written and is easy to revert. The owner accepted it in review of #59.
 Whether to add this to the known ceilings in `guide/built-vs-planned.md` is
 left to them.
 Check: a head that touches anything else gets `failure`, as the second open

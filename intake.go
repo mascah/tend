@@ -93,8 +93,8 @@ func propose() {
 		if s, _ := out("gh", "pr", "list", "--head", t.branch, "--state", "all", "--json", "url", "--jq", ".[0].url // empty"); s != "" {
 			continue
 		}
-		o, _ := out("gh", "pr", "list", "--author", account, "--state", "open", "--json", "headRefName", "--jq", `[.[] | select(.headRefName | startswith("tend/issue-") or startswith("tend/jira-"))] | length`)
-		if open, _ := strconv.Atoi(o); open >= limit {
+		ps, _ := openProposals()
+		if open := len(ps); open >= limit {
 			say("%d proposal pull requests are open, the cap; the rest wait", open)
 			break
 		}
@@ -150,7 +150,8 @@ func proposal(r request, b string) {
 		}
 		// Pushed only to open the pull request: once it exists the branch is
 		// people's, and may be gone after a merge.
-		if pr == "" {
+		created := pr == ""
+		if created {
 			if !pushAs(b) {
 				stop("could not push %s as %s", b, account)
 			}
@@ -161,7 +162,11 @@ func proposal(r request, b string) {
 		}
 		write(run+"/pr", pr+"\n")
 		head = git("rev-parse", "HEAD")
-		vouch(head, pr)
+		if created {
+			// Just pushed, so HEAD is the pull request's head. One found
+			// instead may have moved on; vouchOpen checks its real head.
+			vouch(head, pr)
+		}
 		posted, _ := out("gh", "api", reviewsAPI(), "--paginate", "--jq", fmt.Sprintf(`.[] | select(.user.login == "%s" and .commit_id == "%s") | .id`, account, head))
 		if posted == "" {
 			re := regexp.MustCompile("^" + regexp.QuoteMeta(root) + `/changes/([0-9]*-[a-z0-9]*)-`)
@@ -207,15 +212,25 @@ func proposal(r request, b string) {
 }
 
 // Each open pull request the account opened from a tend/issue- or tend/jira-
-// branch, its head as GitHub reports it fetched from origin and given
-// tend/review once.
+// branch, as "<branch>\t<head>\t<url>". Every page is read: gh pr list stops
+// at --limit, and open proposals have no bound.
+func openProposals() ([]string, error) {
+	o, err := out("gh", "api", "repos/{owner}/{repo}/pulls?state=open&per_page=100", "--paginate", "--jq",
+		fmt.Sprintf(`.[] | select(.user.login == "%s" and (.head.ref | startswith("tend/issue-") or startswith("tend/jira-"))) | [.head.ref, .head.sha, .html_url] | @tsv`, account))
+	if err != nil || o == "" {
+		return nil, err
+	}
+	return strings.Split(o, "\n"), nil
+}
+
+// Each open proposal, its head as GitHub reports it fetched from origin and
+// given tend/review once.
 func vouchOpen() {
-	o, err := out("gh", "pr", "list", "--author", account, "--state", "open", "--json", "headRefName,headRefOid,url", "--jq",
-		`.[] | select(.headRefName | startswith("tend/issue-") or startswith("tend/jira-")) | [.headRefName, .headRefOid, .url] | @tsv`)
+	ps, err := openProposals()
 	if err != nil {
 		stop("could not list the open proposal pull requests")
 	}
-	for _, l := range strings.Split(o, "\n") {
+	for _, l := range ps {
 		f := strings.Split(l, "\t")
 		if len(f) != 3 || f[1] == "" {
 			continue

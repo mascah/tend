@@ -7,7 +7,7 @@
 # CREATE_LOST opens the PR and then fails, as when GitHub acted but tend never
 # heard back. pr-<branch>.merged marks it merged; its head is origin's branch,
 # and pr-<branch>.base, if there, the branch it merges into instead of main.
-# A status's description goes to descriptions as "<sha> <description>". ci
+# STATUS_FAIL fails the first status write. A status's description goes to descriptions as "<sha> <description>". ci
 # holds the checks every commit gets, "<name> <conclusion>" a line, pending
 # for one not finished; none, no checks. A PUT of a pull request's merge
 # squash-merges onto origin's main as the account, merged-by naming it and
@@ -104,6 +104,8 @@ api*)
 		exit 0
 	fi
 	case $2 in
+	*/pulls\?*) # every open pull request, as REST gives it
+		"$0" pr list | jq '[.[] | {head: {ref: .headRefName, sha: .headRefOid}, user: {login: .author}, html_url: .url}]' | jq -r "$(arg --jq "$@")" ;;
 	*/issues/*/comments)
 		[ -f "$s/comments" ] || echo '[]' >"$s/comments"
 		n=${2%/comments} n=${n##*/}
@@ -118,6 +120,7 @@ api*)
 			jq -r "$(arg --jq "$@")" "$s/reviews"
 		fi ;;
 	*/statuses/*)
+		[ -z "${STATUS_FAIL:-}" ] || [ -e "$s/status-failed" ] || { touch "$s/status-failed"; exit 1; }
 		echo "${2##*/} $(printf '%s\n' "$@" | sed -n 's/^state=//p') $by" >>"$s/statuses"
 		echo "${2##*/} $(printf '%s\n' "$@" | sed -n 's/^description=//p')" >>"$s/descriptions" ;;
 	*/commits/*/check-runs)
