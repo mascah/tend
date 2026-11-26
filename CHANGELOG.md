@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.5.0](https://github.com/mascah/tend/compare/v0.4.1...v0.5.0) (2026-11-26)
+
+
+### Features
+
+* fix failing CI before a person is asked (261125-rf036) ([#48](https://github.com/mascah/tend/issues/48)) ([f83036a](https://github.com/mascah/tend/commit/f83036a714901c7c4eb734e86678e6b66351acd0))
+* hold a candidate that touches a protected path (261125-6dvbs) ([#42](https://github.com/mascah/tend/issues/42)) ([98f4515](https://github.com/mascah/tend/commit/98f451558d44f362c794b8cf60c51823e5a0f917))
+
+
+### Bug Fixes
+
+* refuse a protected-path entry with a . or .. segment ([#47](https://github.com/mascah/tend/issues/47)) ([9a8fbcc](https://github.com/mascah/tend/commit/9a8fbcccb94525d341d73c79b6416bb99f5b461a))
+* tidy a merged attempt whose branch was updated on GitHub ([#49](https://github.com/mascah/tend/issues/49)) ([e80da30](https://github.com/mascah/tend/commit/e80da30986a4d43f415b8b2353ecc0db40c204d6))
+
 ## [0.4.1](https://github.com/mascah/tend/compare/v0.4.0...v0.4.1) (2026-11-24)
 
 
