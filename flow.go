@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -35,9 +36,11 @@ type flow struct {
 }
 
 type flowFile struct {
-	Watch   *watchSetting `yaml:"watch,omitempty"`
-	Build   *flow         `yaml:"build,omitempty"`
-	Propose *flow         `yaml:"propose,omitempty"`
+	Watch       *watchSetting `yaml:"watch,omitempty"`
+	Protect     *pathList     `yaml:"protect,omitempty"` // the protected paths, nil for tend's own
+	nullProtect bool          // protect given with no list, which YAML decodes as no protect
+	Build       *flow         `yaml:"build,omitempty"`
+	Propose     *flow         `yaml:"propose,omitempty"`
 }
 
 // How many attempts tend watch keeps going in the repository: with it, watch
@@ -69,6 +72,116 @@ func (w *watchSetting) count() int {
 		}
 	}
 	return -1
+}
+
+// ---- protected paths
+//
+// A head whose change touches a protected path lands only with a person's
+// approval. A project names its own in the flow file's protect, tend/ always
+// among them so that no head unprotects the file that names them; without
+// it, tend's own list covers the rules agents work under that a repository
+// can hold: the flow file and its prompts, CI workflows, CODEOWNERS, the
+// principles file, grove.yaml, agent instructions, skills and settings,
+// deploy config and lockfiles.
+var defaultProtect = []string{
+	"tend/", ".github/workflows/", "CODEOWNERS", "PRINCIPLES.md", "grove.yaml",
+	"CLAUDE.md", "AGENTS.md", ".claude/", ".agents/", ".codex/",
+	"wrangler.*", "fly.toml", "vercel.json", "netlify.toml", "render.yaml", "Procfile", "Dockerfile",
+	"go.sum", "package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml", "bun.lock", "bun.lockb",
+	"Cargo.lock", "Gemfile.lock", "poetry.lock", "uv.lock", "Pipfile.lock", "composer.lock",
+}
+
+// A list of paths in the flow file. An entry YAML gives as null is kept as
+// an empty one, which protectFault refuses, where a []string would drop it.
+type pathList []string
+
+func (l *pathList) UnmarshalYAML(n *yaml.Node) error {
+	if n.Kind != yaml.SequenceNode {
+		return fmt.Errorf("line %d: protect is not a list of paths", n.Line)
+	}
+	*l = make(pathList, 0, len(n.Content))
+	for _, e := range n.Content {
+		for e.Kind == yaml.AliasNode && e.Alias != nil {
+			e = e.Alias
+		}
+		switch {
+		case e.Kind == yaml.ScalarNode && e.Tag == "!!null":
+			*l = append(*l, "")
+		case e.Kind == yaml.ScalarNode:
+			*l = append(*l, e.Value)
+		default:
+			return fmt.Errorf("line %d: protect holds an entry that is not a path", e.Line)
+		}
+	}
+	return nil
+}
+
+// Why protect is not valid, said after the file's name, or "".
+func (ff *flowFile) protectFault() string {
+	if ff.nullProtect {
+		return "gives protect no list, where protect is a list of paths"
+	}
+	if ff.Protect == nil {
+		return ""
+	}
+	for _, e := range *ff.Protect {
+		if strings.TrimSpace(e) == "" {
+			return "gives protect an empty entry, where each entry is a path from the repository's root"
+		}
+		// A . or .. segment would be matched literally and so never match.
+		if t := strings.Trim(e, "/"); t == "" || strings.Contains(e, "//") || slices.ContainsFunc(strings.Split(t, "/"), func(g string) bool { return g == "." || g == ".." }) {
+			return fmt.Sprintf("gives protect the entry %q, where each entry is a path from the repository's root", e)
+		}
+	}
+	return ""
+}
+
+// The protected paths a flow file gives, and whether they are the project's.
+func (ff *flowFile) protected() ([]string, bool) {
+	if ff.Protect == nil {
+		return defaultProtect, false
+	}
+	ps := slices.Clone([]string(*ff.Protect))
+	if !slices.Contains(ps, "tend/") {
+		ps = append(ps, "tend/")
+	}
+	return ps, true
+}
+
+// What an entry matches: from the repository's root (a leading / changes
+// nothing), a folder, its own path and all in it, when it ends in /, a file of that name in
+// any folder when it has no / at all, * within one path segment.
+func entryRE(e string) *regexp.Regexp {
+	dir := strings.HasSuffix(e, "/")
+	segs := strings.Split(strings.Trim(e, "/"), "/")
+	for i, g := range segs {
+		segs[i] = strings.ReplaceAll(regexp.QuoteMeta(g), `\*`, `[^/]*`)
+	}
+	re := strings.Join(segs, "/")
+	switch {
+	case dir:
+		re = "^" + re + "(/|$)" // the folder's own path too, as a gitlink may be
+	case !strings.Contains(e, "/"):
+		re = "(^|/)" + re + "$"
+	default:
+		re = "^" + re + "$"
+	}
+	return regexp.MustCompile(re)
+}
+
+// The paths, repository paths in their order, that any of the entries covers.
+func covered(entries, paths []string) []string {
+	res := make([]*regexp.Regexp, len(entries))
+	for i, e := range entries {
+		res[i] = entryRE(e)
+	}
+	var in []string
+	for _, p := range paths {
+		if slices.ContainsFunc(res, func(r *regexp.Regexp) bool { return r.MatchString(p) }) {
+			in = append(in, p)
+		}
+	}
+	return in
 }
 
 func (ff *flowFile) named() map[string]**flow {
@@ -109,7 +222,7 @@ func (s *step) outcomes(name, flowName string) []string {
 	r, _ := parseResult(s.Result)
 	switch {
 	case name == "publish" && flowName == "build":
-		o = []string{"ok", "requested", "approved"}
+		o = []string{"ok", "requested", "approved", "failed"}
 	case name == "land":
 		o = []string{"ok", "conflict", "failed"}
 	case r.verdict != "":
@@ -269,6 +382,11 @@ func decode(s string, ff *flowFile) string {
 		return "is not a flow file tend can read: " + strings.NewReplacer("unmarshal errors: ", "",
 			"in type main.step", "in a step", "in type main.flowFile", "at the top, where a flow is build or propose",
 			"in type main.flow", "in a flow", "in type main.watchSetting", "in watch").Replace(msg)
+	}
+	if ff.Protect == nil { // protect: or protect: null, which is there and no list
+		var top map[string]any
+		yaml.Unmarshal([]byte(s), &top)
+		_, ff.nullProtect = top["protect"]
 	}
 	return ""
 }

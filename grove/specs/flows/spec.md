@@ -323,6 +323,50 @@ whose flow has none.
 - WHEN the owner runs tend
 - THEN the flow is valid, and those steps are prompted with tend's own text
 
+### Requirement: The flow file names the protected paths
+
+The system shall take the protected paths in effect from the flow file on
+the target branch, read as the flows are read: where the file holds
+`protect`, its entries and `tend/`; otherwise tend's default list. An entry
+is a path from the repository's root. An entry ending in `/` covers that
+folder and everything in it, an entry with no `/` matches a file of that
+name in any folder, and `*` matches within one path segment. `tend flow`
+shall print the protected paths in effect and say whether they are the
+project's or tend's own. If `protect` is not a list of entries that are not
+empty, or an entry has a `.` or `..` segment, the system shall stop as "A
+flow that is not valid" says.
+
+#### Scenario: The default list
+
+- GIVEN a repository with no flow file
+- WHEN the owner runs `tend flow <repo>`
+- THEN it prints `protect` with tend's default list, holding `tend/`,
+  `.github/workflows/`, `CODEOWNERS`, `PRINCIPLES.md`, `grove.yaml`,
+  `CLAUDE.md`, `AGENTS.md`, `.claude/`, deploy config and lockfiles, and
+  says it is tend's own
+
+#### Scenario: A project's own list
+
+- GIVEN a flow file whose `protect` holds `schema.sql` and `migrations/`
+- WHEN the owner runs `tend flow <repo>`
+- THEN it prints `protect` with `schema.sql`, `migrations/` and `tend/`,
+  says it is the project's, and does not hold `go.sum`
+
+#### Scenario: An empty entry
+
+- GIVEN a flow file whose `protect` holds an empty entry
+- WHEN the owner runs tend
+- THEN tend exits 3 with one sentence naming `tend/flow.yaml` and
+  `protect`, and no agent is started
+
+#### Scenario: The implementer's list is not read
+
+- GIVEN a target whose flow file protects `schema.sql`, and an attempt whose
+  implementer commits a flow file with no `protect`
+- WHEN tend reaches `land` with a head that edits `schema.sql`
+- THEN the head is held as the landing change spec's "A head that touches a
+  protected path waits for a person" says
+
 ## Known discrepancies
 
 None recorded.
@@ -337,3 +381,4 @@ None.
 - [261122-9vbmc](../../changes/archive/261122-9vbmc-several-attempts-at-once/) Several attempts at once
 - [261122-rpkqa](../../changes/archive/261122-rpkqa-land-reviewed-candidates-one-at-a-time/) Land reviewed candidates one at a time
 - [261122-hjhmn](../../changes/archive/261122-hjhmn-recover-with-no-one-there/) Recover with no one there
+- [261125-6dvbs](../../changes/archive/261125-6dvbs-hold-candidates-that-touch-protected-paths/) Hold a candidate that touches a protected path for the owner

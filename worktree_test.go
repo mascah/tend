@@ -62,6 +62,23 @@ var worktreeScenarios = []scenario{
 		m, _ := filepath.Glob(s.ts + "/intake/*-1/worktree")
 		s.check("and not looked at again", len(m) == 0)
 	}},
+	{"tidy-updated-branch", func(s *sc) {
+		s.project("main", true)
+		s.allow()
+		s.issues()
+		s.run()
+		wt, b, p := s.worktree(), s.branch(), s.pr()
+		s.git(wt, "commit", "-q", "--allow-empty", "-m", "not pushed")
+		s.bash(s.repo, `c=$(git commit-tree "$0^{tree}" -p "$0~1" -p main -m "Merge branch 'main'") && git push -q origin "$c:refs/heads/$0"`+"\n", b)
+		s.touch(p + ".merged")
+		r := s.propose()
+		s.check("a merged attempt whose worktree has a commit its pull request lacks is left", isDir(wt))
+		s.check("and tend says so", r.said("its head is not in its pull request's"))
+		s.git(wt, "reset", "-q", "--hard", "HEAD~1")
+		s.propose()
+		s.check("one whose pull request's head was updated from the target on GitHub is removed", !exists(wt))
+		s.check("with its local branch", s.git(s.repo, "branch", "--list", b) == "")
+	}},
 	{"tidy-superseded", func(s *sc) {
 		s.project("main", true)
 		s.allow()

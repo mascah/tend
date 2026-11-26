@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -44,8 +45,11 @@ func pushAs(b string) bool {
 // requested changes on it that the flow's request step should make. Each
 // request is asked of the implementer once: request-<review id> is written
 // just before the prompt goes; a request on an older head was answered by a
-// later commit. tend does not wait here for people: tend watch runs it again
-// when one requests changes.
+// later commit. In a flow whose publish gives a step for failed, the checks
+// on the head are waited for next, before an approval is read: a failed one
+// goes to that step while it can be asked, and is said once on the pull
+// request when it cannot. tend does not wait here for people: tend watch
+// runs it again when one requests changes.
 var told bool
 
 func publishStep() string {
@@ -65,6 +69,14 @@ func publishStep() string {
 		stop("could not read the reviews of %s", pr)
 	}
 	if req == nil || exists(run+"/answered-"+str(get(req, "node_id"))) {
+		if to := fl.Steps["publish"].Next["failed"]; to != "" {
+			if failed := waitChecks(); failed != nil {
+				if canAsk(to) {
+					return "failed"
+				}
+				spentFix(to, failed)
+			}
+		}
 		if fl.Steps["publish"].Next["approved"] != "" && approved() {
 			return "approved"
 		}
@@ -82,6 +94,101 @@ func publishStep() string {
 	vars["who"], vars["review_id"] = str(get(req, "user", "login")), rid
 	vars["review"], vars["comments"] = strings.TrimRight(str(get(req, "body")), "\n"), comments
 	return "requested"
+}
+
+// The checks on the published head, waited for in a flow whose publish
+// gives a step for failed, before an approval is read or a person asked:
+// read as land reads them, tend/review left out, so a head that failed
+// review has no failed check for it. The failed checks, each its name and
+// link, or nil once every check passed, decided only once every check has
+// finished; with none but tend/review, or one unfinished, when the wait
+// ends, tend stops for a person. A read that ends after the wait does not
+// decide: the checks were not all seen finished within it. The deadline is
+// checked before each sleep, which is no longer than the time left.
+func waitChecks() []string {
+	ms, _ := strconv.Atoi(timeout())
+	wait := time.Duration(ms) * time.Millisecond
+	poll := min(20*time.Second, wait/4)
+	until := time.Now().Add(wait)
+	var pending []string // as the last read within the wait saw them
+	ci := 0
+	over := func() {
+		switch {
+		case ci == 0:
+			stop("%s at %s has no check but tend/review, so tend asks no one to approve it: a flow whose publish waits for checks needs CI on its pull requests", branch, short(head))
+		case len(pending) == 0:
+			stop("the checks on %s at %s were not read finished within %sms, so tend asks no one to approve it yet", branch, short(head), timeout())
+		}
+		stop("the checks %s on %s at %s were still unfinished after %sms, so tend asks no one to approve it yet", and(pending), branch, short(head), timeout())
+	}
+	for round := 0; ; round++ {
+		if round > 0 {
+			left := time.Until(until)
+			if left <= 0 {
+				over()
+			}
+			time.Sleep(min(poll, left))
+		}
+		f, p, c := readChecks(head, true)
+		if time.Now().After(until) {
+			if round == 0 { // no read ended within the wait: what this one saw
+				pending, ci = p, c
+			}
+			over()
+		}
+		pending, ci = p, c
+		switch standing(head, f, p, c) {
+		case "failed":
+			return f
+		case "passed":
+			say("checks passed on %s", short(head))
+			return nil
+		}
+		stage("working", fmt.Sprintf("waiting for the checks on %s at %s", branch, short(head)), "tend asks a person about "+pr+" once they pass, or has a failed one fixed once")
+	}
+}
+
+// Whether the step a failure leads to can still be asked: it has no limit,
+// it has not reached it, or it was asked at this head and its agent is
+// still working on it, or is gone and may be asked once more in a new
+// session. Asked at this head and settled with no commit, it is spent.
+func canAsk(name string) bool {
+	s := fl.Steps[name]
+	if s == nil || s.Limit == 0 {
+		return true
+	}
+	rec := recordOf(name)
+	if timesAsked(name, rec) < s.Limit {
+		return true
+	}
+	if !slices.Contains(asks(rec), head) {
+		return false
+	}
+	agent, _, _ := agentOf(name)
+	return term.status(agent) == "working" || term.gone(agent) && !slices.Contains(asks(againOf(rec)), head)
+}
+
+// Failed checks on the head once the step for them is spent: said once on
+// the pull request, found by the head's marker, so a rerun says it no more.
+func spentFix(name string, failed []string) {
+	mark := run + "/checks-said-" + head
+	if exists(mark) {
+		return
+	}
+	tag := "<!-- tend:checks-failed " + head + " -->"
+	said, err := out("gh", "api", "repos/{owner}/{repo}/issues/"+prNumber()+"/comments", "--paginate", "--jq", fmt.Sprintf(`.[] | select(.user.login == "%s" and (.body | contains("%s"))) | .id`, account, tag))
+	if err != nil {
+		stop("could not read the comments on %s", pr)
+	}
+	if said == "" {
+		body := fmt.Sprintf("**Checks failed on %s after the one fix tend asks for**\n\ntend asked %s for the fixes its flow allows, %d, so it asks no more. Failed on %s:\n\n- %s\n\nA person decides what follows: fix the branch, run the checks again, or close the pull request.\n\n%s\n",
+			short(head), name, fl.Steps[name].Limit, short(head), strings.Join(failed, "\n- "), tag)
+		if _, err := input(body, "gh", "pr", "comment", pr, "--body-file", "-"); err != nil {
+			stop("could not comment on %s; run tend again to finish", pr)
+		}
+		say("said on %s that the checks on %s failed after %s was spent", pr, short(head), name)
+	}
+	write(mark, head+"\n")
 }
 
 // 5. Publish, when origin is listed in $state/publish with the GitHub account
@@ -309,6 +416,13 @@ func approved() bool {
 	if hs == nil {
 		hs = []string{head}
 	}
+	return approvedOn(hs)
+}
+
+// Whether the newest review that approves or requests changes, by a person
+// with write access, on any of the heads hs, approves: hs[0] is the head,
+// the rest those it counts approvals of.
+func approvedOn(hs []string) bool {
 	q, _ := json.Marshal(hs)
 	s, err := out("gh", "api", reviewsAPI(), "--paginate", "--jq", fmt.Sprintf(`.[] | select((.state == "APPROVED" or .state == "CHANGES_REQUESTED") and (.commit_id | IN(%s[])) and %s) | .state + " " + .user.login`, q, writer("author_association")))
 	if err != nil {
@@ -317,7 +431,7 @@ func approved() bool {
 	ls := strings.Split(s, "\n")
 	last := strings.Fields(ls[len(ls)-1])
 	if len(last) == 2 && last[0] == "APPROVED" {
-		say("%s approved %s at %s", last[1], pr, short(head))
+		say("%s approved %s at %s", last[1], pr, short(hs[0]))
 		return true
 	}
 	return false

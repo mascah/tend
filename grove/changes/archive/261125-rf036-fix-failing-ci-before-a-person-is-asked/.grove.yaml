@@ -2,4 +2,4 @@ title: "Fix failing CI before a person is asked"
 created: 2026-11-25T16:49:03Z
 description: publish waits for the checks on the head and sends a failure to the implementer once before a person is asked to approve
 schema: default
-base: 2a8ae80ca15308c8556fa7ba70821d16b6779a1c
+base: 98f451558d44f362c794b8cf60c51823e5a0f917

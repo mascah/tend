@@ -206,7 +206,8 @@ starting its build stay with people.
 New work branches from the target as origin has it, fetched first. Once a pull
 request is merged or closed, the next `tend propose` or run in that repository
 removes the worktree tend made for it, with its local branch and the agents'
-place, when its head is the pull request's and it holds no uncommitted files;
+place, when the pull request's head holds its head (as after GitHub's "Update
+branch") and it holds no uncommitted files;
 otherwise it is left and tend says why. A declined request's worktree goes at
 once.
 
@@ -386,7 +387,14 @@ limited step.
 
 `publish` gives `ok`, `requested` when a person with write access requested
 changes on the head, and, in a flow that names it, `approved` when the newest
-review on the head by such a person approves.
+review on the head by such a person approves. In a flow that names it,
+`publish` also gives `failed`: after publishing, with no change requested,
+it waits for the checks on the head as `land` does (below), `tend/review`
+left out, before it reads an approval. A failed check gives `failed`, the
+failed checks' names and links going to the next prompt as `{checks}`. A
+head with no check but `tend/review`, or one still unfinished, after
+`TIMEOUT_MS` stops for a person. A flow that does not name `failed` reads no
+check at `publish`.
 
 ### Landing: merging one candidate at a time
 
@@ -416,11 +424,17 @@ One candidate lands for each CI run. tend ships `prompts/conflict.md` and
 `prompts/failed.md` for the steps that follow `conflict` and `failed`. A
 supervised flow sends `publish`'s `approved` to `land`, so a person with
 write access approves each head before it lands, and `tend watch` runs the
-attempt again when it sees the approval:
+attempt again when it sees the approval. It sends `publish`'s `failed` to
+the same `fix` as `land`'s, so a red pull request is fixed before anyone is
+asked to approve it. `fix`'s limit counts asks from both: an attempt gets one
+fix for failed checks in all. When `publish` finds failed checks and `fix` is
+spent, it says so once on the pull request, naming the checks, and asks a
+person as it would have. If `land` later finds `fix` spent, it stops for a
+person as before:
 
 ```yaml
     publish:
-      next: {ok: end, approved: land, requested: request}
+      next: {ok: end, approved: land, requested: request, failed: fix}
     land:
       next: {ok: end, conflict: resolve, failed: fix}
     resolve:
@@ -444,6 +458,10 @@ An autonomous flow lands every head that passed review, with the same
     publish:
       next: {ok: land, requested: request}
 ```
+
+It need not name `failed` on `publish`, since `land` waits for the checks and
+sends a failure to `fix`. It may, to keep a candidate's first CI run out of
+the landing lock, so that run does not hold up another candidate's landing.
 
 Set a branch rule on the target that requires the project's CI and
 `tend/review` and requires branches to be up to date before merging: tend
