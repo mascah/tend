@@ -7,7 +7,7 @@
 # CREATE_LOST opens the PR and then fails, as when GitHub acted but tend never
 # heard back. pr-<branch>.merged marks it merged; its head is origin's branch,
 # and pr-<branch>.base, if there, the branch it merges into instead of main.
-# A status's description goes to descriptions as "<sha> <description>". ci
+# STATUS_FAIL fails the first status write. A status's description goes to descriptions as "<sha> <description>". ci
 # holds the checks every commit gets, "<name> <conclusion>" a line, pending
 # for one not finished; none, no checks. A PUT of a pull request's merge
 # squash-merges onto origin's main as the account, merged-by naming it and
@@ -34,7 +34,8 @@ case "$1 $2" in
 		[ -e "$k.merged" ] && st=MERGED || st=OPEN
 		rd=$(jq -r --arg h "$(git -C "$(sed -n 2p "$w")" rev-parse "$(sed -n 1p "$w")" 2>/dev/null)" 'if any(.[]?; .state == "CHANGES_REQUESTED" and .commit_id == $h) then "CHANGES_REQUESTED" else "" end' "$s/reviews" 2>/dev/null || true)
 		jq -n --arg b "$(sed -n 1p "$w")" --arg by "$(cat "$k.by")" --arg st "$st" --arg t "$(cat "$k.title" 2>/dev/null)" --arg u "https://example.test/pr/${k##*/pr-}" --arg rd "$rd" \
-			'{headRefName: $b, author: $by, state: $st, title: $t, url: $u, number: 1, reviewDecision: $rd}'
+			--arg oid "$(git -C "$(sed -n 2p "$w")" rev-parse "$(sed -n 1p "$w")" 2>/dev/null)" \
+			'{headRefName: $b, headRefOid: $oid, author: $by, state: $st, title: $t, url: $u, number: 1, reviewDecision: $rd}'
 	done | jq -s --arg h "$(arg --head "$@")" --arg a "$(arg --author "$@")" --arg st "$(arg --state "$@")" '
 		if $h != "" then map(select(.headRefName == $h)) elif $a != "" then map(select(.author == $a and .state == "OPEN")) elif $st == "all" then . else map(select(.state == "OPEN")) end' |
 		if q=$(arg --jq "$@") && [ -n "$q" ]; then jq -r "$q"; else cat; fi ;;
@@ -103,6 +104,8 @@ api*)
 		exit 0
 	fi
 	case $2 in
+	*/pulls\?*) # every open pull request, as REST gives it
+		"$0" pr list | jq '[.[] | {head: {ref: .headRefName, sha: .headRefOid}, user: {login: .author}, html_url: .url}]' | jq -r "$(arg --jq "$@")" ;;
 	*/issues/*/comments)
 		[ -f "$s/comments" ] || echo '[]' >"$s/comments"
 		n=${2%/comments} n=${n##*/}
@@ -117,6 +120,7 @@ api*)
 			jq -r "$(arg --jq "$@")" "$s/reviews"
 		fi ;;
 	*/statuses/*)
+		[ -z "${STATUS_FAIL:-}" ] || [ -e "$s/status-failed" ] || { touch "$s/status-failed"; exit 1; }
 		echo "${2##*/} $(printf '%s\n' "$@" | sed -n 's/^state=//p') $by" >>"$s/statuses"
 		echo "${2##*/} $(printf '%s\n' "$@" | sed -n 's/^description=//p')" >>"$s/descriptions" ;;
 	*/commits/*/check-runs)
@@ -125,6 +129,10 @@ api*)
 		[ -z "${CHECKS_SLEEP:-}" ] || sleep "$CHECKS_SLEEP"
 		{ [ ! -f "$s/ci" ] || cat "$s/ci"; } | jq -Rn '{check_runs: [inputs | split(" ") | select(length == 2) |
 			{name: .[0], status: (if .[1] == "pending" then "in_progress" else "completed" end), conclusion: (if .[1] == "pending" then null else .[1] end), html_url: ("https://example.test/checks/" + .[0])}]}' |
+			jq -r "$(arg --jq "$@")" ;;
+	*/commits/*/statuses) # each status on the commit, newest first, with its creator
+		h=${2%/statuses} h=${h##*/}
+		{ [ ! -f "$s/statuses" ] || grep "^$h " "$s/statuses" || true; } | jq -Rn '[inputs | split(" ") | {context: "tend/review", state: .[1], creator: {login: .[2]}}] | reverse' |
 			jq -r "$(arg --jq "$@")" ;;
 	*/commits/*/status)
 		h=${2%/status} h=${h##*/}

@@ -213,6 +213,60 @@ without being prompted twice" says.
 - THEN the follow-up is asked once more of a new drafter session, and the
   pull request opens or the request is told why there is none
 
+### Requirement: A proposal head of Grove documents only passes the rule
+
+When `tend propose` opens a proposal pull request, or finds an open pull
+request that the account opened from a `tend/issue-` or `tend/jira-` branch
+whose head has no `tend/review` status set by the account, the system shall
+set `tend/review` on that head, as the account, linking the pull request:
+`success`, described as Grove documents only and that merging approves the
+change, when every path the head changes against the target as fetched lies
+in one change's folder under `<root>/changes/`; and no `success` otherwise.
+
+#### Scenario: A proposal just opened
+
+- GIVEN issue #1 labelled `tend`, and a drafter that commits a change only
+  under `grove/changes/261115-p0000-thing/`
+- WHEN the owner runs `tend propose <repo>`
+- THEN the pull request's head has `tend/review` `success` set by the
+  account, described "Grove documents only: merging approves this change"
+
+#### Scenario: A proposal opened before this change
+
+- GIVEN an open proposal pull request from `tend/issue-1` by the account,
+  whose head changes only one change's folder and has no status
+- WHEN the owner runs `tend propose <repo>`, with no labelled request left
+  and the cap reached
+- THEN that head has `tend/review` `success` set by the account
+
+#### Scenario: A person revises the proposal
+
+- GIVEN a proposal whose head has `tend/review` `success`, and a person
+  pushes a commit editing only that change's `proposal.md` to its branch
+- WHEN the owner runs `tend propose <repo>`
+- THEN the new head has its own `tend/review` `success`, and the earlier
+  head's status is not set again
+
+#### Scenario: A head that touches code
+
+- GIVEN an open proposal pull request whose head also changes `intake.go`
+- WHEN the owner runs `tend propose <repo>`
+- THEN its head has no `tend/review` `success`
+
+#### Scenario: Two changes in one head
+
+- GIVEN an open proposal pull request whose head adds both
+  `grove/changes/261115-p0000-thing/` and `grove/changes/261115-p0001-other/`
+- WHEN the owner runs `tend propose <repo>`
+- THEN its head has no `tend/review` `success`
+
+#### Scenario: Pull requests that are not proposals
+
+- GIVEN a merged proposal pull request, and an open pull request from
+  `tend/issue-2` opened by a person, not the account
+- WHEN the owner runs `tend propose <repo>`
+- THEN neither head gets a `tend/review` status
+
 ## Known discrepancies
 
 None recorded.
@@ -226,3 +280,4 @@ None.
 - Written when tend adopted Grove (2026-11-16).
 - [261122-hjhmn](../../changes/archive/261122-hjhmn-recover-with-no-one-there/) Recover with no one there
 - [261124-60tny](../../changes/archive/261124-60tny-name-the-drafter-after-its-repository/) An intake drafter is named after its request and its repository
+- [261126-c16zs](../../changes/archive/261126-c16zs-give-proposals-a-review-status/) Give proposal pull requests a tend/review status

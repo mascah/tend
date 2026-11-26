@@ -68,6 +68,10 @@ func propose() {
 		}
 	}
 
+	// Open proposals first, whatever the cap: a head with no tend/review from
+	// the account, such as a person's revision, gets its own.
+	vouchOpen()
+
 	type pending struct {
 		branch string
 		get    func() request
@@ -89,8 +93,8 @@ func propose() {
 		if s, _ := out("gh", "pr", "list", "--head", t.branch, "--state", "all", "--json", "url", "--jq", ".[0].url // empty"); s != "" {
 			continue
 		}
-		o, _ := out("gh", "pr", "list", "--author", account, "--state", "open", "--json", "headRefName", "--jq", `[.[] | select(.headRefName | startswith("tend/issue-") or startswith("tend/jira-"))] | length`)
-		if open, _ := strconv.Atoi(o); open >= limit {
+		ps, _ := openProposals()
+		if open := len(ps); open >= limit {
 			say("%d proposal pull requests are open, the cap; the rest wait", open)
 			break
 		}
@@ -146,7 +150,8 @@ func proposal(r request, b string) {
 		}
 		// Pushed only to open the pull request: once it exists the branch is
 		// people's, and may be gone after a merge.
-		if pr == "" {
+		created := pr == ""
+		if created {
 			if !pushAs(b) {
 				stop("could not push %s as %s", b, account)
 			}
@@ -157,6 +162,11 @@ func proposal(r request, b string) {
 		}
 		write(run+"/pr", pr+"\n")
 		head = git("rev-parse", "HEAD")
+		if created {
+			// Just pushed, so HEAD is the pull request's head. One found
+			// instead may have moved on; vouchOpen checks its real head.
+			vouch(head, pr)
+		}
 		posted, _ := out("gh", "api", reviewsAPI(), "--paginate", "--jq", fmt.Sprintf(`.[] | select(.user.login == "%s" and .commit_id == "%s") | .id`, account, head))
 		if posted == "" {
 			re := regexp.MustCompile("^" + regexp.QuoteMeta(root) + `/changes/([0-9]*-[a-z0-9]*)-`)
@@ -199,4 +209,91 @@ func proposal(r request, b string) {
 		stop("%s: %s committed no change and wrote no reason. Look at its pane, then commit the draft or write %s/declined, or delete %s/followed to have it asked again", r.ref, impl, run, run)
 	}
 	cd(repo)
+}
+
+// Each open pull request the account opened from a tend/issue- or tend/jira-
+// branch, as "<branch>\t<head>\t<url>". Every page is read: gh pr list stops
+// at --limit, and open proposals have no bound.
+func openProposals() ([]string, error) {
+	o, err := out("gh", "api", "repos/{owner}/{repo}/pulls?state=open&per_page=100", "--paginate", "--jq",
+		fmt.Sprintf(`.[] | select(.user.login == "%s" and (.head.ref | startswith("tend/issue-") or startswith("tend/jira-"))) | [.head.ref, .head.sha, .html_url] | @tsv`, account))
+	if err != nil || o == "" {
+		return nil, err
+	}
+	return strings.Split(o, "\n"), nil
+}
+
+// Each open proposal, its head as GitHub reports it fetched from origin and
+// given tend/review once.
+func vouchOpen() {
+	ps, err := openProposals()
+	if err != nil {
+		stop("could not list the open proposal pull requests")
+	}
+	for _, l := range ps {
+		f := strings.Split(l, "\t")
+		if len(f) != 3 || f[1] == "" {
+			continue
+		}
+		if !ok("git", "cat-file", "-e", f[1]+"^{commit}") {
+			// The branch fetched into no ref of ours, so a pass beside this
+			// one has nothing of its to race.
+			quiet("git", "fetch", "-q", "origin", "refs/heads/"+f[0])
+		}
+		if !ok("git", "cat-file", "-e", f[1]+"^{commit}") {
+			say("could not fetch %s's head %s; the next pass checks it", f[0], short(f[1]))
+			continue
+		}
+		vouch(f[1], f[2])
+	}
+}
+
+// The tend/review status on proposal head h, set as the account once:
+// success when every path h changes against the target as fetched lies in
+// one change's folder under <root>/changes/, read from Git alone; failure,
+// naming why, otherwise.
+func vouch(h, url string) {
+	set, err := out("gh", "api", "repos/{owner}/{repo}/commits/"+h+"/statuses", "--paginate", "--jq",
+		fmt.Sprintf(`.[] | select(.context == "tend/review" and .creator.login == "%s") | .state`, account))
+	if err != nil {
+		stop("could not read the statuses on %s", short(h))
+	}
+	if set != "" {
+		return
+	}
+	st, d := "success", "Grove documents only: merging approves this change"
+	if why := notDocs(h); why != "" {
+		st, d = "failure", why
+	}
+	if r := []rune(d); len(r) > 140 { // GitHub's limit on a description
+		d = string(r[:139]) + "…"
+	}
+	if _, err := out("gh", "api", "repos/{owner}/{repo}/statuses/"+h, "-f", "state="+st, "-f", "context=tend/review",
+		"-f", "description="+d, "-f", "target_url="+url); err != nil {
+		stop("could not set the tend/review status on %s", short(h))
+	}
+}
+
+// Why head h is not one change's Grove documents only, or "" when it is:
+// a folder directly under <root>/changes/ named <id>-<slug>, which leaves
+// out the archive.
+func notDocs(h string) string {
+	re := regexp.MustCompile("^" + regexp.QuoteMeta(root) + `/changes/([0-9]+-[a-z0-9]+-[^/]+)/`)
+	ps := changedPaths(h)
+	if len(ps) == 0 {
+		return "Changes nothing against " + target
+	}
+	folder := ""
+	for _, p := range ps {
+		m := re.FindStringSubmatch(p)
+		switch {
+		case m == nil:
+			return "Changes " + p + ", outside one change's Grove documents"
+		case folder == "":
+			folder = m[1]
+		case m[1] != folder:
+			return "Changes two changes' documents: " + folder + " and " + m[1]
+		}
+	}
+	return ""
 }

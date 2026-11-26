@@ -151,7 +151,9 @@ Where agents run, where you can watch and take over: Herdr (default) or rex.
 Each worktree gets a place (a workspace or session); each agent a pane.
 
 ### `tend/review` {#tend-review}
-The commit status tend sets on each reviewed commit: `success` or `failure`.
+The commit status tend sets on each reviewed commit: `success` or `failure`;
+also on each proposal's head, `success` when it changes only one change's
+Grove documents ([intake](concepts/intake.md)).
 
 ### Unattended {#unattended}
 A mark on a Grove cycle's plan: approval for watch to start it with no one
