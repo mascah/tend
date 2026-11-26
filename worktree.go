@@ -115,7 +115,7 @@ func removeWorktree(d, b string) {
 }
 
 // Worktrees tend made for this repository whose pull request is merged or
-// closed, removed when their head is the pull request's, so nothing is lost;
+// closed, removed when the pull request's head holds theirs, so nothing is lost;
 // and those of attempts with no pull request whose cycle or change is done, when their
 // branch has no commit the target lacks. Never one with a worktree inside it
 // or whose implementer is working. A run folder names its worktree in
@@ -142,9 +142,14 @@ func tidy() {
 			if err != nil || h == "" {
 				continue
 			}
-			if gitQ("-C", d, "rev-parse", "HEAD") != h {
-				say("left %s: its head is not its pull request's", d)
-				continue
+			// The pull request's head holds every commit of the worktree's, as
+			// when a person updated the branch on GitHub before merging.
+			if hd := gitQ("-C", d, "rev-parse", "HEAD"); hd != h {
+				quiet("git", "-C", repo, "fetch", "-q", "origin", h)
+				if !ok("git", "-C", repo, "merge-base", "--is-ancestor", hd, h) {
+					say("left %s: its head is not in its pull request's", d)
+					continue
+				}
 			}
 			b = pb
 		} else if b = superseded(d, r, g); b == "" {
