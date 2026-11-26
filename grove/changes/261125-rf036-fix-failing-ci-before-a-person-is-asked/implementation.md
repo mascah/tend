@@ -38,8 +38,37 @@ Check: `prompts/failed.md` now starts "Checks GitHub ran on {branch} at {head} f
 
 ### T-02 — tend's own flow and its documentation
 
-Status: not started
+Status: done
+
+- `tend/flow.yaml`: `publish` gives `failed: fix`, and the header comment
+  says so.
+- `README.md`: `publish`'s outcomes include `failed`. The supervised example
+  names `failed: fix`, with how it shares the one `fix` with `land`. The
+  autonomous example says such a flow may name `failed` to keep the first
+  CI run out of the landing lock, and need not, since `land` waits for checks.
+- `guide/flows-reference.md`: the outcomes table, `{checks}` and the
+  `prompts/failed.md` text. `guide/concepts/publication.md`: the outcome
+  `failed`, the wait, the spent-fix comment, the `at_once` slot, and the
+  sequence diagram. `guide/concepts/landing.md`: the shared fix.
+- The file is valid: parsed by the flow checker, it has no fault and
+  `publish` gives `approved: land, failed: fix, ok: end, requested: request`.
+
+Also changed: `guide/setup.md` — it holds the guide's supervised flow example, which the acceptance says names `failed: fix` on `publish`.
+Check: `tend flow` on this repository reads the flow file from origin's main, so until this branch merges it prints main's `publish` without `failed`. I could not push the file to a scratch origin to run `tend flow` on it (that command was refused). Instead, a throwaway test ran the flow checker (`faultOf`) on the file in this working tree: no fault, and `publish` gives `failed: fix`. The test was deleted afterwards. The test flow-publish-failed shows `tend flow` printing a flow with `failed: fix` on `publish`.
 
 ## Scenarios
+
+- publication "A red pull request in a supervised flow": publication_test.go TestTend/ci-red, passed
+- publication "The checks pass": publication_test.go TestTend/ci-pass, passed
+- publication "Failed review is not a failed check": publication_test.go TestTend/ci-failed-review, passed
+- publication "A change requested first": publication_test.go TestTend/ci-requested-first, passed
+- publication "Approved but red": publication_test.go TestTend/ci-approved-red, passed
+- publication "No CI": publication_test.go TestTend/ci-none, passed (and ci-unfinished for a check still unfinished, passed)
+- publication "A flow without failed": publication_test.go TestTend/ci-no-flow, passed
+- publication "Still red after the fix": publication_test.go TestTend/ci-still-red, passed
+- publication "One fix in all": publication_test.go TestTend/ci-one-fix, passed
+- publication "A rerun": publication_test.go TestTend/ci-rerun, passed
+- watch-and-status "Waiting for checks counts": watch_test.go TestTend/watch-at-once-checks, passed
+- watch-and-status, the requirement's other scenarios (unchanged): watch_test.go TestTend/watch-at-once-*, passed
 
 ## Reconciliation

@@ -159,7 +159,7 @@ request.
 
 | Step | Outcomes |
 | --- | --- |
-| `publish` in build | `ok`, `requested` (a person with write access requested changes on the head), `approved` (the newest such review on the head approves; only if the flow names it) |
+| `publish` in build | `ok`, `requested` (a person with write access requested changes on the head), `approved` (the newest such review on the head approves; only if the flow names it), `failed` (a check on the head failed; only if the flow names it, which has `publish` wait for the checks) |
 | `publish` in propose | `ok` |
 | `land` | `ok` (merged), `conflict` (the target does not merge in cleanly), `failed` (a check failed) |
 | a step with a `verdict` result | `success`, `actionable` (failure the reviewer calls an in-scope fix), `failure` |
@@ -186,7 +186,7 @@ step.
 | `{kind}` | `grove` or `issue`. |
 | `{named}`, `{scope}` | An issue's name (`GitHub issue #7`) and its title, description and URL on one line. |
 | `{who}`, `{review_id}`, `{review}`, `{comments}` | The person who requested changes, the review's ID, its body, and its line comments. |
-| `{checks}` | After `failed` at `land`: the failed checks' names and links. |
+| `{checks}` | After `failed` at `publish` or `land`: the failed checks' names and links. |
 | `{request}`, `{refs}`, `{ref}` | In propose: the request quoted with its link, the commit trailer (`Refs #7`), and `issue #7`. |
 
 ## Built-in prompts
@@ -242,7 +242,7 @@ tend could not land {branch} at {head}: {base} does not merge into it cleanly, s
 `prompts/failed.md`
 
 ```text
-tend could not land {branch} at {head}: checks GitHub ran on it failed. {checks} Find why each failed, fix what is in scope, run the tests, update {notes} where a claim changes, and commit. Ask no one.
+Checks GitHub ran on {branch} at {head} failed, so tend neither asks a person to approve it nor lands it. {checks} Find why each failed, fix what is in scope, run the tests, update {notes} where a claim changes, and commit. Ask no one.
 ```
 
 ## Validation

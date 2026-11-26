@@ -21,7 +21,11 @@ sequenceDiagram
         T->>GH: review comment (event COMMENT) with the summary
     end
     T->>GH: draft if the head failed review, ready if it passed
-    T->>GH: read reviews: changes requested? approved?
+    T->>GH: read reviews: changes requested?
+    opt flow names failed on publish
+        T->>GH: wait for the checks on the head (tend/review left out)
+    end
+    T->>GH: read reviews: approved?
 ```
 
 [Publication](../glossary.md#publication) is the built-in `publish` step. It
@@ -59,6 +63,17 @@ After publishing, the step's outcome is:
   either commits, and the new head is reviewed and published, or makes no
   change and its reply is posted as a comment and not asked again. Plain
   comments, and requests from anyone without write access, are ignored.
+- `failed`, only in a flow that names it, when a check on the head failed.
+  Such a flow has `publish` wait, once no change is requested, for every
+  check GitHub reports on the head, read as [landing](landing.md) reads them
+  but with `tend/review` left out. It waits before it reads an approval, so an
+  approved head whose check fails still gives `failed`. A head with no check
+  but `tend/review`, or one still unfinished, after `TIMEOUT_MS` stops for a
+  person (exit 3). The failed checks go to the next step as `{checks}`. If
+  that step is spent (tend's own flow sends `failed` to the `fix` that
+  `land` uses, limit 1, so one fix in all), tend says so once on the pull
+  request, naming the failed checks, and gives `approved` or `ok` as it would
+  have.
 - `approved`, only in a flow that names it, when the newest such review on the
   head approves.
 - `ok` otherwise.
@@ -68,6 +83,8 @@ After publishing, the step's outcome is:
 the agents' place, if the worktree's head is the pull request's and it holds
 no uncommitted files; otherwise it leaves it and says why.
 
-tend does not wait for people at `publish`. [Watch](watch.md) runs the attempt
+tend does not wait for people at `publish`, only for checks in a flow that
+names `failed`. While it waits for them, the attempt counts toward
+[watch's](watch.md) `at_once`. [Watch](watch.md) runs the attempt
 again when a change request or approval arrives. Merging stays a person's,
 unless the flow has a [`land`](landing.md) step.

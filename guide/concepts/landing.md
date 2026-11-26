@@ -58,4 +58,7 @@ runner:
 
 If a person merged the pull request meanwhile, `land` sees it and gives `ok`.
 tend ships `prompts/conflict.md` and `prompts/failed.md` for the steps that
-follow `conflict` and `failed`.
+follow `conflict` and `failed`. A flow whose `publish` names `failed` waits for
+the same checks before a person is asked (see [Publication](publication.md)).
+Sent to the same `fix`, the two share its limit, so an attempt gets one fix for
+failed checks in all.
