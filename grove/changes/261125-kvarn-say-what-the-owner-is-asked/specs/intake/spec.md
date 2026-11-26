@@ -1,12 +1,12 @@
 # Changes to intake
 
 The changes that change 261125-kvarn proposes to the requirements of
-[intake](../../../../specs/intake/spec.md), as that spec stands at f3f9f87.
+[intake](../../../../specs/intake/spec.md), as that spec stands at 7e339d9.
 This is future work: nothing here describes the target branch until the
 change is implemented and the maintained spec is reconciled.
 
 The examples use the title wording and the counting of consequential open
-questions that the proposal's open questions 2 and 3 recommend.
+questions that the proposal's decisions 1 and 2 fix.
 
 ## ADDED Requirements
 
@@ -17,7 +17,7 @@ system shall notify the person, as
 [terminals](../../../../specs/terminals/spec.md) says for a wait, with a
 title naming the pull request and saying it waits for them, and a body
 naming the request it was drafted from, how many of its open questions the
-drafter marked consequential, and to merge to approve or revise on its
+drafter marked consequential with the follow prompt's fixed marker, and to merge to approve or revise on its
 branch, ending with the pull request's URL; and shall notify each proposal
 pull request once.
 
@@ -44,9 +44,9 @@ pull request once.
 
 ## Observed current behavior
 
-- `intake.go` at f3f9f87 opens the proposal pull request, posts its review
+- `intake.go` at 7e339d9 opens the proposal pull request, posts its review
   and records `done` in the request's status ("a person answers its open
   questions, revises or merges it"), and sends no notification.
-- `flows/prompts/follow.md` at f3f9f87 asks the drafter to write the open
+- `flows/prompts/follow.md` at 7e339d9 asks the drafter to write the open
   questions to `summary`, "the consequential ones ... first and marked so",
   with no fixed marker.

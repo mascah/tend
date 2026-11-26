@@ -2,11 +2,11 @@
 
 The changes that change 261125-kvarn proposes to the requirements of
 [terminals](../../../../specs/terminals/spec.md), as that spec stands at
-f3f9f87. This is future work: nothing here describes the target branch
+7e339d9. This is future work: nothing here describes the target branch
 until the change is implemented and the maintained spec is reconciled.
 
 The examples use the title wording, length bound and once-per-wait record
-that the proposal's open questions 2, 4 and 5 recommend.
+that the proposal's decisions 1 and 5 fix.
 
 ## MODIFIED Requirements
 
@@ -111,6 +111,27 @@ to approve this head to land it, ending with the pull request's URL.
   body names `tend/flow.yaml`, says to approve this head to land it, and
   ends with the pull request's URL
 
+### Requirement: Failed checks after the one fix are said
+
+When an attempt's flow ends at a published head on which a check still
+failed after the step `publish` gives for `failed` was spent, as the
+publication spec's "A spent fix is said on the pull request" says, the
+system shall say in the notification's body which checks failed after the
+one fix, and to fix the branch, run the checks again or close the pull
+request, ending with the pull request's URL, and shall not say the head is
+ready to approve or merge.
+
+#### Scenario: Still red after the fix
+
+- GIVEN a flow whose `publish` sends `failed` to a `fix` step with limit 1,
+  and pull request #42 of `o/r` whose check `test` fails on its head and
+  again on the head `fix` makes
+- WHEN the flow ends
+- THEN the notification is titled `tend: o/r#42 waits for you`, and its
+  body names `test`, says it failed after the one fix, says to fix the
+  branch, run the checks again or close, ends with the pull request's URL,
+  and says nothing of approving
+
 ### Requirement: Another stop gives its reason and the link
 
 When tend stops for a person for any other reason, the system shall give
@@ -163,12 +184,12 @@ shortening the text before the link and marking the cut with an ellipsis.
 
 ## Observed current behavior
 
-- `attempt.go` at f3f9f87 notifies `tend <item>: <conclusion>` with `<pr or
+- `attempt.go` at 7e339d9 notifies `tend <item>: <conclusion>` with `<pr or
   branch> at <head> is ready for you` when a flow ends, or `tend <item>:
   landed` with `<pr> is merged`.
-- `main.go` `stop()` at f3f9f87 notifies `tend <item> needs you` with the
+- `main.go` `stop()` at 7e339d9 notifies `tend <item> needs you` with the
   stop's message, which is sometimes several hundred characters long (for
   example the stops in `flow_run.go` that tell a person to look at a pane).
-- `rex.go` at f3f9f87 joins title and body as `<title>: <body>`, replaces
+- `rex.go` at 7e339d9 joins title and body as `<title>: <body>`, replaces
   control characters with spaces and cuts the message at 2000 bytes.
-- Nothing at f3f9f87 records a notification already sent.
+- Nothing at 7e339d9 records a notification already sent.
