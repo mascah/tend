@@ -111,7 +111,7 @@ func draft(prefix string, r request) {
 		write(run+"/id", strconv.FormatInt(time.Now().Unix(), 10)+"\n")
 	}
 	id = cat(run + "/id")
-	issue = r.fields
+	issue, item, pr = r.fields, r, "" // what a stop or notification names
 	settingUp()
 	worktreeFor(b, base, "tend: "+r.ref)
 	write(run+"/worktree", dir+"\n")
@@ -191,6 +191,15 @@ func proposal(r request, b string) {
 		}
 		write(run+"/linked", pr+"\n")
 		stage("done", "proposal from "+r.ref+" at "+pr, "a person answers its open questions, revises or merges it")
+		asked := "see its open questions"
+		switch n := consequential(cat(run + "/summary")); {
+		case n == 1:
+			asked = "1 open question is consequential"
+		case n > 1:
+			asked = fmt.Sprintf("%d open questions are consequential", n)
+		}
+		t, body := waits(fmt.Sprintf("Proposal from %s: %s. Merge to approve, or revise it on %s.", r.from, asked, b))
+		tell(run, t, body, "request")
 		say("%s: %s", r.ref, pr)
 	case nonempty(run + "/declined"):
 		// Said on the request once, found by the attempt's marker, then the label off.
@@ -209,6 +218,12 @@ func proposal(r request, b string) {
 		stop("%s: %s committed no change and wrote no reason. Look at its pane, then commit the draft or write %s/declined, or delete %s/followed to have it asked again", r.ref, impl, run, run)
 	}
 	cd(repo)
+}
+
+// How many open questions a drafter's summary marks consequential: lines
+// that begin, after any list marker, with the follow prompt's fixed marker.
+func consequential(summary string) int {
+	return len(regexp.MustCompile(`(?m)^[ \t]*(?:[-*+]|[0-9]+[.)])?[ \t]*\[consequential\]`).FindAllString(summary, -1))
 }
 
 // Each open pull request the account opened from a tend/issue- or tend/jira-

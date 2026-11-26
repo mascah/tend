@@ -58,6 +58,55 @@ Check: a stop before the attempt's run folder exists, such as an issue not label
 Check: the record is the last notification only. Wait A, then wait B, then wait A again notifies A a second time, as decision 5 says.
 Check: a dead tend run again by watch is checked by writing `working` into the status file and running `tend watch` once. The test does not kill a real tend.
 
+### T-02 — Intake tells the owner of a proposal
+
+Status: done
+
+What changed:
+
+- `intake.go`: once a proposal pull request is opened, linked and recorded
+  `done`, intake notifies it through T-01's `waits` and `tell`, with the
+  request's run folder as the record. The body reads `Proposal from <#n or
+  KEY>: <n> open questions are consequential. Merge to approve, or revise
+  it on <branch>.`, then the pull request's URL. With no question marked,
+  it reads `see its open questions` in place of the count. `consequential`
+  counts the summary's lines that begin, after any list marker, with
+  `[consequential]`. `draft` now sets `item` and clears `pr` for each
+  request, so a stop or notification names that request and not the
+  previous one.
+- `flows/prompts/follow.md`: the drafter is asked to begin each
+  consequential question with the fixed marker `[consequential]` and to
+  leave the routine ones unmarked.
+- `intake_test.go`: `propose-notify` and `propose-notify-unmarked`, and a
+  check in `propose-declined` that a declined request notifies no one.
+
+Checks: `go test -run 'TestTend/^propose' ./...` passed, and so did
+`go test ./...`.
+
+Also changed: `testdata/bin/turn.sh` — the drafter stand-in writes `$SUMMARY` as its summary when it is set, so a test can mark questions.
+Also changed: `scenario_test.go` — `SUMMARY` is added to the environment variables a scenario drops from the caller's.
+Check: the fixed marker's text is `[consequential]`, chosen under the proposal's open question 1. The stand-in's default summary keeps its old `(consequential)` wording, so it counts as unmarked.
+Check: the proposal's notification sounds as `request`, the same as a stop, since the owner has to act on it.
+
 ## Scenarios
+
+- terminals "A stop under Herdr": terminal_test.go `TestTend/notify-stop`, passed
+- terminals "A stop under rex": terminal_test.go `TestRexStopMessage`, passed
+- terminals "A landing": terminal_test.go `TestTend/notify-landed`, passed
+- terminals "A supervised head that passed review": terminal_test.go `TestTend/notify-supervised`, passed
+- terminals "A head that passed review where approval lands nothing": terminal_test.go `TestTend/notify-built-in`, passed
+- terminals "Findings that stand after the repair": terminal_test.go `TestTend/notify-repair-spent`, passed
+- terminals "A failure the reviewer did not judge repairable": terminal_test.go `TestTend/notify-decision`, passed
+- terminals "No pull request": terminal_test.go `TestTend/notify-unpublished`, passed
+- terminals "A protected path": terminal_test.go `TestTend/notify-held`, passed
+- terminals "Still red after the fix": terminal_test.go `TestTend/notify-still-red`, passed
+- terminals "A stop after publishing": terminal_test.go `TestTend/notify-other-stop`, passed
+- terminals "A died tend run again by watch": terminal_test.go `TestTend/notify-once`, passed (the dead tend is simulated by a `working` status file)
+- terminals "A new head": terminal_test.go `TestTend/notify-once`, passed
+- terminals "A long stop reason": terminal_test.go `TestTend/notify-long`, passed
+- intake "A proposal with consequential questions": intake_test.go `TestTend/propose-notify`, passed (the stand-in's pull request is `o/r#1`, not `#44`)
+- intake "A summary with none marked": intake_test.go `TestTend/propose-notify-unmarked`, passed
+- intake "The next intake pass": intake_test.go `TestTend/propose-notify`, passed
+- Whether each notification is short and plain enough to act on from a phone's lock screen: unverified, since only a person reading one on a phone can judge it
 
 ## Reconciliation

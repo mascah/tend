@@ -73,6 +73,28 @@ var intakeScenarios = []scenario{
 		s.check("and opens nothing again", s.creates() == 2)
 		s.check("nor reviews again", len(s.reviewList()) == 2)
 	}},
+	{"propose-notify", func(s *sc) {
+		s.project("main", true)
+		s.allow()
+		s.issues("43:tend")
+		r := s.propose(`SUMMARY=1. [consequential] Which thing?\n2. [consequential] Which place?\n3. Which name?`)
+		n := s.lastNote()
+		s.check("a proposal pull request is notified as waiting for the person", r.code == 0 && len(s.notes()) == 1 && n.Title == "tend: o/r#1 waits for you")
+		s.check("naming the request it came from and the consequential questions marked", strings.Contains(n.Body, "Proposal from #43: 2 open questions are consequential"))
+		s.check("saying to merge to approve or revise it on its branch", strings.Contains(n.Body, "Merge to approve, or revise it on tend/issue-43"))
+		s.check("ending with the pull request's URL", n.endsWith("https://example.test/pr/tend_issue-43"))
+		s.propose()
+		s.check("the next intake pass notifies it no more", len(s.notes()) == 1)
+	}},
+	{"propose-notify-unmarked", func(s *sc) {
+		s.project("main", true)
+		s.allow()
+		s.issues("1:tend")
+		s.propose()
+		n := s.lastNote()
+		s.check("a summary with no question marked gives no count", !strings.Contains(n.Body, "consequential"))
+		s.check("and says to see its open questions", strings.Contains(n.Body, "Proposal from #1: see its open questions."))
+	}},
 	{"propose-declined", func(s *sc) {
 		s.project("main", true)
 		s.allow()
@@ -83,6 +105,7 @@ var intakeScenarios = []scenario{
 		s.check("says why on the issue, as the account", str(get(s.readJSON(s.st+"/comments"), 0, "user", "login")) == "the-bot")
 		s.check("in the drafter's words", strings.Contains(s.cat(s.st+"/comments"), "It names no outcome."))
 		s.check("and takes the label off", !s.labelled(1))
+		s.check("notifying no one: its author acts on the comment", len(s.notes()) == 0)
 		s.check("its worktree is removed, with its branch", !exists(s.st+"/wt-tend/issue-1") && s.git(s.repo, "branch", "--list", "tend/issue-1") == "")
 		s.propose("DECLINE=1")
 		s.check("so a second pass leaves it", s.drafts() == 1 && s.comments(1) == 1)
