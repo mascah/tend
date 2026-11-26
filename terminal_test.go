@@ -164,7 +164,9 @@ func (s *sc) lastNote() note {
 }
 
 // The pull request's URL as the gh stand-in gives it.
-func (s *sc) prURL() string { return "https://example.test/pr/" + strings.ReplaceAll(s.branch(), "/", "_") }
+func (s *sc) prURL() string {
+	return "https://example.test/pr/" + strings.ReplaceAll(s.branch(), "/", "_")
+}
 
 // Whether n's body ends with link alone on its last line, and both fit a
 // lock screen.
