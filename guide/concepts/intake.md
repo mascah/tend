@@ -14,6 +14,7 @@ sequenceDiagram
     alt committed a change under #lt;root#gt;/changes/
         T->>GH: push tend/issue-#lt;n#gt;, open the pull request (as the bot)
         T->>GH: review comment listing the open questions
+        T->>GH: tend/review on the head: success if only one change's documents
         T->>GH: (Jira) comment with the pull request's URL
     else wrote declined
         T->>GH: comment why, take the tend label off
@@ -34,6 +35,14 @@ whose origin is listed in the [publish file](publish-file.md).
 - tend pushes `tend/issue-<n>` (or `tend/jira-<KEY>`) and opens a pull request
   as the bot account. Its review lists the open questions and what merging
   with them open means.
+- **Status.** tend sets [`tend/review`](../glossary.md#tend-review) on the
+  head of each proposal it opened: `success`, "Grove documents only: merging
+  approves this change", when every path the head changes against the target
+  lies in one change's folder under `<root>/changes/`; `failure`, naming why,
+  otherwise. Each pass checks the open proposals first, whatever the cap, so
+  a person's revision pushed to the branch gets its own status; a head the
+  bot already set one on is left. You merge a proposal with the ordinary
+  Merge button, no bypass.
 - If no change can be drafted, the drafter writes why. tend comments that on
   the request and takes the `tend` label off. Putting the label back tries
   again.

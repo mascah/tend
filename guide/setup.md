@@ -164,6 +164,9 @@ person (exit 3), "did not pass review, so tend lands nothing".
 - Set a branch rule on the target that requires the project's CI and
   `tend/review`, and requires branches to be up to date. tend checks the head
   itself; the rule closes the moment between its check and GitHub's merge.
+  Intake gives a proposal head that changes only one change's Grove documents
+  `tend/review` success, so you merge proposals without bypass; release and
+  hand-made pull requests get no `tend/review` and still need it.
 - The repository must allow squash merging: tend merges with GitHub's squash
   method, and a refusal stops for a person (exit 3).
 - The bot must be allowed to merge and must not be able to bypass the rule.

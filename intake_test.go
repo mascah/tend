@@ -19,6 +19,35 @@ func (s *sc) labelled(n int) bool {
 	return false
 }
 
+// A commit on origin's branch b, started from origin's branch from when b is
+// not there yet, writing each path given; its sha.
+func (s *sc) pushTo(b, from string, paths ...string) string {
+	return s.bash(s.dir, `w=$(mktemp -d "$t/push.XXXX") && git clone -q "$t/repo.git" "$w" && cd "$w" &&
+		{ git checkout -q "$1" 2>/dev/null || git checkout -q -b "$1" "origin/$2"; } && b=$1 && shift 2 &&
+		for p in "$@"; do mkdir -p "$(dirname "$p")" && echo "$RANDOM" >>"$p"; done &&
+		git add -A && git commit -qm push && git push -q origin "HEAD:refs/heads/$b" && git rev-parse HEAD`, append([]string{"_", b, from}, paths...)...)
+}
+
+// An open pull request from origin's branch b, opened by account by, as the
+// gh stand-in keeps one.
+func (s *sc) openPR(b, by string) {
+	k := s.st + "/pr-" + strings.ReplaceAll(b, "/", "_")
+	s.write(k, "A body\n")
+	s.write(k+".by", by+"\n")
+	s.write(k+".where", b+"\n"+s.git(s.repo, "remote", "get-url", "origin")+"\n")
+}
+
+// The tend/review statuses set on head h, as "<state> <account>" lines.
+func (s *sc) statusesOn(h string) []string {
+	var r []string
+	for _, l := range strings.Split(s.cat(s.st+"/statuses"), "\n") {
+		if a, ok := strings.CutPrefix(l, h+" "); ok {
+			r = append(r, a)
+		}
+	}
+	return r
+}
+
 var intakeScenarios = []scenario{
 	{"propose", func(s *sc) {
 		s.project("main", true)
@@ -188,5 +217,48 @@ var intakeScenarios = []scenario{
 		s.check("the second repository starts its own drafter", o.has(o.log(), "^agent start "+b+" "))
 		s.check("and prompts it, not the first's", o.count(o.log(), "^agent prompt "+b+" /grove-propose") == 1 && !o.has(o.log(), "^agent prompt "+a+" "))
 		s.check("its proposal is opened", r.code == 0 && exists(o.prOf("1")))
+	}},
+	{"propose-vouch", func(s *sc) {
+		s.project("main", true)
+		s.allow()
+		s.issues("1:tend")
+		s.propose()
+		h := s.git(s.repo+".git", "rev-parse", "tend/issue-1")
+		s.check("a proposal just opened has tend/review success, set by the account", slices.Equal(s.statusesOn(h), []string{"success the-bot"}))
+		s.check("described as Grove documents only", s.has(s.cat(s.st+"/descriptions"), `^`+h+` Grove documents only: merging approves this change$`))
+		s.check("linking the pull request", s.has(s.log(), `^gh api repos/\{owner\}/\{repo\}/statuses/`+h+` .*target_url=https://example.test/pr/tend_issue-1$`))
+		s.propose()
+		s.check("a second pass with no new head sets no status again", len(s.statusesOn(h)) == 1)
+		n := s.pushTo("tend/issue-1", "main", "grove/changes/261115-p0000-a-proposal/proposal.md")
+		r := s.propose()
+		s.check("a person's revision of the proposal gets its own success", r.code == 0 && slices.Equal(s.statusesOn(n), []string{"success the-bot"}))
+		s.check("and the earlier head's is not set again", len(s.statusesOn(h)) == 1)
+		c := s.pushTo("tend/issue-1", "main", "intake.go")
+		s.propose()
+		s.check("a head that also touches code gets no success", slices.Equal(s.statusesOn(c), []string{"failure the-bot"}))
+		s.check("its description names the path", s.has(s.cat(s.st+"/descriptions"), `^`+c+` Changes intake.go, outside`))
+	}},
+	{"propose-vouch-open", func(s *sc) {
+		s.project("main", true)
+		s.allow()
+		s.issues("1:", "2:tend")
+		old := s.pushTo("tend/issue-1", "main", "grove/changes/261115-p0000-thing/proposal.md")
+		s.openPR("tend/issue-1", "the-bot")
+		two := s.pushTo("tend/issue-3", "main", "grove/changes/261115-p0000-thing/proposal.md", "grove/changes/261115-p0001-other/proposal.md")
+		s.openPR("tend/issue-3", "the-bot")
+		merged := s.pushTo("tend/issue-4", "main", "grove/changes/261115-p0002-done/proposal.md")
+		s.openPR("tend/issue-4", "the-bot")
+		s.touch(s.st + "/pr-tend_issue-4.merged")
+		theirs := s.pushTo("tend/issue-5", "main", "grove/changes/261115-p0003-theirs/proposal.md")
+		s.openPR("tend/issue-5", "owner")
+		arch := s.pushTo("tend/jira-AB-1", "main", "grove/changes/archive/261115-p0004-old/proposal.md")
+		s.openPR("tend/jira-AB-1", "the-bot")
+		r := s.propose("CAP=3")
+		s.check("with the cap reached, no request is drafted", r.code == 0 && s.drafts() == 0 && r.said("the cap"))
+		s.check("but a proposal opened before has tend/review success, set by the account", slices.Equal(s.statusesOn(old), []string{"success the-bot"}))
+		s.check("two changes in one head get no success", slices.Equal(s.statusesOn(two), []string{"failure the-bot"}))
+		s.check("nor does an archived change", slices.Equal(s.statusesOn(arch), []string{"failure the-bot"}))
+		s.check("a merged proposal gets no status", len(s.statusesOn(merged)) == 0)
+		s.check("nor one a person opened from a tend/issue- branch", len(s.statusesOn(theirs)) == 0)
 	}},
 }
