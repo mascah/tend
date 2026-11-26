@@ -1,0 +1,5 @@
+title: "Close the request when its change's implementation is merged"
+created: 2026-11-26T02:18:55Z
+description: the implementation pull request of a change intake drafted says Closes #<n> for its GitHub issue, and comments on its Jira issue
+schema: default
+base: 7e339d9136ff2f1a06796d820c3dfb2a8e3ac684
