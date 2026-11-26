@@ -31,8 +31,28 @@ Status: done
   `review-notes-not-text`, `repair-notes`, `review-earlier-gone`;
   `flow_test.go` `flow-own-review-bar`. All pass, as does `go test ./...`.
 
+Also changed: `guide/flows-reference.md` — it quotes the built-in review prompt, lists the verdict's fields and the placeholders; the old prompt, no `notes` and no `{earlier}` would be false
+Also changed: `guide/run.md` — its review step listed the verdict's fields without `notes` and said nothing of the bar or earlier verdicts
 Check: `{earlier}` is one `; `-separated line (`<short head> <conclusion> <file>`, or `none`) rather than one line per verdict, since every built-in prompt is a single line sent to the agent's terminal; the proposal leaves its form to the implementer.
 Check: which files count as the attempt's verdicts: those matching any step's `verdict <name>` result in the flow (with `{head}` as a wildcard), so a project's own verdict step's verdicts are named too; a verdict for the head under review itself is not "earlier" and is left out.
+
+### T-02 — Notes on the pull request
+
+Status: done
+
+- `publication.go`: a verdict's non-empty `notes` go in the head's comment
+  review after the summary, under "**Notes that do not fail the head**, for
+  a person to file or drop:", before the repairable / needs-a-decision line;
+  the `tend/review` status is still set from `conclusion` alone. The
+  repairable line now says "every finding that fails the head", as
+  `actionable` is judged on those alone.
+- Tests: `publication_test.go` `publish-notes` (status `success`, one review
+  with the note under the heading), `publish` (a verdict without notes has
+  no notes heading), `publish-failure-notes` (the failed head's review: the
+  summary, then the notes, then "tend repairs once"; one `failure` and one
+  `success` status). All pass.
+
+Check: empty `notes` (`""` or blanks) shows no heading, as the prompt asks for notes "or empty"; the heading's wording is the implementer's, as the proposal's open question allows.
 
 ## Scenarios
 

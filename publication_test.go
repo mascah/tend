@@ -34,6 +34,7 @@ var publicationScenarios = []scenario{
 		}
 		s.check("the head gets one review, a comment by the account", n == 1)
 		s.check("saying it passed", s.has(rv, `review of .*: success`))
+		s.check("a verdict without notes has no notes heading", !strings.Contains(rv, "do not fail the head"))
 		s.check("the head carries the tend/review status, set by the account", s.has(s.cat(s.st+"/statuses"), `^`+s.head()+` success the-bot$`))
 		s.check("status points at the pull request", strings.Contains(s.status(), "a person reviews https://example.test/pr/"))
 		s.check("a passing head leaves it ready", !exists(s.pr()+".draft") && s.count(s.log(), `^gh pr ready`) == 0)
@@ -72,6 +73,37 @@ var publicationScenarios = []scenario{
 		s.check("as is the repaired head's", s.reviewed(s.head()) == 1)
 		st := s.cat(s.st + "/statuses")
 		s.check("each head has its own status", s.count(st, ` failure the-bot$`) == 1 && s.count(st, `^`+s.head()+` success`) == 1)
+	}},
+	{"publish-notes", func(s *sc) {
+		s.project("main", true)
+		s.allow()
+		r := s.run("REVIEW=notes")
+		s.check("a passing head with notes publishes", r.passed())
+		s.check("with status success", s.has(s.cat(s.st+"/statuses"), `^`+s.head()+` success the-bot$`))
+		s.check("and one review", s.reviewed(s.head()) == 1)
+		b := ""
+		for _, x := range s.reviewList() {
+			b = str(get(x, "body"))
+		}
+		s.check("showing the note under a heading saying it does not fail the head",
+			strings.Contains(b, "**Notes that do not fail the head**, for a person to file or drop:\n\na.txt:1 could read better."))
+	}},
+	{"publish-failure-notes", func(s *sc) {
+		s.project("main", true)
+		s.allow()
+		r := s.run("REVIEW=repairable-notes")
+		s.check("a repaired head with notes on the failed one passes", r.passed())
+		b := ""
+		for _, x := range s.reviewList() {
+			if strings.Contains(str(get(x, "body")), ": failure") {
+				b = str(get(x, "body"))
+			}
+		}
+		sum, note, rep := strings.Index(b, "a.txt:1 lacks the fix."), strings.Index(b, "a.txt:2 could read better."), strings.Index(b, "tend repairs once")
+		s.check("the failed head's review shows its notes after its summary", sum >= 0 && note > sum)
+		s.check("and still says the failure was judged repairable", rep > note)
+		st := s.cat(s.st + "/statuses")
+		s.check("the notes change neither status", s.count(st, ` failure the-bot$`) == 1 && s.count(st, `^`+s.head()+` success`) == 1)
 	}},
 	{"publish-new-head", func(s *sc) {
 		s.project("main", true)

@@ -262,9 +262,12 @@ func publish() {
 			markDraft(c != "success")
 		}
 		body := fmt.Sprintf("**Independent review of %s: %s**\n\n%s\n\n", short(h), c, str(get(x, "summary")))
+		if n := strings.TrimSpace(str(get(x, "notes"))); n != "" {
+			body += "**Notes that do not fail the head**, for a person to file or drop:\n\n" + n + "\n\n"
+		}
 		if c != "success" {
 			if get(x, "actionable") == true {
-				body += "The reviewer judged every finding an in-scope fix. tend repairs once, then a person decides.\n\n"
+				body += "The reviewer judged every finding that fails the head an in-scope fix. tend repairs once, then a person decides.\n\n"
 			} else {
 				body += "A finding needs a decision from a person.\n\n"
 			}
