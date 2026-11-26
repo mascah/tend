@@ -1,0 +1,5 @@
+title: "Say what the owner is asked to do in each notification"
+created: 2026-11-25T18:19:30Z
+description: Each notification that waits for the owner names the pull request or request, what the owner is asked to do and how, with its link, once per wait.
+schema: default
+base: 7e339d9136ff2f1a06796d820c3dfb2a8e3ac684
