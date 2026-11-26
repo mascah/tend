@@ -206,7 +206,8 @@ starting its build stay with people.
 New work branches from the target as origin has it, fetched first. Once a pull
 request is merged or closed, the next `tend propose` or run in that repository
 removes the worktree tend made for it, with its local branch and the agents'
-place, when its head is the pull request's and it holds no uncommitted files;
+place, when the pull request's head holds its head (as after GitHub's "Update
+branch") and it holds no uncommitted files;
 otherwise it is left and tend says why. A declined request's worktree goes at
 once.
 

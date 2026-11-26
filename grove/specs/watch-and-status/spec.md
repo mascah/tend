@@ -305,7 +305,8 @@ count.
 
 When `tend <repo> <item>` or `tend propose <repo>` runs, the system shall
 remove each worktree tend made for that repository whose pull request is
-merged or closed, when its head is the pull request's head, and each
+merged or closed, when the pull request's head holds its head, as after a
+person updates the branch from the target on GitHub, and each
 attempt's worktree with no pull request whose Grove cycle is done and whose
 head the target holds, each with its local branch and its agents' place,
 when it holds no uncommitted files, no worktree is inside it and its
