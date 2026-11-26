@@ -1,0 +1,150 @@
+# Fail a head in review only for findings that matter
+
+## Problem
+
+GitHub issue [mascah/tend#45](https://github.com/mascah/tend/issues/45)
+reports that the reviewer fails a head for every edge case it can construct,
+so a change does not converge. Pull request #42 (change 261125-6dvbs,
+protected paths) went through five Codex reviews on 2026-11-25; each passed
+the previous findings and raised new ones, each marked actionable. The issue
+says most findings needed a temporary test the reviewer wrote to construct
+the case, several were corners no one will hit, and one only changed which
+reason a stop gives. Each round cost a full implementer turn, a full review
+and about 15 minutes, and a failing verdict blocks `land` and the ruleset's
+`tend/review` status, so the owner could only ask for another round or merge
+with admin bypass.
+
+The issue names three causes, which the code at 7e339d9 bears out:
+
+- The built-in prompt, `flows/prompts/review.md` at 7e339d9, asks for
+  "material findings: a defect, an unmet requirement, or a claim in {notes}
+  the code does not support". The specs state requirements absolutely, so a
+  constructed corner that departs from one reads as an unmet requirement.
+- `actionable` says whether a finding needs a decision from the owner, not
+  whether it matters (`grove/specs/review/spec.md`, Purpose, at 7e339d9).
+- Each review is prompted with the whole change, `git diff {base}...HEAD`,
+  and nothing of the earlier verdicts, so a finding on code unchanged since
+  the previous round can first appear in round five.
+
+Commit eecd7e6 (#52) added a stopgap for tend's own repository only:
+`tend/prompts/review.md` states the bar, and tend reads it before the
+built-in prompt. Every other project still gets the old bar.
+
+## Intended outcome
+
+- The built-in review prompt and the review spec state the bar: a head fails
+  only for a defect a realistic use would hit, a requirement missed in its
+  main case, a security or data hole that can be reached, or a claim in the
+  implementer's notes the code does not support. Corners that need contrived
+  setup, which of two reasons a stop gives, wording and polish do not fail a
+  head. A project can tune the bar in its own `tend/prompts/review.md`, as it
+  can replace any built-in prompt today.
+- Findings that do not fail the head are written as notes in the verdict and
+  shown on the pull request, apart from the findings that fail it, so the
+  owner can file or drop them. They never reach the repair prompt.
+- A later review of the same attempt is given the earlier verdicts. It
+  judges whether the findings that failed an earlier head are fixed and what
+  the commits since then changed, and does not fail the head over code an
+  earlier review saw and passed over.
+
+## Scope
+
+### In scope
+
+- The built-in review prompt's bar, its notes, and what it says of earlier
+  rounds.
+- An optional `notes` string in the verdict, and the verdict's validity with
+  and without it.
+- A `{earlier}` placeholder filled for every step, naming the attempt's
+  earlier verdicts on commits of its branch.
+- The review that publication posts: notes under their own heading, which
+  do not change the `tend/review` status.
+- tend's own `tend/prompts/review.md` stopgap, which this change deletes.
+
+### Out of scope
+
+- A cap on review rounds before a person decides. The issue asks for one
+  only "if the above is not enough". The owner left it out of this change.
+- A separate step that verifies each failing finding before the repair is
+  spent. A project's flow file can add one today, as the handoff notes say.
+  The owner left it out of this change.
+- Severity per finding, or a structured list of findings in the verdict.
+- Overriding a failing verdict from GitHub, or changing what `land` or the
+  ruleset require of `tend/review`.
+- Whether the reviewer's judgement is right, which tend does not check.
+
+## Decisions
+
+The request (GitHub issue #45) sets these constraints:
+
+- "A head fails review only for findings that matter: a defect a realistic
+  use would hit, a requirement missed in its main case, a security or data
+  hole that is reachable, or a claim in the notes the code does not support.
+  Corners that need contrived setup, wording, and polish do not fail a head."
+- "Findings that do not fail the head are still reported, on the pull
+  request, so the owner can file them or drop them."
+- "A later round does not move the goalposts: it judges whether the earlier
+  findings are fixed and what the new commits changed, and does not fail the
+  head over code the previous review saw and passed over."
+- "The bar is stated in the built-in review prompt and the review spec, so a
+  project can tune it in its own `tend/prompts/review.md`."
+
+On 2026-11-26 the owner answered "Yes" to each of the following, put to them
+as recommendations in the session that revised this proposal:
+
+1. **A verdict field, not only a prompt change.** The verdict gains an
+   optional `notes` string for findings that do not fail the head;
+   `conclusion` alone still fails a head, with no severity per finding, and
+   a verdict without `notes` stays valid. Reason: `conclusion` already is
+   the blocking signal, so a severity would duplicate it; notes kept apart
+   from `summary` can be shown under their own heading and kept out of
+   `{findings}`, so the one repair is not spent on polish; and being
+   optional, cached verdicts and projects' own prompts stay valid. Decides
+   T-01 and T-02.
+2. **A later round does not fail a head over code an earlier review saw,
+   except for a security or data hole that can be reached.** Reason: such a
+   hole costs more to land than one more round, and it is the narrowest of
+   the four kinds of finding. Decides T-01.
+3. **No cap on review rounds and no step that verifies findings before the
+   repair, in this change.** Each would be its own change. Reason: the
+   repair is already limited to one, every later round is one a person
+   asked for, and the bar should be seen working first; a verify step costs
+   a second Codex turn on every failure, and a project can add one in its
+   flow file today, as item 5 of the Claude Ship notes in
+   `docs/work/261121-autonomous-direction/handoff-261124.md` says.
+4. **Notes reach the pull request in the comment review tend already posts
+   for the head**, after the summary, under their own heading, and never
+   change the `tend/review` status; without publication they stay in the
+   verdict file. Reason: it is the one place the owner already reads each
+   verdict, and it adds no new kind of GitHub post. Decides T-02.
+5. **tend's own `tend/prompts/review.md` stopgap is deleted**, so tend's
+   flow falls back to the built-in prompt, as the flows spec's scenario "A
+   flow names tend's own prompts" says. Reason: commit eecd7e6 (#52) says it
+   can go once the built-in prompt holds the bar, and left in place it would
+   lack `{earlier}` and `notes`. It is a protected path, so the owner merges
+   it with admin bypass. Decides T-03.
+
+The change no longer waits on "Fix failing CI before a person is asked"
+(261125-rf036), which also changes `publication.go`: it was merged into main
+in f83036a, and this change is based on main after it.
+
+## Open questions
+
+None must be answered before review.
+
+1. **Routine choices.** Recommended: the wording of the prompt and of the
+   notes heading, the form of `{earlier}` (one line per earlier verdict,
+   giving its short head, conclusion and file path, or `none`), the helper
+   that builds it, and test names and layout are the implementer's. Reason:
+   they do not change behavior the specs fix. Decides T-01 and T-02; can
+   wait for implementation.
+
+The Purpose of the maintained review spec defines actionable as "every
+finding is an in-scope code fix"; at archive it should read "every finding
+that fails the head".
+
+## Related documents
+
+- Requirements: [specs/review/spec.md](specs/review/spec.md),
+  [specs/publication/spec.md](specs/publication/spec.md)
+- Tasks: [tasks.md](tasks.md)
