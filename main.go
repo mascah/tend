@@ -401,7 +401,7 @@ func postJSON(path string, body map[string]any) error {
 }
 
 // A verdict counts only when complete and naming the head it was written
-// for; a file's name is not enough.
+// for, its notes, where present, text; a file's name is not enough.
 func valid(file, h string) bool {
 	b, err := os.ReadFile(file)
 	if err != nil {
@@ -411,5 +411,8 @@ func valid(file, h string) bool {
 	_, isBool := get(x, "actionable").(bool)
 	_, isString := get(x, "summary").(string)
 	c := get(x, "conclusion")
-	return get(x, "head") == h && (c == "success" || c == "failure") && isBool && isString
+	o, _ := x.(map[string]any)
+	n, hasNotes := o["notes"]
+	_, notesString := n.(string)
+	return get(x, "head") == h && (c == "success" || c == "failure") && isBool && isString && (!hasNotes || notesString)
 }

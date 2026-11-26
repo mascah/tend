@@ -290,11 +290,42 @@ func reach(name string, s *step) string {
 	}
 	vars["head"] = h
 	vars["findings"] = str(get(lastV, "summary"))
+	vars["earlier"] = earlier(h)
 	rec := recordOf(name)
 	if r.verdict != "" || (r.file != "" && !r.commit) {
 		return reachAt(name, s, r, h, rec)
 	}
 	return reachInOrder(name, s, r, h, rec)
+}
+
+// The attempt's valid verdicts for commits of the branch before head h,
+// oldest first, each its short head, conclusion and file, or none: what a
+// later review is given as {earlier}. A verdict file is one a step of the
+// flow names.
+func earlier(h string) string {
+	var fs []string
+	for _, s := range fl.Steps {
+		if r, _ := parseResult(s.Result); r.verdict != "" {
+			m, _ := filepath.Glob(run + "/" + verdictName(r.verdict, "*"))
+			fs = append(fs, m...)
+		}
+	}
+	slices.Sort(fs)
+	fs = slices.Compact(fs)
+	mtime := func(f string) time.Time { s, _ := os.Stat(f); return s.ModTime() }
+	slices.SortStableFunc(fs, func(a, b string) int { return mtime(a).Compare(mtime(b)) })
+	var said []string
+	for _, f := range fs {
+		v := str(get(parse(cat(f)), "head"))
+		if v == h || !valid(f, v) || !ok("git", "merge-base", "--is-ancestor", v, h) {
+			continue
+		}
+		said = append(said, fmt.Sprintf("%s %s %s", short(v), str(get(parse(cat(f)), "conclusion")), f))
+	}
+	if len(said) == 0 {
+		return "none"
+	}
+	return strings.Join(said, "; ")
 }
 
 // A step whose result is a file named for the head is judged at the head.
