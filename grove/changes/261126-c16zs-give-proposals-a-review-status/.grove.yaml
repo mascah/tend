@@ -1,0 +1,5 @@
+title: "Give proposal pull requests a tend/review status"
+created: 2026-11-26T02:38:12Z
+description: Intake sets tend/review success on a proposal head that changes only one change's Grove documents, so the owner merges it without bypass.
+schema: default
+base: c6505b1d81039d654bbc40cfa101a5c2a0247e37
