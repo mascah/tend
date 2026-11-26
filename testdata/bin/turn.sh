@@ -46,7 +46,7 @@ turn() { # name text
 		*)
 			if [ -n "$(git status --porcelain)" ]; then
 				git add -A && git commit -qm "$(printf 'Propose a thing\n\nBecause it is wanted.\n\nRefs #%s' "$(n=${1#prop-} && echo "${n%-*}")")"
-				echo "1. (consequential) Which thing?" >"$(grep -oE '[^ ,]*/summary' <<<"$2" | head -1)"
+				printf '%b\n' "${SUMMARY:-1. (consequential) Which thing?}" >"$(grep -oE '[^ ,]*/summary' <<<"$2" | head -1)" # SUMMARY, if set, instead
 			else
 				echo "It names no outcome." >"$(grep -oE '[^ ,]*/declined' <<<"$2" | head -1)"
 			fi ;;
@@ -70,6 +70,13 @@ turn() { # name text
 		noconclusion) jq -n --arg h "$h" '{head: $h, actionable: false, summary: "ok"}' ;;
 		decision) jq -n --arg h "$h" '{head: $h, conclusion: "failure", actionable: false, summary: "a.txt:1 needs an owner decision."}' ;;
 		actionable) jq -n --arg h "$h" '{head: $h, conclusion: "failure", actionable: true, summary: "a.txt:1 lacks the fix."}' ;;
+		repairable-decision) # fails the first head it sees as repairable, the rest as needing a decision
+			if [ -e "$s/failed-once" ]; then
+				jq -n --arg h "$h" '{head: $h, conclusion: "failure", actionable: false, summary: "a.txt:1 needs an owner decision."}'
+			else
+				touch "$s/failed-once"
+				jq -n --arg h "$h" '{head: $h, conclusion: "failure", actionable: true, summary: "a.txt:1 lacks the fix."}'
+			fi ;;
 		repairable) # fails the first head it sees, passes the rest
 			if [ -e "$s/failed-once" ]; then
 				jq -n --arg h "$h" '{head: $h, conclusion: "success", actionable: false, summary: "ok"}'

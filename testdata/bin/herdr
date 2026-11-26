@@ -8,7 +8,8 @@
 # does, a blocked agent refuses a prompt. HOLD holds every prompt until the
 # file it names exists, the agent idle meanwhile, so another tend runs during
 # the turn. AGENT_GET_FAIL fails every agent get, as a terminal that cannot be
-# reached. WORKTREE_HOLD holds a new worktree's creation, once made, likewise,
+# reached. Each notification shown is appended to notifications as one JSON
+# line, {title, body, sound}. WORKTREE_HOLD holds a new worktree's creation, once made, likewise,
 # touching $WORKTREE_HOLD.made.
 set -euo pipefail
 s=$HERDR_STATE
@@ -63,5 +64,8 @@ case "$1 $2" in
 	turn "$3" "$4"
 	said "$(status "$3")"
 	[ -z "${block:-}" ] || echo blocked >"$s/status-$block" ;;
+"notification show")
+	jq -cn --arg t "$3" --arg b "$5" --arg so "$7" '{title: $t, body: $b, sound: $so}' >>"$s/notifications"
+	echo '{"result":{}}' ;;
 *) echo '{"result":{}}' ;;
 esac

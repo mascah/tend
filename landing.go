@@ -112,7 +112,8 @@ func hold(h string) {
 	if len(touched) > 1 {
 		what = "the protected paths "
 	}
-	stop("%s at %s changes %s%s, so tend lands it only once a person with write access approves that head on %s", branch, short(h), what, and(touched), pr)
+	halt(fmt.Sprintf("%s at %s changes %s%s, so tend lands it only once a person with write access approves that head on %s", branch, short(h), what, and(touched), pr),
+		fmt.Sprintf("Held at land: %s changes %s%s. Approve this head to land it.", short(h), what, and(touched)))
 }
 
 // One landing at a time for each repository on this runner: the lock, held

@@ -252,6 +252,13 @@ func (r *rex) notify(title, body, sound string) {
 		return
 	}
 	defer tty.Close()
+	st, msg := rexMessage(title, body, sound)
+	fmt.Fprintf(tty, "\x1b]7501;state=%s:app=tend:msg=%s\x1b\\", st, base64.StdEncoding.EncodeToString([]byte(msg)))
+}
+
+// The state and message tend reports under rex: blocked for a stop, done for
+// an end, and the title then the body on one line.
+func rexMessage(title, body, sound string) (string, string) {
 	st := "done"
 	if sound == "request" {
 		st = "blocked"
@@ -265,5 +272,5 @@ func (r *rex) notify(title, body, sound string) {
 	if len(msg) > 2000 {
 		msg = msg[:2000]
 	}
-	fmt.Fprintf(tty, "\x1b]7501;state=%s:app=tend:msg=%s\x1b\\", st, base64.StdEncoding.EncodeToString([]byte(msg)))
+	return st, msg
 }

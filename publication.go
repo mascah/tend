@@ -50,9 +50,13 @@ func pushAs(b string) bool {
 // goes to that step while it can be asked, and is said once on the pull
 // request when it cannot. tend does not wait here for people: tend watch
 // runs it again when one requests changes.
-var told bool
+var (
+	told        bool
+	spentChecks []string // the checks that still failed after the one fix, by name
+)
 
 func publishStep() string {
+	spentChecks = nil
 	where, account = branch, accountOf()
 	if account == "" && !told {
 		told = true
@@ -75,6 +79,9 @@ func publishStep() string {
 					return "failed"
 				}
 				spentFix(to, failed)
+				for _, f := range failed { // "<name> <link>"
+					spentChecks = append(spentChecks, strings.TrimSpace(f[:max(0, strings.LastIndex(f, " "))]))
+				}
 			}
 		}
 		if fl.Steps["publish"].Next["approved"] != "" && approved() {

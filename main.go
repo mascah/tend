@@ -191,11 +191,19 @@ func abs(p string) (string, error) {
 
 func say(f string, a ...any) { fmt.Fprintf(os.Stderr, "tend: %s\n", fmt.Sprintf(f, a...)) }
 
-func stop(f string, a ...any) {
-	msg := fmt.Sprintf(f, a...)
+func stop(f string, a ...any) { halt(fmt.Sprintf(f, a...), "") }
+
+// A stop for a person: said, recorded as needs-you, and notified once, the
+// notification giving body, or the stop's message when body is "", then the
+// link to the pull request or request.
+func halt(msg, body string) {
 	say("%s", msg)
 	stage("needs-you", msg, "a person deals with that, then runs tend again")
-	term.notify("tend "+cycle+" needs you", msg, "request")
+	if body == "" {
+		body = msg
+	}
+	t, b := waits(body)
+	tell(toldIn(), t, b, "request")
 	os.Exit(3)
 }
 

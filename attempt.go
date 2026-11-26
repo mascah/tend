@@ -166,6 +166,7 @@ func attempt() {
 			ref = "issue " + cycle
 		}
 		if ok("grove", "changes", "--json") {
+			knownAs(cycle) // for the notification, which names the issue
 			stop("%s uses Grove, so %s is not built directly: label it tend for tend propose to draft a proposal, then approve and plan it", repo, ref)
 		}
 		if isJira(cycle) {
@@ -310,11 +311,14 @@ func attempt() {
 	verdict := parse(cat(v))
 	conclusion, h := str(get(verdict, "conclusion")), short(str(get(verdict, "head")))
 	if landed != "" {
-		term.notify("tend "+cycle+": landed", landed+" is merged", "done")
+		ref, link := subject()
+		t, b := fit(titled(ref, " landed"), "Squash-merged at "+short(git("rev-parse", "HEAD"))+".", link)
+		tell(run+"/notified", t, b, "done")
 		stage("done", fmt.Sprintf("landed %s, %s at %s, verdict %s", landed, branch, short(git("rev-parse", "HEAD")), v), "nothing: it is merged")
 		say("done: landed %s, verdict %s", landed, v)
 	} else {
-		term.notify("tend "+cycle+": "+conclusion, where+" at "+h+" is ready for you", "done")
+		t, b := waits(ended(verdict))
+		tell(run+"/notified", t, b, "done")
 		stage("done", fmt.Sprintf("%s for %s at %s, verdict %s", conclusion, branch, h, v), "a person reviews "+where+" and decides whether to merge it")
 		say("done: %s, verdict %s", branch, v)
 	}
@@ -323,6 +327,63 @@ func attempt() {
 		fmt.Println(pretty.String())
 	}
 	os.Exit(0)
+}
+
+// What an ended attempt asks of the person, for its notification: what the
+// head's review concluded and the choices tend acts on, or the checks that
+// still failed after the one fix.
+func ended(x any) string {
+	h := short(str(get(x, "head")))
+	ok := str(get(x, "conclusion")) == "success"
+	switch {
+	case spentChecks != nil:
+		return fmt.Sprintf("Checks %s failed at %s after the one fix. Fix the branch, run the checks again, or close the pull request.", and(spentChecks), short(head))
+	case pr == "" && ok:
+		return fmt.Sprintf("Review passed on %s at %s, which is not published: merge the branch yourself, or change it.", branch, h)
+	case pr == "":
+		return fmt.Sprintf("Codex's findings stand on %s at %s, which is not published: fix the branch, or drop it.", branch, h)
+	case ok && fl.Steps["publish"] != nil && fl.Steps["publish"].Next["approved"] != "":
+		return fmt.Sprintf("Review passed at %s. Approve it to land it, or request changes.", h)
+	case ok:
+		return fmt.Sprintf("Review passed at %s. Merge it, or request changes.", h)
+	}
+	after := ""
+	if n := repairs(); n == 1 {
+		after = " after one repair"
+	} else if n > 1 {
+		after = fmt.Sprintf(" after %d repairs", n)
+	}
+	return fmt.Sprintf("Codex's findings stand at %s%s. Request changes to send them to the implementer, or close the pull request.", h, after)
+}
+
+// How many repairs the attempt spent, whatever the last verdict says: the
+// limit of the step a failure the reviewer calls actionable goes to, once it
+// has been asked that often.
+func repairs() int {
+	for _, s := range fl.Steps {
+		name := s.Next["actionable"]
+		to := fl.Steps[name]
+		if to != nil && to.Limit > 0 && timesAsked(name, recordOf(name)) >= to.Limit {
+			return to.Limit
+		}
+	}
+	return 0
+}
+
+// The issue that work item c names, as far as a stop before it is loaded
+// can say: its key, and a GitHub issue's URL where gh gives it.
+func knownAs(c string) {
+	if isJira(c) {
+		item = request{from: c}
+		return
+	}
+	n := strings.TrimPrefix(c, "issue-")
+	item = request{from: "#" + n, key: n}
+	if o, err := quiet("gh", "issue", "view", n, "--json", "url"); err == nil {
+		if u := str(get(parse(o), "url")); u != "" {
+			issue = map[string]any{"url": u}
+		}
+	}
 }
 
 // Done is what Git holds, never what the pane's state says: why the branch is

@@ -1,10 +1,13 @@
 package main
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 var terminalScenarios = []scenario{
@@ -134,4 +137,211 @@ var terminalScenarios = []scenario{
 		s.check("saying it did not start", r.said("did not start"))
 		s.check("and is sent no key", !s.has(s.rexlog(), `^rex send-key`))
 	}},
+}
+
+// ---- telling a person
+
+type note struct{ Title, Body, Sound string }
+
+// The notifications the Herdr stand-in was asked to show, oldest first.
+func (s *sc) notes() []note {
+	var ns []note
+	for _, l := range strings.Split(s.cat(s.st+"/notifications"), "\n") {
+		var n note
+		if json.Unmarshal([]byte(l), &n) == nil {
+			ns = append(ns, n)
+		}
+	}
+	return ns
+}
+
+func (s *sc) lastNote() note {
+	ns := s.notes()
+	if len(ns) == 0 {
+		return note{}
+	}
+	return ns[len(ns)-1]
+}
+
+// The pull request's URL as the gh stand-in gives it.
+func (s *sc) prURL() string {
+	return "https://example.test/pr/" + strings.ReplaceAll(s.branch(), "/", "_")
+}
+
+// Whether n's body ends with link alone on its last line, and both fit a
+// lock screen.
+func (n note) endsWith(link string) bool {
+	return strings.HasSuffix(n.Body, "\n"+link) && utf8.RuneCountInString(n.Title) <= 60 && utf8.RuneCountInString(n.Body) <= 240
+}
+
+var notifyScenarios = []scenario{
+	{"notify-stop", func(s *sc) {
+		s.plain()
+		s.allow()
+		s.issues("7:tend")
+		r := s.build()
+		n := s.lastNote()
+		s.check("a stop still exits 3", r.code == 3)
+		s.check("titled with the issue and that it waits", n.Title == "tend: o/r#7 waits for you")
+		s.check("its body says why and ends with the issue's URL", strings.Contains(n.Body, "not labelled tend-build") && n.endsWith("https://example.test/issues/7"))
+		s.check("sounded as a request", n.Sound == "request")
+		r = s.build()
+		s.check("the same stop on a second run, before any run folder, is not notified again", r.code == 3 && len(s.notes()) == 1)
+	}},
+	{"notify-stop-in-grove", func(s *sc) {
+		s.project("main", true)
+		s.allow()
+		s.issues("7:tend-build")
+		r := s.build()
+		n := s.lastNote()
+		s.check("an issue of a Grove repository stops naming the issue", r.code == 3 && n.Title == "tend: o/r#7 waits for you")
+		s.check("and ends with its URL", n.endsWith("https://example.test/issues/7"))
+	}},
+	{"notify-repair-then-decision", func(s *sc) {
+		s.project("main", true)
+		s.allow()
+		r := s.run("REVIEW=repairable-decision")
+		n := s.lastNote()
+		s.check("a head failing for a decision after the one repair was spent is published", r.code == 0 && r.conclusion() == "failure" && s.prompts("An") == 1)
+		s.check("and its notification says the findings stand after one repair", strings.Contains(n.Body, "Codex's findings stand at "+short(s.head())+" after one repair") && n.endsWith(s.prURL()))
+	}},
+	{"notify-landed", func(s *sc) {
+		s.lands(false, "check success")
+		r := s.run()
+		n := s.lastNote()
+		s.check("a landing is notified as landed", r.passed() && n.Title == "tend: o/r#1 landed")
+		s.check("waiting for no one, with the pull request's URL", !strings.Contains(n.Title+n.Body, "waits for you") && n.endsWith(s.prURL()))
+	}},
+	{"notify-supervised", func(s *sc) {
+		s.lands(true, "check success")
+		r := s.run()
+		n := s.lastNote()
+		s.check("a supervised head that passed review waits for the person", r.passed() && n.Title == "tend: o/r#1 waits for you")
+		s.check("its body says review passed at the head, to approve to land or request changes", strings.Contains(n.Body, "Review passed at "+short(s.head())) && strings.Contains(n.Body, "Approve it to land it, or request changes"))
+		s.check("ending with the pull request's URL", n.endsWith(s.prURL()))
+	}},
+	{"notify-built-in", func(s *sc) {
+		s.project("main", true)
+		s.allow()
+		r := s.run()
+		n := s.lastNote()
+		s.check("under the built-in flow, a head that passed review is to merge or request changes", r.passed() && strings.Contains(n.Body, "Merge it, or request changes"))
+		s.check("saying nothing of approving", !strings.Contains(strings.ToLower(n.Body), "approv") && n.endsWith(s.prURL()))
+	}},
+	{"notify-repair-spent", func(s *sc) {
+		s.project("main", true)
+		s.allow()
+		r := s.run("REVIEW=actionable")
+		n := s.lastNote()
+		s.check("a head still failing after its one repair is published and waits", r.code == 0 && r.conclusion() == "failure" && n.Title == "tend: o/r#1 waits for you")
+		s.check("its body says Codex's findings stand after one repair", strings.Contains(n.Body, "Codex's findings stand at "+short(s.head())+" after one repair"))
+		s.check("to request changes to send them to the implementer, or close", strings.Contains(n.Body, "Request changes to send them to the implementer, or close") && n.endsWith(s.prURL()))
+	}},
+	{"notify-decision", func(s *sc) {
+		s.project("main", true)
+		s.allow()
+		r := s.run("REVIEW=decision")
+		n := s.lastNote()
+		s.check("a failure not judged repairable says Codex's findings stand", r.code == 0 && strings.Contains(n.Body, "Codex's findings stand at "+short(s.head())+"."))
+		s.check("to request changes or close, with no repair named", strings.Contains(n.Body, "Request changes to send them to the implementer, or close") && !strings.Contains(n.Body, "repair") && n.endsWith(s.prURL()))
+	}},
+	{"notify-unpublished", func(s *sc) {
+		s.plain()
+		s.issues("7:tend-build")
+		r := s.build()
+		n := s.lastNote()
+		h := s.git(s.bworktree(), "rev-parse", "--short=7", "HEAD")
+		s.check("with no pull request the notification names the issue", r.passed() && n.Title == "tend: o/r#7 waits for you")
+		s.check("its body names the branch and its head", strings.Contains(n.Body, "tend/build-7 at "+h))
+		s.check("and ends with the issue's URL", n.endsWith("https://example.test/issues/7"))
+	}},
+	{"notify-held", func(s *sc) {
+		s.lands(false, "check success")
+		r := s.run(`BUILD_ALSO=echo "# ours" >>tend/flow.yaml`)
+		n := s.lastNote()
+		s.check("a head held at land waits for the person", r.held("tend/flow.yaml") && n.Title == "tend: o/r#1 waits for you")
+		s.check("its body names the protected path and to approve this head", strings.Contains(n.Body, "tend/flow.yaml") && strings.Contains(n.Body, "Approve this head to land it"))
+		s.check("ending with the pull request's URL, given once", n.endsWith(s.prURL()) && strings.Count(n.Body, s.prURL()) == 1)
+	}},
+	{"notify-still-red", func(s *sc) {
+		s.stillRed()
+		n := s.lastNote()
+		s.check("checks still failing after the one fix wait for the person", n.Title == "tend: o/r#1 waits for you")
+		s.check("naming the check and that it failed after the one fix", strings.Contains(n.Body, "Checks test failed at "+short(s.head())+" after the one fix"))
+		s.check("to fix the branch, run the checks again or close", strings.Contains(n.Body, "Fix the branch, run the checks again, or close the pull request"))
+		s.check("saying nothing of approving", !strings.Contains(strings.ToLower(n.Body), "approv") && n.endsWith(s.prURL()))
+	}},
+	{"notify-other-stop", func(s *sc) {
+		s.project("main", true)
+		s.allow()
+		s.run()
+		s.request()
+		s.run("REQUEST_FAIL=agent_prompt_stalled")
+		r := s.run()
+		n := s.lastNote()
+		s.check("a stop after publishing waits for the person on the pull request", r.code == 3 && n.Title == "tend: o/r#1 waits for you")
+		s.check("its body gives the reason and ends with the pull request's URL", strings.Contains(n.Body, "committed nothing") && n.endsWith(s.prURL()))
+		s.check("and still records needs-you", s.has(s.status(), `^[^ ]* needs-you: `))
+		s.check("adding nothing about running tend again but the reason's own words", !strings.Contains(n.Body, "a person deals with that"))
+	}},
+	{"notify-once", func(s *sc) {
+		s.project("main", true)
+		s.allow()
+		s.run()
+		s.check("an ended attempt is notified once", len(s.notes()) == 1)
+		s.write(s.runDir()+"/status", "2026-11-25T00:00:00+0000 working: reviewing\nnext: tend goes on\n")
+		w := s.watch()
+		s.check("watch runs again an attempt a dead tend left working", s.count(w.err, `running tend`) == 1)
+		s.check("and the same end is not notified again", len(s.notes()) == 1)
+		first := s.head()
+		s.request()
+		r := s.run()
+		n := s.lastNote()
+		s.check("a new head that passes review is notified", r.passed() && s.head() != first && len(s.notes()) == 2 && strings.Contains(n.Body, short(s.head())))
+	}},
+	{"notify-long", func(s *sc) {
+		s.project("main", true)
+		s.allow()
+		s.run()
+		s.request()
+		long := strings.Repeat("why ", 150)
+		r := s.run("REQUEST_FAIL=" + long)
+		n := s.lastNote()
+		s.check("a stop with a 600-character reason exits 3", r.code == 3 && len(long) == 600)
+		s.check("its body is at most 240 characters and ends with the pull request's whole URL", n.endsWith(s.prURL()))
+		s.check("the reason cut with an ellipsis before the link", strings.HasSuffix(n.Body, "…\n"+s.prURL()))
+	}},
+}
+
+// A long ref loses its start, never its number or what the title says of it.
+func TestNotificationTitle(t *testing.T) {
+	ref := "an-organization-with-a-long-name/a-repository-with-an-even-longer-name#7"
+	for _, suffix := range []string{" waits for you", " landed"} {
+		got := titled(ref, suffix)
+		if utf8.RuneCountInString(got) > 60 || !strings.HasPrefix(got, "tend: …") || !strings.HasSuffix(got, "#7"+suffix) {
+			t.Errorf("titled(%q, %q) = %q", ref, suffix, got)
+		}
+	}
+	if got := titled("o/r#7", " waits for you"); got != "tend: o/r#7 waits for you" {
+		t.Errorf("a short ref is changed: %q", got)
+	}
+}
+
+// Under rex tend writes its state to /dev/tty, which a test of the built
+// binary cannot read: the message it reports there is checked here.
+func TestRexStopMessage(t *testing.T) {
+	pr, cycle, run, repo = "", "issue-7", "", ""
+	issue = parse(`{"url": "https://github.com/o/r/issues/7"}`)
+	item = request{from: "#7", key: "7"}
+	title, body := waits("issue #7 is not labelled tend-build, so it is not approved for building")
+	st, msg := rexMessage(title, body, "request")
+	if st != "blocked" {
+		t.Errorf("state %q, want blocked", st)
+	}
+	if !strings.HasPrefix(msg, "tend: o/r#7 waits for you") {
+		t.Errorf("message %q does not begin with the title", msg)
+	}
+	if !strings.Contains(msg, "https://github.com/o/r/issues/7") || strings.ContainsAny(msg, "\n") {
+		t.Errorf("message %q lacks the issue's URL or holds a newline", msg)
+	}
 }
