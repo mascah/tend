@@ -85,6 +85,15 @@ var intakeScenarios = []scenario{
 		s.check("ending with the pull request's URL", n.endsWith("https://example.test/pr/tend_issue-43"))
 		s.propose()
 		s.check("the next intake pass notifies it no more", len(s.notes()) == 1)
+		d := glob(s.ts + "/intake/*-43")
+		os.Remove(d + "/linked")
+		r = s.propose()
+		s.check("a pass stopped after the notification went, before linked, is finished by the next without a second", r.code == 0 && exists(d+"/linked") && len(s.notes()) == 1)
+		os.Remove(d + "/linked")
+		os.Remove(d + "/notified")
+		os.Remove(s.st + "/notifications")
+		s.propose()
+		s.check("one stopped before the notification went is notified by the next pass", exists(d+"/linked") && len(s.notes()) == 1)
 	}},
 	{"propose-notify-unmarked", func(s *sc) {
 		s.project("main", true)

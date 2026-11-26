@@ -183,6 +183,25 @@ var notifyScenarios = []scenario{
 		s.check("titled with the issue and that it waits", n.Title == "tend: o/r#7 waits for you")
 		s.check("its body says why and ends with the issue's URL", strings.Contains(n.Body, "not labelled tend-build") && n.endsWith("https://example.test/issues/7"))
 		s.check("sounded as a request", n.Sound == "request")
+		r = s.build()
+		s.check("the same stop on a second run, before any run folder, is not notified again", r.code == 3 && len(s.notes()) == 1)
+	}},
+	{"notify-stop-in-grove", func(s *sc) {
+		s.project("main", true)
+		s.allow()
+		s.issues("7:tend-build")
+		r := s.build()
+		n := s.lastNote()
+		s.check("an issue of a Grove repository stops naming the issue", r.code == 3 && n.Title == "tend: o/r#7 waits for you")
+		s.check("and ends with its URL", n.endsWith("https://example.test/issues/7"))
+	}},
+	{"notify-repair-then-decision", func(s *sc) {
+		s.project("main", true)
+		s.allow()
+		r := s.run("REVIEW=repairable-decision")
+		n := s.lastNote()
+		s.check("a head failing for a decision after the one repair was spent is published", r.code == 0 && r.conclusion() == "failure" && s.prompts("An") == 1)
+		s.check("and its notification says the findings stand after one repair", strings.Contains(n.Body, "Codex's findings stand at "+short(s.head())+" after one repair") && n.endsWith(s.prURL()))
 	}},
 	{"notify-landed", func(s *sc) {
 		s.lands(false, "check success")
@@ -290,6 +309,20 @@ var notifyScenarios = []scenario{
 		s.check("its body is at most 240 characters and ends with the pull request's whole URL", n.endsWith(s.prURL()))
 		s.check("the reason cut with an ellipsis before the link", strings.HasSuffix(n.Body, "…\n"+s.prURL()))
 	}},
+}
+
+// A long ref loses its start, never its number or what the title says of it.
+func TestNotificationTitle(t *testing.T) {
+	ref := "an-organization-with-a-long-name/a-repository-with-an-even-longer-name#7"
+	for _, suffix := range []string{" waits for you", " landed"} {
+		got := titled(ref, suffix)
+		if utf8.RuneCountInString(got) > 60 || !strings.HasPrefix(got, "tend: …") || !strings.HasSuffix(got, "#7"+suffix) {
+			t.Errorf("titled(%q, %q) = %q", ref, suffix, got)
+		}
+	}
+	if got := titled("o/r#7", " waits for you"); got != "tend: o/r#7 waits for you" {
+		t.Errorf("a short ref is changed: %q", got)
+	}
 }
 
 // Under rex tend writes its state to /dev/tty, which a test of the built

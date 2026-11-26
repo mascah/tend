@@ -1,8 +1,10 @@
 package main
 
 import (
+	"cmp"
 	"errors"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -149,24 +151,25 @@ func ask(name, text, mark string) {
 // item by its ID with no link.
 func subject() (ref, link string) {
 	if pr != "" {
-		return refOf(pr, func() string {
+		ref = refOf(pr, func() string {
 			if n := prNumber(); regexp.MustCompile(`^[0-9]+$`).MatchString(n) {
 				return n
 			}
 			n, _ := quiet("gh", "pr", "view", pr, "--json", "number", "--jq", ".number")
 			return n
-		}), pr
+		})
+		return cmp.Or(ref, pr), pr
 	}
-	if u := str(get(issue, "url")); u != "" {
-		if item.from != "" && !strings.HasPrefix(item.from, "#") {
-			return item.from, u // a Jira key
+	u := str(get(issue, "url"))
+	switch {
+	case item.from != "" && !strings.HasPrefix(item.from, "#"):
+		return item.from, u // a Jira key
+	case u != "" || item.key != "":
+		if ref = cmp.Or(refOf(u, func() string { return item.key }), u); ref != "" {
+			return ref, u
 		}
-		return refOf(u, func() string { return item.key }), u
 	}
-	if cycle != "" {
-		return cycle, ""
-	}
-	return "tend", ""
+	return cmp.Or(cycle, "tend"), ""
 }
 
 var ghURL = regexp.MustCompile(`^https://github\.com/([^/]+/[^/]+)/(?:pull|issues)/([0-9]+)$`)
@@ -181,13 +184,13 @@ func refOf(url string, num func() string) string {
 	}
 	n := num()
 	if n == "" {
-		return url
+		return ""
 	}
 	if nwo == "" {
 		nwo, _ = quiet("gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner")
 	}
 	if nwo == "" {
-		return url
+		return ""
 	}
 	return nwo + "#" + n
 }
@@ -199,7 +202,18 @@ func waits(text string) (string, string) {
 	if link != "" {
 		text = strings.ReplaceAll(text, link, ref) // the link comes once, at the end
 	}
-	return fit("tend: "+ref+" waits for you", text, link)
+	return fit(titled(ref, " waits for you"), text, link)
+}
+
+// A title of at most 60 characters that keeps what it says of the work,
+// suffix, whole: a long ref loses its start, so its number stays.
+func titled(ref, suffix string) string {
+	ref = strings.Join(strings.Fields(ref), " ")
+	room := 60 - len("tend: ") - len([]rune(suffix))
+	if r := []rune(ref); len(r) > room {
+		ref = "…" + string(r[len(r)-room+1:])
+	}
+	return "tend: " + ref + suffix
 }
 
 // A title of at most 60 characters and a body of at most 240, the link whole
@@ -226,31 +240,29 @@ func cut(s string, n int) string {
 }
 
 // Tell the person, once for each wait: a notification the same as the last
-// one recorded in folder d's notified is not sent again. With no folder it is
-// always sent.
-func tell(d, title, body, sound string) {
+// one recorded in file rec is not sent again. With no file it is always sent.
+func tell(rec, title, body, sound string) {
 	text := title + "\n" + body + "\n"
-	if d != "" && cat(d+"/notified")+"\n" == text {
+	if rec != "" && cat(rec)+"\n" == text {
 		say("already told: %s", title)
 		return
 	}
 	term.notify(title, body, sound)
-	if d != "" && exists(d) {
-		write(d+"/notified.tmp", text)
-		os.Rename(d+"/notified.tmp", d+"/notified")
+	if rec != "" && os.MkdirAll(filepath.Dir(rec), 0o755) == nil {
+		write(rec+".tmp", text)
+		os.Rename(rec+".tmp", rec)
 	}
 }
 
-// The folder that records what tend last told about this work: the attempt's
-// run folder, or, before it is known, an issue's when it is there.
+// The file that records what tend last told about this work: in the
+// attempt's run folder, or, before there is one, under TEND_STATE/notified,
+// named as the work item's lock is.
 func toldIn() string {
 	if run != "" {
-		return run
+		return run + "/notified"
 	}
-	if repo != "" && isItem(cycle) {
-		if d := issueRun(cycle); exists(d) {
-			return d
-		}
+	if state != "" && repo != "" && cycle != "" {
+		return state + "/notified/" + filepath.Base(lockFile(repo, cycle))
 	}
 	return ""
 }

@@ -189,8 +189,6 @@ func proposal(r request, b string) {
 		if r.link != nil && r.link(pr) != nil {
 			stop("could not say on %s where its proposal is (%s); run tend propose again to finish", r.ref, pr)
 		}
-		write(run+"/linked", pr+"\n")
-		stage("done", "proposal from "+r.ref+" at "+pr, "a person answers its open questions, revises or merges it")
 		asked := "see its open questions"
 		switch n := consequential(cat(run + "/summary")); {
 		case n == 1:
@@ -199,7 +197,11 @@ func proposal(r request, b string) {
 			asked = fmt.Sprintf("%d open questions are consequential", n)
 		}
 		t, body := waits(fmt.Sprintf("Proposal from %s: %s. Merge to approve, or revise it on %s.", r.from, asked, b))
-		tell(run, t, body, "request")
+		// Before linked, so a pass stopped here sends it on the next; sent
+		// already, it is not sent again.
+		tell(run+"/notified", t, body, "request")
+		write(run+"/linked", pr+"\n")
+		stage("done", "proposal from "+r.ref+" at "+pr, "a person answers its open questions, revises or merges it")
 		say("%s: %s", r.ref, pr)
 	case nonempty(run + "/declined"):
 		// Said on the request once, found by the attempt's marker, then the label off.

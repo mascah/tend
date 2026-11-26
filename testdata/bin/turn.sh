@@ -70,6 +70,13 @@ turn() { # name text
 		noconclusion) jq -n --arg h "$h" '{head: $h, actionable: false, summary: "ok"}' ;;
 		decision) jq -n --arg h "$h" '{head: $h, conclusion: "failure", actionable: false, summary: "a.txt:1 needs an owner decision."}' ;;
 		actionable) jq -n --arg h "$h" '{head: $h, conclusion: "failure", actionable: true, summary: "a.txt:1 lacks the fix."}' ;;
+		repairable-decision) # fails the first head it sees as repairable, the rest as needing a decision
+			if [ -e "$s/failed-once" ]; then
+				jq -n --arg h "$h" '{head: $h, conclusion: "failure", actionable: false, summary: "a.txt:1 needs an owner decision."}'
+			else
+				touch "$s/failed-once"
+				jq -n --arg h "$h" '{head: $h, conclusion: "failure", actionable: true, summary: "a.txt:1 lacks the fix."}'
+			fi ;;
 		repairable) # fails the first head it sees, passes the rest
 			if [ -e "$s/failed-once" ]; then
 				jq -n --arg h "$h" '{head: $h, conclusion: "success", actionable: false, summary: "ok"}'
