@@ -181,11 +181,13 @@ func readChecks(h string, ciOnly bool) (failed, pending []string, ci int) {
 	return
 }
 
-// How the checks read stand: failed, with the failed checks' names and links
-// in {checks}; passed; or "" while one is unfinished or none but tend/review
-// is reported.
+// How the checks read stand: "" while one is unfinished or none but
+// tend/review is reported, so every check finishes before any decides;
+// failed, with the failed checks' names and links in {checks}; or passed.
 func standing(h string, failed, pending []string, ci int) string {
 	switch {
+	case len(pending) > 0:
+		return ""
 	case len(failed) > 0:
 		vars["checks"] = "The failed checks, each with its link: " + strings.Join(failed, "; ") + "."
 		say("checks failed on %s: %s", short(h), strings.Join(failed, "; "))

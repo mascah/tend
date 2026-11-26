@@ -100,31 +100,41 @@ func publishStep() string {
 // gives a step for failed, before an approval is read or a person asked:
 // read as land reads them, tend/review left out, so a head that failed
 // review has no failed check for it. The failed checks, each its name and
-// link, or nil once every check passed; with none but tend/review, or one
-// unfinished, when the wait ends, tend stops for a person.
+// link, or nil once every check passed, decided only once every check has
+// finished; with none but tend/review, or one unfinished, when the wait
+// ends, tend stops for a person. A read that ends after the wait does not
+// decide: the checks were not all seen finished within it.
 func waitChecks() []string {
 	ms, _ := strconv.Atoi(timeout())
 	wait := time.Duration(ms) * time.Millisecond
 	poll := min(20*time.Second, wait/4)
 	until := time.Now().Add(wait)
+	var pending []string // as the last read within the wait saw them
+	ci := 0
 	for round := 0; ; round++ {
 		if round > 0 {
 			time.Sleep(poll)
 		}
-		over := time.Now().After(until)
-		failed, pending, ci := readChecks(head, true)
-		switch standing(head, failed, pending, ci) {
+		f, p, c := readChecks(head, true)
+		if time.Now().After(until) {
+			if round == 0 { // no read ended within the wait: what this one saw
+				pending, ci = p, c
+			}
+			switch {
+			case ci == 0:
+				stop("%s at %s has no check but tend/review, so tend asks no one to approve it: a flow whose publish waits for checks needs CI on its pull requests", branch, short(head))
+			case len(pending) == 0:
+				stop("the checks on %s at %s were not read finished within %sms, so tend asks no one to approve it yet", branch, short(head), timeout())
+			}
+			stop("the checks %s on %s at %s were still unfinished after %sms, so tend asks no one to approve it yet", and(pending), branch, short(head), timeout())
+		}
+		pending, ci = p, c
+		switch standing(head, f, p, c) {
 		case "failed":
-			return failed
+			return f
 		case "passed":
 			say("checks passed on %s", short(head))
 			return nil
-		}
-		switch {
-		case over && ci == 0:
-			stop("%s at %s has no check but tend/review, so tend asks no one to approve it: a flow whose publish waits for checks needs CI on its pull requests", branch, short(head))
-		case over:
-			stop("the checks %s on %s at %s were still unfinished after %sms, so tend asks no one to approve it yet", and(pending), branch, short(head), timeout())
 		}
 		stage("working", fmt.Sprintf("waiting for the checks on %s at %s", branch, short(head)), "tend asks a person about "+pr+" once they pass, or has a failed one fixed once")
 	}

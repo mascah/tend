@@ -297,6 +297,18 @@ var publicationScenarios = []scenario{
 		r := s.run("TIMEOUT_MS=400")
 		s.check("with a check unfinished when the wait ends, tend stops for a person naming it", r.code == 3 && r.said(`the checks test on .* were still unfinished after 400ms`))
 	}},
+	{"ci-mixed", func(s *sc) {
+		s.waitsForCI("test failure\nslow pending")
+		r := s.run("TIMEOUT_MS=400")
+		s.check("with one check failed and another unfinished, no fix is prompted before every check finishes", s.prompts("Checks GitHub ran on") == 0)
+		s.check("and when the wait ends tend stops for a person naming the unfinished check", r.code == 3 && r.said(`the checks slow on .* were still unfinished after 400ms`))
+	}},
+	{"ci-past-deadline", func(s *sc) {
+		s.waitsForCI("test success")
+		r := s.run("TIMEOUT_MS=800", "CHECKS_SLEEP=2")
+		s.check("a pass read only after the wait ended is not taken: tend stops for a person", r.code == 3 && r.said(`the checks on .* were not read finished within 800ms`))
+		s.check("and the head is not reported done", r.conclusion() == "")
+	}},
 	{"ci-no-flow", func(s *sc) {
 		s.project("main", true)
 		s.allow()
