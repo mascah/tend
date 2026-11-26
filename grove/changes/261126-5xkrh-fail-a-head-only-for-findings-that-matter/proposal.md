@@ -14,14 +14,14 @@ and about 15 minutes, and a failing verdict blocks `land` and the ruleset's
 `tend/review` status, so the owner could only ask for another round or merge
 with admin bypass.
 
-The issue names three causes, which the code at e80da30 bears out:
+The issue names three causes, which the code at 7e339d9 bears out:
 
-- The built-in prompt, `flows/prompts/review.md` at e80da30, asks for
+- The built-in prompt, `flows/prompts/review.md` at 7e339d9, asks for
   "material findings: a defect, an unmet requirement, or a claim in {notes}
   the code does not support". The specs state requirements absolutely, so a
   constructed corner that departs from one reads as an unmet requirement.
 - `actionable` says whether a finding needs a decision from the owner, not
-  whether it matters (`grove/specs/review/spec.md`, Purpose, at e80da30).
+  whether it matters (`grove/specs/review/spec.md`, Purpose, at 7e339d9).
 - Each review is prompted with the whole change, `git diff {base}...HEAD`,
   and nothing of the earlier verdicts, so a finding on code unchanged since
   the previous round can first appear in round five.
@@ -59,15 +59,15 @@ built-in prompt. Every other project still gets the old bar.
   earlier verdicts on commits of its branch.
 - The review that publication posts: notes under their own heading, which
   do not change the `tend/review` status.
-- tend's own `tend/prompts/review.md` stopgap (see open question 6).
+- tend's own `tend/prompts/review.md` stopgap, which this change deletes.
 
 ### Out of scope
 
 - A cap on review rounds before a person decides. The issue asks for one
-  only "if the above is not enough"; see open question 3.
+  only "if the above is not enough". The owner left it out of this change.
 - A separate step that verifies each failing finding before the repair is
-  spent. A project's flow file can add one today, as the handoff notes say;
-  see open question 4.
+  spent. A project's flow file can add one today, as the handoff notes say.
+  The owner left it out of this change.
 - Severity per finding, or a structured list of findings in the verdict.
 - Overriding a failing verdict from GitHub, or changing what `land` or the
   ruleset require of `tend/review`.
@@ -75,8 +75,7 @@ built-in prompt. Every other project still gets the old bar.
 
 ## Decisions
 
-No decision was made beyond the request. The request (GitHub issue #45) sets
-these constraints:
+The request (GitHub issue #45) sets these constraints:
 
 - "A head fails review only for findings that matter: a defect a realistic
   use would hit, a requirement missed in its main case, a security or data
@@ -90,57 +89,55 @@ these constraints:
 - "The bar is stated in the built-in review prompt and the review spec, so a
   project can tune it in its own `tend/prompts/review.md`."
 
-## Open questions
+On 2026-11-26 the owner answered "Yes" to each of the following, put to them
+as recommendations in the session that revised this proposal:
 
-None must be answered before review; each has a recommended answer that
-`/grove-implement` builds and records.
-
-1. **A prompt change only, or a verdict field tend reads?** Recommended: keep
-   `conclusion` as the one thing that fails a head, with no severity per
-   finding, and add an optional `notes` string for findings that do not fail
-   it. Reason: `conclusion` already is the blocking signal, so a severity
-   would duplicate it; but notes kept apart from `summary` let tend show them
-   under their own heading and keep them out of `{findings}`, so the one
-   repair is not spent on polish. Optional, so a cached verdict or a
-   project's own prompt without it stays valid. Decides T-01 and T-02.
-2. **Can a later round fail a head over unchanged code at all?** The request
-   says it does not. Recommended: follow the request, with one exception: a
-   security or data hole that can be reached still fails the head wherever
-   it is. Reason: such a hole costs more to land than one more round, and it
-   is the narrowest of the four kinds of finding. Without the exception, the
-   specs drop that sentence. Decides T-01.
-3. **A cap on rounds?** Recommended: none in this change. Reason: the repair
-   is already limited to one, every later round is one a person asked for,
-   and the bar and the earlier-rounds rule should be seen working before a
-   cap is added; a cap would be its own change. Decides nothing here.
-4. **A step that verifies failing findings before the repair?** Recommended:
-   not in the built-in flow. Reason: it costs a second Codex turn on every
-   failure, and a project can add it in its flow file with no change to
-   tend, as item 5 of the Claude Ship notes in
-   `docs/work/261121-autonomous-direction/handoff-261124.md` says. Decides
-   nothing here.
-5. **How notes reach the pull request.** Recommended: in the comment review
-   tend already posts for the head, after the summary, under a heading
-   saying they do not fail the head; without publication they stay in the
+1. **A verdict field, not only a prompt change.** The verdict gains an
+   optional `notes` string for findings that do not fail the head;
+   `conclusion` alone still fails a head, with no severity per finding, and
+   a verdict without `notes` stays valid. Reason: `conclusion` already is
+   the blocking signal, so a severity would duplicate it; notes kept apart
+   from `summary` can be shown under their own heading and kept out of
+   `{findings}`, so the one repair is not spent on polish; and being
+   optional, cached verdicts and projects' own prompts stay valid. Decides
+   T-01 and T-02.
+2. **A later round does not fail a head over code an earlier review saw,
+   except for a security or data hole that can be reached.** Reason: such a
+   hole costs more to land than one more round, and it is the narrowest of
+   the four kinds of finding. Decides T-01.
+3. **No cap on review rounds and no step that verifies findings before the
+   repair, in this change.** Each would be its own change. Reason: the
+   repair is already limited to one, every later round is one a person
+   asked for, and the bar should be seen working first; a verify step costs
+   a second Codex turn on every failure, and a project can add one in its
+   flow file today, as item 5 of the Claude Ship notes in
+   `docs/work/261121-autonomous-direction/handoff-261124.md` says.
+4. **Notes reach the pull request in the comment review tend already posts
+   for the head**, after the summary, under their own heading, and never
+   change the `tend/review` status; without publication they stay in the
    verdict file. Reason: it is the one place the owner already reads each
    verdict, and it adds no new kind of GitHub post. Decides T-02.
-6. **tend's own `tend/prompts/review.md`.** Recommended: delete it, so tend's
+5. **tend's own `tend/prompts/review.md` stopgap is deleted**, so tend's
    flow falls back to the built-in prompt, as the flows spec's scenario "A
-   flow names tend's own prompts" says. Reason: commit eecd7e6 says it can go
-   once the built-in prompt holds the bar, and left in place it would lack
-   `{earlier}` and `notes`. It is a protected path, so the owner merges it.
-   Decides T-03.
-7. **Routine choices.** Recommended: the wording of the prompt and of the
+   flow names tend's own prompts" says. Reason: commit eecd7e6 (#52) says it
+   can go once the built-in prompt holds the bar, and left in place it would
+   lack `{earlier}` and `notes`. It is a protected path, so the owner merges
+   it with admin bypass. Decides T-03.
+
+The change no longer waits on "Fix failing CI before a person is asked"
+(261125-rf036), which also changes `publication.go`: it was merged into main
+in f83036a, and this change is based on main after it.
+
+## Open questions
+
+None must be answered before review.
+
+1. **Routine choices.** Recommended: the wording of the prompt and of the
    notes heading, the form of `{earlier}` (one line per earlier verdict,
    giving its short head, conclusion and file path, or `none`), the helper
    that builds it, and test names and layout are the implementer's. Reason:
-   they do not change behavior the specs fix. Decides T-01 and T-02.
-8. **Does approved change 261125-rf036 (fix failing CI before a person is
-   asked) need to land first?** It also changes publication and
-   `publication.go`, though not the review a head gets. Recommended: no
-   dependency. Reason: the two touch different parts of publishing, so
-   whichever lands second merges the other's code without changing what it
-   does. Decides T-02.
+   they do not change behavior the specs fix. Decides T-01 and T-02; can
+   wait for implementation.
 
 The Purpose of the maintained review spec defines actionable as "every
 finding is an in-scope code fix"; at archive it should read "every finding

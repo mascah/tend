@@ -2,4 +2,4 @@ title: "Fail a head in review only for findings that matter"
 created: 2026-11-26T01:00:39Z
 description: The reviewer fails a head only for findings that matter, notes the rest on the pull request, and a later round judges what changed
 schema: default
-base: e80da30986a4d43f415b8b2353ecc0db40c204d6
+base: 7e339d9136ff2f1a06796d820c3dfb2a8e3ac684

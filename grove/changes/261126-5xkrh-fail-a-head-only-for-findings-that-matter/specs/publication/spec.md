@@ -5,7 +5,7 @@
 until the change is implemented and the maintained spec is reconciled. -->
 
 Maintained spec: [publication](../../../../specs/publication/spec.md), as at
-e80da30.
+7e339d9.
 
 ## MODIFIED Requirements
 

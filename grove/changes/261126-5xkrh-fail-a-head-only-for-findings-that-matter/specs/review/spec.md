@@ -4,7 +4,7 @@
 `review`. This is future work: nothing here describes the target branch
 until the change is implemented and the maintained spec is reconciled. -->
 
-Maintained spec: [review](../../../../specs/review/spec.md), as at e80da30.
+Maintained spec: [review](../../../../specs/review/spec.md), as at 7e339d9.
 
 ## ADDED Requirements
 
