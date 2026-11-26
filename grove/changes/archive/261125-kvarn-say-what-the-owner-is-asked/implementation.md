@@ -86,6 +86,7 @@ Checks: `go test -run 'TestTend/^propose' ./...` passed, and so did
 Also changed: `testdata/bin/turn.sh` — the drafter stand-in writes `$SUMMARY` as its summary when it is set, so a test can mark questions.
 Also changed: `scenario_test.go` — `SUMMARY` is added to the environment variables a scenario drops from the caller's.
 Check: the fixed marker's text is `[consequential]`, chosen under the proposal's open question 1. The stand-in's default summary keeps its old `(consequential)` wording, so it counts as unmarked.
+Check: `intake.go`, `intake_test.go`, `main.go`, `publication.go` and `publication_test.go` changed on main after this change's base, in the `tend/review` status on proposals and in reviewer notes. Neither touches what either task says. T-01 and T-02 were built on the files as main has them, and the change was re-based to 32e85a9, its `base` the only line changed, so that Grove's `check` passes.
 Check: the proposal's notification sounds as `request`, the same as a stop, since the owner has to act on it.
 
 ## Scenarios
@@ -110,3 +111,6 @@ Check: the proposal's notification sounds as `request`, the same as a stop, sinc
 - Whether each notification is short and plain enough to act on from a phone's lock screen: unverified, since only a person reading one on a phone can judge it
 
 ## Reconciliation
+
+- terminals: applied to specs/terminals/spec.md
+- intake: applied to specs/intake/spec.md

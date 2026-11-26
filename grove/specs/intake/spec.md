@@ -267,6 +267,38 @@ in one change's folder under `<root>/changes/`; and no `success` otherwise.
 - WHEN the owner runs `tend propose <repo>`
 - THEN neither head gets a `tend/review` status
 
+### Requirement: The owner is told of a proposal
+
+When intake has opened a proposal pull request and posted its review, the
+system shall notify the person, as
+[terminals](../../../../specs/terminals/spec.md) says for a wait, with a
+title naming the pull request and saying it waits for them, and a body
+naming the request it was drafted from, how many of its open questions the
+drafter marked consequential with the follow prompt's fixed marker, and to merge to approve or revise on its
+branch, ending with the pull request's URL; and shall notify each proposal
+pull request once.
+
+#### Scenario: A proposal with consequential questions
+
+- GIVEN issue #43 of `o/r` labelled `tend`, drafted with a summary that
+  marks two open questions consequential
+- WHEN `tend propose` opens pull request #44 for it
+- THEN the notification is titled `tend: o/r#44 waits for you`, and its
+  body names #43, says two open questions are consequential, says to merge
+  to approve or revise on its branch, and ends with the pull request's URL
+
+#### Scenario: A summary with none marked
+
+- GIVEN a drafted proposal whose summary marks no question consequential
+- WHEN `tend propose` opens its pull request
+- THEN the body gives no count and says to see its open questions
+
+#### Scenario: The next intake pass
+
+- GIVEN that proposal notified once, its pull request still open
+- WHEN `tend watch` runs `tend propose` again
+- THEN no second notification is shown
+
 ## Known discrepancies
 
 None recorded.
@@ -281,3 +313,4 @@ None.
 - [261122-hjhmn](../../changes/archive/261122-hjhmn-recover-with-no-one-there/) Recover with no one there
 - [261124-60tny](../../changes/archive/261124-60tny-name-the-drafter-after-its-repository/) An intake drafter is named after its request and its repository
 - [261126-c16zs](../../changes/archive/261126-c16zs-give-proposals-a-review-status/) Give proposal pull requests a tend/review status
+- [261125-kvarn](../../changes/archive/261125-kvarn-say-what-the-owner-is-asked/) Say what the owner is asked to do in each notification
