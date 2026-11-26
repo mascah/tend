@@ -611,7 +611,7 @@ func TestTend(t *testing.T) {
 	}
 }
 
-var scenarios = slices.Concat(cliScenarios, attemptScenarios, worktreeScenarios, watchScenarios, statusScenarios, publicationScenarios, intakeScenarios, jiraScenarios, terminalScenarios)
+var scenarios = slices.Concat(cliScenarios, attemptScenarios, worktreeScenarios, watchScenarios, statusScenarios, publicationScenarios, intakeScenarios, jiraScenarios, terminalScenarios, notifyScenarios)
 
 var cliScenarios = []scenario{
 	{"version", func(s *sc) {

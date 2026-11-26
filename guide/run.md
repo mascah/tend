@@ -86,8 +86,11 @@ way; only the claim and the scope differ (see [work items](concepts/work-items.m
    merge keeps the verdict), waits for CI, and squash-merges the pull request
    at exactly the head whose checks passed.
 10. **Done.** tend prints the verdict JSON and exits 0. A Herdr notification
-    says the pull request (or the branch, when nothing was published) is ready
-    for you, or that it landed.
+    titled `tend: <owner>/<repo>#<n> waits for you` says what the review
+    concluded and what you are asked to do (approve to land or request
+    changes, merge or request changes, or request changes or close), ending
+    with the pull request's link; or it is titled `tend: <owner>/<repo>#<n>
+    landed`. Each wait is notified once.
 
 Without a `land` step, the built-in flow ends at publish: **merging is yours.**
 
@@ -171,7 +174,10 @@ on how many reviews a person may send, since people bound that loop (see
 tend stops rather than guess. It prints the reason, writes it to the
 attempt's `status` as `needs-you` with the next action ("a person deals with
 that, then runs tend again"), and shows a Herdr notification titled
-`tend <id> needs you` (under rex, its own tab says so). Some examples:
+`tend: <ref> waits for you`, where `<ref>` is the pull request, else the
+request, else the work item's ID, whose body gives the reason and ends with
+the link (under rex, its own tab says so). The same stop is not notified
+twice. Some examples:
 
 - Grove refused the claim, with Grove's sentence.
 - An agent is `blocked` or in an `unknown` state, or did not start.

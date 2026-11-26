@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -139,4 +140,117 @@ func ask(name, text, mark string) {
 	}
 	st, why := term.prompt(name, text)
 	settled(name, st, why)
+}
+
+// ---- telling a person
+
+// What a notification is about, as its title names it, and the link it ends
+// with: the pull request, else the request the work came from, else the work
+// item by its ID with no link.
+func subject() (ref, link string) {
+	if pr != "" {
+		return refOf(pr, func() string {
+			if n := prNumber(); regexp.MustCompile(`^[0-9]+$`).MatchString(n) {
+				return n
+			}
+			n, _ := quiet("gh", "pr", "view", pr, "--json", "number", "--jq", ".number")
+			return n
+		}), pr
+	}
+	if u := str(get(issue, "url")); u != "" {
+		if item.from != "" && !strings.HasPrefix(item.from, "#") {
+			return item.from, u // a Jira key
+		}
+		return refOf(u, func() string { return item.key }), u
+	}
+	if cycle != "" {
+		return cycle, ""
+	}
+	return "tend", ""
+}
+
+var ghURL = regexp.MustCompile(`^https://github\.com/([^/]+/[^/]+)/(?:pull|issues)/([0-9]+)$`)
+
+// A GitHub pull request or issue as <owner>/<repo>#<n>, from its URL, else
+// from the repository gh sees and the number num gives; "" when neither says.
+var nwo string
+
+func refOf(url string, num func() string) string {
+	if m := ghURL.FindStringSubmatch(url); m != nil {
+		return m[1] + "#" + m[2]
+	}
+	n := num()
+	if n == "" {
+		return url
+	}
+	if nwo == "" {
+		nwo, _ = quiet("gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner")
+	}
+	if nwo == "" {
+		return url
+	}
+	return nwo + "#" + n
+}
+
+// The notification of a wait: titled with what it is about and that it waits
+// for the person, the body text then the link.
+func waits(text string) (string, string) {
+	ref, link := subject()
+	if link != "" {
+		text = strings.ReplaceAll(text, link, ref) // the link comes once, at the end
+	}
+	return fit("tend: "+ref+" waits for you", text, link)
+}
+
+// A title of at most 60 characters and a body of at most 240, the link whole
+// on the body's last line, the text before it cut with an ellipsis.
+func fit(title, text, link string) (string, string) {
+	title = cut(strings.Join(strings.Fields(title), " "), 60)
+	text = strings.Join(strings.Fields(text), " ")
+	if link == "" {
+		return title, cut(text, 240)
+	}
+	room := 240 - len([]rune(link)) - 1
+	if room < 2 || text == "" {
+		return title, link
+	}
+	return title, cut(text, room) + "\n" + link
+}
+
+func cut(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return strings.TrimRight(string(r[:n-1]), " ") + "…"
+}
+
+// Tell the person, once for each wait: a notification the same as the last
+// one recorded in folder d's notified is not sent again. With no folder it is
+// always sent.
+func tell(d, title, body, sound string) {
+	text := title + "\n" + body + "\n"
+	if d != "" && cat(d+"/notified")+"\n" == text {
+		say("already told: %s", title)
+		return
+	}
+	term.notify(title, body, sound)
+	if d != "" && exists(d) {
+		write(d+"/notified.tmp", text)
+		os.Rename(d+"/notified.tmp", d+"/notified")
+	}
+}
+
+// The folder that records what tend last told about this work: the attempt's
+// run folder, or, before it is known, an issue's when it is there.
+func toldIn() string {
+	if run != "" {
+		return run
+	}
+	if repo != "" && isItem(cycle) {
+		if d := issueRun(cycle); exists(d) {
+			return d
+		}
+	}
+	return ""
 }
