@@ -276,6 +276,17 @@ var flowScenarios = []scenario{
 		p := s.tendIn(nil, "flow", s.repo)
 		s.check("a flow naming tend's own prompts for conflict and failed, with none beside it, is valid", p.code == 0 && strings.Contains(p.out, "prompt: prompts/conflict.md") && strings.Contains(p.out, "prompt: prompts/failed.md"))
 	}},
+	{"flow-publish-failed", func(s *sc) {
+		s.waitsForCI("test success")
+		p := s.tendIn(nil, "flow", s.repo)
+		s.check("a build flow naming failed on publish is valid, and tend flow prints it", p.code == 0 && regexp.MustCompile(`(?m)^ +publish:\n +next:\n( +[a-z]+: [a-z]+\n)* +failed: fix$`).MatchString(p.out))
+		s.commit("Fail at publish", map[string]string{"tend/flow.yaml": strings.Replace(landFlow(s.t, true)["tend/flow.yaml"], "        approved: land\n", "        approved: land\n        failed: nowhere\n", 1)})
+		r := s.run()
+		s.check("one naming a step it lacks for failed is refused", r.code == 3 && r.said(`gives step publish of flow build "nowhere" after failed, a step the flow does not have`))
+		s.commit("Fail without fix", map[string]string{"tend/flow.yaml": strings.Replace(buildFlow(s.t), "        ok: end\n        requested: request\n", "        ok: end\n        requested: request\n        conflict: end\n", 1)})
+		r = s.run()
+		s.check("and an outcome publish cannot have is refused, naming failed among those it has", r.code == 3 && r.said(`the outcome conflict, which it cannot have; it has ok, requested, approved and failed$`))
+	}},
 	{"flow-one-more-step", func(s *sc) {
 		s.project("main", true)
 		s.allow()

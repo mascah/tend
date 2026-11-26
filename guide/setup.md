@@ -146,8 +146,12 @@ before it lands. tend ends at `publish` (`ok: end`) until then, and
 
 ```yaml
     publish:
-      next: {ok: end, approved: land, requested: request}
+      next: {ok: end, approved: land, requested: request, failed: fix}
 ```
+
+`failed: fix` has `publish` wait for the head's checks before anyone is
+asked, sending a failure to the same one `fix` that `land` uses. See
+[Publication](concepts/publication.md).
 
 In the autonomous shape, a head that failed review (a non-actionable failure,
 or the repair spent) still reaches `land`, which refuses it: tend stops for a

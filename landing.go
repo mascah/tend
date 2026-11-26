@@ -158,14 +158,17 @@ func checksOn(h string) [][]string {
 	return cs
 }
 
-// How the checks on head h stand: failed, with the failed checks' names and
-// links in {checks}; passed; or "" while one is unfinished or none but
-// tend/review is reported, which stops for a person once the wait is over.
-func checked(h string, over bool) string {
-	var failed, pending []string
-	ci := 0
+// The checks on head h by how they stand: the failed ones, each its name and
+// link, the unfinished ones, and how many there are but tend/review. With
+// ciOnly, tend/review is not read at all, so a head that failed review has
+// no failed check for it.
+func readChecks(h string, ciOnly bool) (failed, pending []string, ci int) {
 	for _, c := range checksOn(h) {
-		if c[0] != "tend/review" {
+		if c[0] == "tend/review" {
+			if ciOnly {
+				continue
+			}
+		} else {
 			ci++
 		}
 		switch c[1] {
@@ -175,19 +178,39 @@ func checked(h string, over bool) string {
 			pending = append(pending, c[0])
 		}
 	}
+	return
+}
+
+// How the checks read stand: "" while one is unfinished or none but
+// tend/review is reported, so every check finishes before any decides;
+// failed, with the failed checks' names and links in {checks}; or passed.
+func standing(h string, failed, pending []string, ci int) string {
 	switch {
+	case len(pending) > 0:
+		return ""
 	case len(failed) > 0:
 		vars["checks"] = "The failed checks, each with its link: " + strings.Join(failed, "; ") + "."
 		say("checks failed on %s: %s", short(h), strings.Join(failed, "; "))
 		return "failed"
 	case ci > 0 && len(pending) == 0:
 		return "passed"
+	}
+	return ""
+}
+
+// How the checks on head h stand, as standing says, for land, which stops
+// for a person once the wait is over.
+func checked(h string, over bool) string {
+	failed, pending, ci := readChecks(h, false)
+	st := standing(h, failed, pending, ci)
+	switch {
+	case st != "":
 	case over && ci == 0:
 		stop("%s at %s has no check but tend/review, so tend lands nothing: a project lands only with CI on its pull requests", branch, short(h))
 	case over:
 		stop("the checks %s on %s at %s were still unfinished after %sms, so tend landed nothing", and(pending), branch, short(h), timeout())
 	}
-	return ""
+	return st
 }
 
 // The build flow's land: a head that passed review, or is carried from one

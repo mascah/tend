@@ -15,7 +15,8 @@
 # head moved or lacks main; REQUIRE_APPROVAL refuses without an approving
 # review, CI_LATE (a check's name) refuses once for that check, then reports
 # it passed, BEFORE_MERGE is a script run once before the first merge, DURING_CHECKS
-# one run once as check runs are first read, and
+# one run once as check runs are first read, CHECKS_SLEEP seconds slept in
+# each read of check runs, each read's start in seconds going to check-reads, and
 # MERGE_HOLD holds every merge until the file it names exists.
 set -euo pipefail
 s=$HERDR_STATE
@@ -120,6 +121,8 @@ api*)
 		echo "${2##*/} $(printf '%s\n' "$@" | sed -n 's/^description=//p')" >>"$s/descriptions" ;;
 	*/commits/*/check-runs)
 		if [ -n "${DURING_CHECKS:-}" ] && [ ! -e "$s/during-checks" ]; then touch "$s/during-checks"; bash -c "$DURING_CHECKS" >/dev/null 2>&1; fi
+		perl -MTime::HiRes=time -e 'printf "%.3f\n", time' >>"$s/check-reads"
+		[ -z "${CHECKS_SLEEP:-}" ] || sleep "$CHECKS_SLEEP"
 		{ [ ! -f "$s/ci" ] || cat "$s/ci"; } | jq -Rn '{check_runs: [inputs | split(" ") | select(length == 2) |
 			{name: .[0], status: (if .[1] == "pending" then "in_progress" else "completed" end), conclusion: (if .[1] == "pending" then null else .[1] end), html_url: ("https://example.test/checks/" + .[0])}]}' |
 			jq -r "$(arg --jq "$@")" ;;
