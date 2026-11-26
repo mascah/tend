@@ -71,4 +71,27 @@ Check: `tend/prompts/review.md` is a protected path, so merging this needs the o
 
 ## Scenarios
 
+All run with `go test ./...` on the final head, which passed.
+
+- review "The bar in the prompt": attempt_test.go TestTend/review-bar, passed
+- review "A passing head with notes": attempt_test.go TestTend/review-notes, passed
+- review "A failure with notes": attempt_test.go TestTend/repair-notes, passed
+- review "A project's own bar": flow_test.go TestFlows/flow-own-review-bar, passed
+- review "The review after a repair": attempt_test.go TestTend/repair-notes, passed
+- review "The first review": attempt_test.go TestTend/review-bar, passed
+- review "A verdict for a commit no longer on the branch": attempt_test.go TestTend/review-earlier-gone, passed
+- review "The reviewer's one writable folder": attempt_test.go TestTend/remote-claim, passed
+- review "A reviewer left working": attempt_test.go TestTend/survivor-reviewing, passed
+- review "A carried head": landing_test.go TestLanding/land-target-moved, passed
+- review "A cached verdict for another head": attempt_test.go TestTend/cached-wrong-head, passed
+- review "A cached verdict without a conclusion": attempt_test.go TestTend/cached-incomplete, passed
+- review "A new verdict without a conclusion": attempt_test.go TestTend/new-incomplete, passed
+- review "A verdict without notes": attempt_test.go TestTend/review-bar, passed
+- review "Notes that are not text": attempt_test.go TestTend/review-notes-not-text, passed
+- publication "A passing head": publication_test.go TestTend/publish, passed
+- publication "A passing head with notes": publication_test.go TestTend/publish-notes, passed
+- publication "A verdict without notes": publication_test.go TestTend/publish, passed
+- publication "A repair within one run": publication_test.go TestTend/publish-repair, passed
+- publication "A later commit that needs a decision": publication_test.go TestTend/publish-new-head, passed
+
 ## Reconciliation
