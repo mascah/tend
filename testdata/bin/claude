@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Claude Code stand-in for headless agents: claude -p with its prompt on
+# stdin, taking the turn turn.sh gives the agent tend names in TEND_AGENT,
+# then printing stream-json's last line, the result. Logged as the Herdr
+# stand-in logs: "agent start <name>" for a new session, "agent prompt <name>
+# <text>" for each turn. IMPL_SLEEP holds the implementer's first
+# /grove-implement turn that long, the pid in sleeper, before it takes the
+# turn, as a turn that outlives tend does. SILENT, a prefix of agent names:
+# their turns do nothing and say why.
+set -euo pipefail
+s=$HERDR_STATE
+p=$(cat)
+sid=
+while [ $# -gt 0 ]; do
+	case $1 in
+	--session-id) sid=$2 && printf 'agent start %s\n' "$TEND_AGENT" >>"$s/log" ;;
+	--resume) sid=$2 ;;
+	esac
+	shift
+done
+printf 'agent prompt %s %s\n' "$TEND_AGENT" "$p" >>"$s/log"
+. "${0%/*}/turn.sh"
+if [ -n "${IMPL_SLEEP:-}" ] && [[ $TEND_AGENT == impl-* && $p == /grove-implement* ]] && [ ! -e "$s/slept" ]; then
+	touch "$s/slept" && echo $$ >"$s/sleeper" && sleep "$IMPL_SLEEP"
+fi
+said="Took the turn."
+if [ -n "${SILENT:-}" ] && [[ $TEND_AGENT == "$SILENT"* ]]; then
+	said="T-01 needs a decision: the proposal names two files for one table."
+else
+	turn "$TEND_AGENT" "$p"
+fi
+jq -nc --arg r "$said" --arg sid "$sid" '{type: "result", subtype: "success", is_error: false, result: $r, session_id: $sid}'

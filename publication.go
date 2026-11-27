@@ -15,8 +15,13 @@ import (
 
 // The account a repository's origin is published as, from $state/publish
 // ("<origin-url> <account>" a line), or nothing when it is not listed.
-func accountOf() string {
-	o := gitQ("remote", "get-url", "origin")
+func accountOf() string { return accountIn(".") }
+
+func accountIn(r string) string {
+	o := gitQ("-C", r, "remote", "get-url", "origin")
+	if o == "" {
+		return ""
+	}
 	for _, line := range strings.Split(cat(state+"/publish"), "\n") {
 		if f := strings.Fields(line); len(f) > 1 && f[0] == o {
 			return f[1]
@@ -31,14 +36,44 @@ func token() {
 		stop("gh holds no token for %s; sign it in with gh auth login, then switch back", account)
 	}
 	os.Setenv("GH_TOKEN", t)
+	if w := workflowScope(); w != "" {
+		stop("%s", w)
+	}
+}
+
+// Why the token in GH_TOKEN may not publish, or "": a token with the workflow
+// scope lets a pull request it pushes change the CI that judges it, so the
+// account tend publishes as holds none (design review, 18.6).
+func workflowScope() string {
+	h, err := quiet("gh", "api", "-i", "user")
+	if err != nil {
+		retry("could not read the scopes of %s's token", account)
+	}
+	for _, l := range strings.Split(h, "\n") {
+		if k, v, _ := strings.Cut(l, ":"); strings.EqualFold(strings.TrimSpace(k), "X-Oauth-Scopes") &&
+			slices.Contains(strings.Split(strings.ReplaceAll(v, " ", ""), ","), "workflow") {
+			return account + "'s token has the workflow scope, so tend publishes nothing as it: remove the scope (gh auth refresh -h github.com -r workflow, signed in as " + account + " in the browser), then run tend again"
+		}
+		if strings.TrimSpace(l) == "" {
+			break // the body
+		}
+	}
+	return ""
 }
 
 // Push HEAD to origin's branch as the account whose token is GH_TOKEN, over
-// HTTPS even when origin is an SSH URL; never forced.
-func pushAs(b string) bool {
-	_, err := out("git", "-c", "credential.helper=", "-c", "credential.helper=!gh auth git-credential", "-c", "url.https://github.com/.pushInsteadOf=git@github.com:",
+// HTTPS even when origin is an SSH URL; never forced. Whether it pushed, and
+// when not, whether only trying again is needed: anything but a refusal, as
+// of a branch someone else pushed to, a workflow file or the account's access.
+func pushAs(b string) (bool, bool, string) {
+	o, err := both("git", "-c", "credential.helper=", "-c", "credential.helper=!gh auth git-credential", "-c", "url.https://github.com/.pushInsteadOf=git@github.com:",
 		"push", "-q", "origin", "HEAD:refs/heads/"+b)
-	return err == nil
+	if err == nil {
+		return true, false, ""
+	}
+	fmt.Fprintln(os.Stderr, o)
+	why := regexp.MustCompile(`(?im)^(remote: |error: |! )?.*(rejected|refusing|denied|not found|403|authentication failed|protected).*$`).FindString(o)
+	return false, why == "", strings.TrimSpace(why)
 }
 
 // The build flow's publish: the head published, then whether a person
@@ -66,7 +101,7 @@ func publishStep() string {
 	}
 	req, err := requested()
 	if err != nil {
-		stop("could not read the reviews of %s", pr)
+		retry("could not read the reviews of %s", pr)
 	}
 	if req == nil || exists(run+"/answered-"+str(get(req, "node_id"))) {
 		if to := fl.Steps["publish"].Next["failed"]; to != "" {
@@ -85,7 +120,7 @@ func publishStep() string {
 	rid := str(get(req, "id"))
 	comments, err := out("gh", "api", reviewsAPI()+"/"+rid+"/comments", "--paginate", "--jq", `.[] | "\(.path):\(.line // .original_line // "?"): \(.body)"`)
 	if err != nil {
-		stop("could not read the comments of review %s on %s", rid, pr)
+		retry("could not read the comments of review %s on %s", rid, pr)
 	}
 	if comments != "" {
 		comments = " Their comments on lines: " + comments
@@ -178,13 +213,13 @@ func spentFix(name string, failed []string) {
 	tag := "<!-- tend:checks-failed " + head + " -->"
 	said, err := out("gh", "api", "repos/{owner}/{repo}/issues/"+prNumber()+"/comments", "--paginate", "--jq", fmt.Sprintf(`.[] | select(.user.login == "%s" and (.body | contains("%s"))) | .id`, account, tag))
 	if err != nil {
-		stop("could not read the comments on %s", pr)
+		retry("could not read the comments on %s", pr)
 	}
 	if said == "" {
 		body := fmt.Sprintf("**Checks failed on %s after the one fix tend asks for**\n\ntend asked %s for the fixes its flow allows, %d, so it asks no more. Failed on %s:\n\n- %s\n\nA person decides what follows: fix the branch, run the checks again, or close the pull request.\n\n%s\n",
 			short(head), name, fl.Steps[name].Limit, short(head), strings.Join(failed, "\n- "), tag)
 		if _, err := input(body, "gh", "pr", "comment", pr, "--body-file", "-"); err != nil {
-			stop("could not comment on %s; run tend again to finish", pr)
+			retry("could not comment on %s; run tend again to finish", pr)
 		}
 		say("said on %s that the checks on %s failed after %s was spent", pr, short(head), name)
 	}
@@ -212,19 +247,21 @@ func publish() {
 	head = git("rev-parse", "HEAD")
 	stage("working", fmt.Sprintf("publishing %s at %s as %s", branch, short(head), account), "tend pushes it and opens its pull request or reviews the one there")
 	token()
-	if !pushAs(branch) {
-		stop("could not push %s to origin as %s; if it has commits this checkout lacks, look at them, then run tend again", branch, account)
+	if pushed, blip, why := pushAs(branch); blip {
+		retry("could not push %s to origin as %s", branch, account)
+	} else if !pushed {
+		stop("could not push %s to origin as %s, which said %q. If it has commits this checkout lacks, look at them; if %s may not push it, as with a workflow file, push it yourself from the worktree; then run tend again", branch, account, why, account)
 	}
 	var err error
 	if pr, err = out("gh", "pr", "list", "--head", branch, "--state", "all", "--json", "url", "--jq", ".[0].url // empty"); err != nil {
-		stop("could not look for %s's pull request", branch)
+		retry("could not look for %s's pull request", branch)
 	}
 	// The PR is squash-merged: its title and description become the commit's,
 	// so the implementer, who knows what changed and why, writes them.
 	if pr == "" {
 		title, body := titleBody(message(""))
 		if pr, err = input(body, "gh", "pr", "create", "--base", target, "--head", branch, "--title", title, "--body-file", "-"); err != nil {
-			stop("could not open a pull request for %s; run tend again, and it looks for one before opening another", branch)
+			retry("could not open a pull request for %s; run tend again, and it looks for one before opening another", branch)
 		}
 		write(run+"/described", head+"\n")
 	} else if d := cat(run + "/described"); d != "" && d != head && !slices.Contains(carried(head), d) {
@@ -237,7 +274,7 @@ func publish() {
 	// a failure repaired within one run still shows.
 	posted, err := out("gh", "api", reviewsAPI(), "--paginate", "--jq", fmt.Sprintf(`.[] | select(.user.login == "%s") | .commit_id`, account))
 	if err != nil {
-		stop("could not read %s's reviews", pr)
+		retry("could not read %s's reviews", pr)
 	}
 	fs, _ := filepath.Glob(run + "/verdict-*.json")
 	mtime := func(f string) time.Time { s, _ := os.Stat(f); return s.ModTime() }
@@ -256,12 +293,16 @@ func publish() {
 		}
 		if _, err := out("gh", "api", "repos/{owner}/{repo}/statuses/"+h, "-f", "state="+st, "-f", "context=tend/review",
 			"-f", "description=Independent review of "+short(h)+": "+c, "-f", "target_url="+pr); err != nil {
-			stop("could not set the tend/review status on %s", short(h))
+			retry("could not set the tend/review status on %s", short(h))
 		}
 		if h == head {
 			markDraft(c != "success")
 		}
-		body := fmt.Sprintf("**Independent review of %s: %s**\n\n%s\n\n", short(h), c, str(get(x, "summary")))
+		body := fmt.Sprintf("**Independent review of %s: %s**\n\n", short(h), c)
+		if h == head && kind == "grove" {
+			body += approvedNote()
+		}
+		body += str(get(x, "summary")) + "\n\n"
 		if n := strings.TrimSpace(str(get(x, "notes"))); n != "" {
 			body += "**Notes that do not fail the head**, for a person to file or drop:\n\n" + n + "\n\n"
 		}
@@ -286,15 +327,50 @@ func publish() {
 		}
 		body += "Codex reviewed this commit in a session apart from the implementer; tend posted it for attempt `" + id + "`."
 		if postJSON(reviewsAPI(), map[string]any{"commit_id": h, "event": "COMMENT", "body": body}) != nil {
-			stop("could not post the review of %s on %s", short(h), pr)
+			retry("could not post the review of %s on %s", short(h), pr)
 		}
 	}
 	where = pr
 	write(run+"/pr", pr+"\n") // for tend watch to find; GitHub stays the record
 	if item.link != nil && item.link(pr) != nil {
-		stop("could not say on %s where its pull request is (%s); run tend again to finish", item.ref, pr)
+		retry("could not say on %s where its pull request is (%s); run tend again to finish", item.ref, pr)
 	}
 	say("published %s", pr)
+}
+
+// What merging builds, as the owner approved it: each change's proposal as the
+// claim's commit holds it, and the pull request that brought it to the target.
+func approvedNote() string {
+	c := str(get(rec, "commit"))
+	u, err := quiet("gh", "repo", "view", "--json", "url", "--jq", ".url")
+	if c == "" || err != nil {
+		return ""
+	}
+	var said []string
+	for _, x := range list(get(rec, "changes")) {
+		folder := ""
+		for _, p := range strings.Split(gitQ("ls-tree", "--name-only", c, root+"/changes/"), "\n") {
+			if strings.HasPrefix(filepath.Base(p), str(x)+"-") {
+				folder = p
+			}
+		}
+		if folder == "" {
+			continue
+		}
+		l := fmt.Sprintf("[%s](%s/blob/%s/%s/proposal.md)", str(x), u, c, folder)
+		if added := gitQ("log", "-1", "--format=%H", "--diff-filter=A", c, "--", folder+"/proposal.md"); added != "" {
+			if n, _ := quiet("gh", "api", "repos/{owner}/{repo}/commits/"+added+"/pulls", "--jq", ".[0].number // empty"); n != "" {
+				l += ", approved in #" + n
+			} else {
+				l += ", approved in " + short(added)
+			}
+		}
+		said = append(said, l)
+	}
+	if len(said) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("**What you approved:** %s. The proposal is as it stood at %s, when tend claimed it; this pull request moves it to the archive.\n\n", strings.Join(said, "; "), short(c))
 }
 
 // A pull request whose head failed review is made a draft, and one whose head
@@ -322,12 +398,12 @@ func answer(nid, who, reply string) {
 	tag := "<!-- tend:answered " + nid + " -->"
 	said, err := out("gh", "api", "repos/{owner}/{repo}/issues/"+prNumber()+"/comments", "--paginate", "--jq", fmt.Sprintf(`.[] | select(.user.login == "%s" and (.body | contains("%s"))) | .id`, account, tag))
 	if err != nil {
-		stop("could not read the comments on %s", pr)
+		retry("could not read the comments on %s", pr)
 	}
 	if said == "" {
 		body := fmt.Sprintf("**No change made for the changes %s requested at %s**\n\nThe implementer, on why:\n\n> %s\n\ntend will not ask again. To have it tried again, request changes saying what should change; or change the branch yourself.\n\n%s\n", who, short(head), strings.ReplaceAll(strings.TrimRight(reply, "\n"), "\n", "\n> "), tag)
 		if _, err := input(body, "gh", "pr", "comment", pr, "--body-file", "-"); err != nil {
-			stop("could not comment on %s; run tend again to finish", pr)
+			retry("could not comment on %s; run tend again to finish", pr)
 		}
 	}
 	write(run+"/answered-"+nid, head+"\n")
@@ -378,7 +454,7 @@ func fold(title, body string) string {
 func redescribe(d string) {
 	s, err := out("gh", "pr", "view", pr, "--json", "state,title,body")
 	if err != nil {
-		stop("could not read %s", pr)
+		retry("could not read %s", pr)
 	}
 	x := parse(s)
 	if str(get(x, "state")) != "OPEN" {
@@ -397,7 +473,7 @@ func redescribe(d string) {
 	title, body := titleBody(message(was))
 	if fold(title, body) != now {
 		if _, err := input(body, "gh", "pr", "edit", pr, "--title", title, "--body-file", "-"); err != nil {
-			stop("could not rewrite %s's description", pr)
+			retry("could not rewrite %s's description", pr)
 		}
 		say("rewrote %s's description for %s", pr, short(head))
 	}
@@ -429,7 +505,7 @@ func approvedOn(hs []string) bool {
 	q, _ := json.Marshal(hs)
 	s, err := out("gh", "api", reviewsAPI(), "--paginate", "--jq", fmt.Sprintf(`.[] | select((.state == "APPROVED" or .state == "CHANGES_REQUESTED") and (.commit_id | IN(%s[])) and %s) | .state + " " + .user.login`, q, writer("author_association")))
 	if err != nil {
-		stop("could not read the reviews of %s", pr)
+		retry("could not read the reviews of %s", pr)
 	}
 	ls := strings.Split(s, "\n")
 	last := strings.Fields(ls[len(ls)-1])

@@ -95,7 +95,7 @@ func newSc(t *testing.T) *sc {
 	return s
 }
 
-var dropped = regexp.MustCompile(`^(TEND_|HERDR_|REX_|JIRA_|GIT_|GH_|WATCH_|NO_NOTES|REVIEW|IMPL_|REPAIR_FAIL|REV_FAIL|BLOCK_AFTER_BUILD|CREATE_LOST|STATUS_FAIL|REQUEST_|PROPOSE_FAIL|FOLLOW_FAIL|DECLINE|EDIT_FAIL|CAP|TRUST_|DRAFT_FAIL|COMMENT_FAIL|STRAY|CHECK|UNFINISHED|TIMEOUT_MS|KEEP|AT_ONCE|HOLD|WORKTREE_HOLD|CI_LATE|BEFORE_MERGE|REQUIRE_APPROVAL|MERGE_HOLD|AGENT_GET_FAIL)`)
+var dropped = regexp.MustCompile(`^(TEND_|HERDR_|REX_|JIRA_|GIT_|GH_|WATCH_|NO_NOTES|REVIEW|IMPL_|REPAIR_FAIL|REV_FAIL|BLOCK_AFTER_BUILD|CREATE_LOST|STATUS_FAIL|REQUEST_|PROPOSE_FAIL|FOLLOW_FAIL|DECLINE|EDIT_FAIL|CAP|TRUST_|DRAFT_FAIL|COMMENT_FAIL|STRAY|CHECK|UNFINISHED|TIMEOUT_MS|KEEP|AT_ONCE|HOLD|WORKTREE_HOLD|CI_LATE|BEFORE_MERGE|REQUIRE_APPROVAL|MERGE_HOLD|AGENT_GET_FAIL|SILENT|PERMISSION|VISIBILITY)`)
 
 // The environment every command of the scenario gets, then extra ("K=V").
 func (s *sc) env(extra ...string) []string {
@@ -107,7 +107,7 @@ func (s *sc) env(extra ...string) []string {
 	}
 	e = append(e, "PATH="+standIns+":"+binDir+":"+os.Getenv("PATH"),
 		"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com", "GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com",
-		"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1", "TEND_TERMINAL=herdr",
+		"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1", "TEND_TERMINAL=herdr", "TEND_RETRY_MS=20",
 		"HERDR_STATE="+s.st, "TEND_STATE="+s.ts, "JIRA_EMAIL=owner@example.test", "JIRA_API_TOKEN=tok-secret-1", "t="+s.dir)
 	return append(e, extra...)
 }
@@ -611,7 +611,7 @@ func TestTend(t *testing.T) {
 	}
 }
 
-var scenarios = slices.Concat(cliScenarios, attemptScenarios, worktreeScenarios, watchScenarios, statusScenarios, publicationScenarios, intakeScenarios, jiraScenarios, terminalScenarios)
+var scenarios = slices.Concat(cliScenarios, attemptScenarios, worktreeScenarios, watchScenarios, statusScenarios, publicationScenarios, intakeScenarios, jiraScenarios, terminalScenarios, headlessScenarios)
 
 var cliScenarios = []scenario{
 	{"version", func(s *sc) {

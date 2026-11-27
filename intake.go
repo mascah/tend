@@ -152,7 +152,7 @@ func proposal(r request, b string) {
 		// people's, and may be gone after a merge.
 		created := pr == ""
 		if created {
-			if !pushAs(b) {
+			if pushed, _, _ := pushAs(b); !pushed {
 				stop("could not push %s as %s", b, account)
 			}
 			pr, err = input(git("log", "-1", "--format=%b")+"\n", "gh", "pr", "create", "--base", target, "--head", b, "--title", git("log", "-1", "--format=%s"), "--body-file", "-")

@@ -68,7 +68,7 @@ func walkFlow(publish func() string) {
 		case "end":
 			if flowName == "build" {
 				if why := unbuilt(); why != "" {
-					stop("%s", why)
+					unfinished(why)
 				}
 			}
 			return
@@ -88,12 +88,25 @@ func walkFlow(publish func() string) {
 		if flowName == "build" {
 			if r, _ := parseResult(fl.Steps[to].Result); to == "publish" || !r.commit {
 				if why := unbuilt(); why != "" {
-					stop("%s", why)
+					unfinished(why)
 				}
 			}
 		}
 		at = to
 	}
+}
+
+// A candidate the implementer left unfinished: a rerun asks it to finish.
+func unfinished(why string) {
+	stuck(impl, "", why, "Run tend again to have "+impl+" asked to finish it")
+}
+
+// Where a person sees what an agent did: its pane, or its output headless.
+func lookAt(agent string) string {
+	if _, ok := term.(*headless); ok {
+		return "its output in " + agentDir(agent)
+	}
+	return "its pane"
 }
 
 // The record of the step's asks in the run folder, a head a line: the names
@@ -267,7 +280,7 @@ func again(name, agent, rec, a string) bool {
 	if !term.gone(agent) || slices.Contains(asks(againOf(rec)), a) {
 		return false
 	}
-	say("%s was asked at %s and left nothing, and %s is gone; asking it once more in a new session", name, short(a), agent)
+	say("%s was asked at %s and left nothing, and %s is no longer on it; asking it once more", name, short(a), agent)
 	promptStep(name, againOf(rec), a)
 	return true
 }
@@ -358,11 +371,14 @@ func reachAt(name string, s *step, r result, h, rec string) string {
 	agent, _, _ := agentOf(name)
 	left := func() string { // the turn ended: the result, which leaves the branch as it was
 		o := got()
+		if o == "" && !exists(f) && again(name, agent, rec, h) { // headless, its turn over
+			o = got()
+		}
 		if o == "" {
 			if exists(f) {
-				stop("%s settled without a valid verdict for %s; look at pane %s", agent, short(h), term.pane(agent))
+				stuck(agent, rec, fmt.Sprintf("%s settled without a valid verdict for %s", agent, short(h)), "Look at "+lookAt(agent)+", then run tend again")
 			}
-			stop("%s wrote no %s; look at pane %s", name, fileName(f), term.pane(agent))
+			stuck(agent, rec, fmt.Sprintf("%s wrote no %s", name, fileName(f)), "Look at "+lookAt(agent)+", then write it and run tend again")
 		}
 		if _, _, root := agentOf(name); root != fl.Start && !continued(root) {
 			term.closePane(term.pane(agent))
@@ -397,7 +413,8 @@ func reachAt(name string, s *step, r result, h, rec string) string {
 		if slices.Contains(asks(againOf(rec)), h) {
 			asked = "asked twice"
 		}
-		stop("%s was %s at %s and left nothing: no %s, and %s is not working on it. Look at its pane, then write it and run tend again, or delete %s to have it asked once more", name, asked, short(h), fileName(f), agent, rec)
+		stuck(agent, rec, fmt.Sprintf("%s was %s at %s and left nothing: no %s, and %s is not working on it", name, asked, short(h), fileName(f), agent),
+			fmt.Sprintf("Look at %s, then write it and run tend again, or delete %s to have it asked once more", lookAt(agent), rec))
 	}
 	if s.Limit > 0 && timesAsked(name, rec) >= s.Limit {
 		return "spent"
@@ -456,18 +473,24 @@ func reachInOrder(name string, s *step, r result, h, rec string) string {
 		}
 		if implementing && !seen { // an ask that may still be in flight is not sent again
 			if why := unbuilt(); why != "" {
-				stop("%s. Look at %s's pane, then finish it and run tend again, or delete %s to have %s asked once more", why, agent, rec, name)
+				stuck(agent, rec, why, fmt.Sprintf("Look at %s, then finish it and run tend again, or delete %s to have %s asked once more", lookAt(agent), rec, name))
 			}
 		}
 		o := got(a)
+		if o == "" && seen && again(name, agent, rec, a) { // headless, its turn over
+			o = got(a)
+		}
 		if o == "" {
 			switch {
 			case isReq:
-				stop("the changes %s requested on %s (review %s) were asked of %s, which committed nothing and is not working on them. Look at its pane, then commit and run tend again, or delete %s to have them asked once more", vars["who"], pr, vars["review_id"], agent, rec)
+				stuck(agent, rec, fmt.Sprintf("the changes %s requested on %s (review %s) were asked of %s, which committed nothing and is not working on them", vars["who"], pr, vars["review_id"], agent),
+					fmt.Sprintf("Look at %s, then commit and run tend again, or delete %s to have them asked once more", lookAt(agent), rec))
 			case f != "":
-				stop("the %s asked of %s at %s has no commit and no %s, and %s is not working on it. Look at its pane, then commit or write %s and run tend again, or delete %s to have it asked once more", name, agent, short(a), fileName(f), agent, f, rec)
+				stuck(agent, rec, fmt.Sprintf("the %s asked of %s at %s has no commit and no %s, and %s is not working on it", name, agent, short(a), fileName(f), agent),
+					fmt.Sprintf("Look at %s, then commit or write %s and run tend again, or delete %s to have it asked once more", lookAt(agent), f, rec))
 			}
-			stop("the %s asked of %s at %s has no commit and %s is not working on it. Look at its pane, then commit and run tend again, or delete %s to have it asked once more", name, agent, short(a), agent, rec)
+			stuck(agent, rec, fmt.Sprintf("the %s asked of %s at %s has no commit and %s is not working on it", name, agent, short(a), agent),
+				fmt.Sprintf("Look at %s, then commit and run tend again, or delete %s to have it asked once more", lookAt(agent), rec))
 		}
 		if flowName == "build" {
 			contained()

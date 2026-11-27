@@ -8,7 +8,7 @@ cycle, or one approved change no cycle lists:
 
 ```text
 grove claim
-    -> Claude Code implements, in a Herdr worktree pane
+    -> Claude Code implements, headless (claude -p), in a worktree of its own
     -> Codex reviews the head commit
     -> one repair in the implementer's conversation, if the review asks
     -> Codex reviews the new head
@@ -16,9 +16,10 @@ grove claim
     -> with a listed origin, a pull request and its reviews, as a bot account
 ```
 
-Grove holds what is agreed. Herdr runs the agents where you can watch and
-take over. tend is a small Go program between them. It reconstructs
-progress from Git, its own run files and Herdr on every run.
+Grove holds what is agreed. The agents run headless, so tend and they need
+no terminal: close it and the work goes on. tend is a small Go program
+between them. It reconstructs progress from Git, GitHub and its own run
+files on every run, and asks you on GitHub when it needs a decision.
 
 The agreed [execution plan](docs/work/261114-reliable-orchestration/spec.md)
 records the intended boundaries, review findings, delivery order and session
@@ -35,8 +36,8 @@ curl -fsSL https://raw.githubusercontent.com/mascah/tend/main/install.sh | sh -s
 ```
 
 Or build it with Go 1.26 (`go build -o bin/tend .`). It needs `grove` (0.14.0
-or later), `git` and `gh` on PATH, Herdr or rex, and Claude Code and Codex
-signed in. Run it inside a Herdr pane or a rex terminal:
+or later), `git` and `gh` on PATH, and Claude Code and Codex signed in. It
+needs no terminal of its own:
 
 ```sh
 bin/tend <repo> <id>          # a change, a cycle, issue-<n> or a Jira <KEY>
@@ -52,8 +53,21 @@ only to build several changes together. A change a cycle lists is built with
 its cycle, and a change that waits on another is refused; either way tend
 stops with Grove's sentence.
 
-The agents run in Herdr, or in rex when tend runs in rex (not in Herdr);
-`TEND_TERMINAL=herdr` or `rex` chooses. In rex each worktree gets a session,
+The agents run headless. Each turn is one process of its harness, `claude -p`
+(`--session-id`, then `--resume`) or `codex exec`, in a session of its own so
+it outlives a killed tend, with its prompt on its standard input. Everything
+about an agent is under `TEND_STATE/agents/<name>/`: `agent.json` (its
+harness, flags, session and the running turn's process), and for turn n
+`n.prompt`, `n.out` (Claude's stream-json, which `tail -f` follows; Codex's
+JSONL), `n.err`, and for Codex `n.last`. An agent is working while its turn's
+process runs; once the turn has ended nothing is left that could act on the
+prompt, so a step it left with nothing to show is asked once more, resuming
+the same session, and never a third time. To look at a session, `claude
+--resume <session>` in its worktree once its turn is over. Worktrees are made
+by Git under `TEND_STATE/worktrees/`.
+
+To watch the agents in panes instead, `TEND_TERMINAL=herdr` or `rex` runs them
+there. In rex each worktree gets a session,
 first named after its folder and found again by its ID in
 `TEND_STATE/rex-sessions` (agents may rename it), and each agent a block named
 after it. Its state is
@@ -64,8 +78,10 @@ tend rather than being prompted into. rex worktrees are made by Git under
 
 - Exit 0: the head is reviewed, and the verdict is printed.
 - Exit 2: no work item was given; tend prints `usage: tend <repo> <id>`.
-- Exit 3: a person is needed. A Herdr notification says why, or under rex
-  tend's own tab.
+- Exit 3: a person is needed. With a listed origin, the publishing account
+  opens an issue on the repository: what happened, what the agent said last,
+  where the work is, and how to answer (see [Decisions](#decisions-what-tend-asks-you)).
+  Under Herdr or rex a notification says why too.
 - Exit 4: the work item is taken: another tend with the same `TEND_STATE` is
   on it in that repository (or, for `tend propose`, another intake pass of
   the repository), and nothing was done. The lock goes when its holder exits
@@ -164,7 +180,14 @@ and, for Grove work, Grove still shows it in flight. It also runs
 was given. In each of those repositories it then starts the oldest cycle that
 Grove would claim and whose plan marks it `unattended`: marking a cycle so when
 you plan it is how you let it be built with no one there. An attempt or request
-waiting for you is left alone until you have run tend on it.
+waiting for you is left alone until you have answered its issue (see
+[Decisions](#decisions-what-tend-asks-you)) or run tend on it. Started, watch
+first checks each repository it was given can tell you things once no one is
+at the terminal: a listed origin whose publishing account can push to it and
+holds no token with the `workflow` scope; it refuses to start otherwise. It
+also runs tend on any attempt Grove shows in flight on this machine, in a
+worktree tend made, that has no run folder, as when tend was killed while
+claiming, so that claim is not stranded.
 
 With watch running, an attempt carries on with no one there after its tend is
 killed, and after a reboot that took its agents too. The rerun waits for a
@@ -299,6 +322,39 @@ To see where things stand: `tend status <repo>` says what waits for whom;
 tend watch's own output says what it ran; the agents work in the terminal's
 workspaces, one per worktree; and when tend needs a person it stops and
 notifies.
+
+## Decisions: what tend asks you
+
+When an attempt stops for a person and its origin is listed in `publish`, the
+publishing account opens one issue on the repository, titled `tend needs you
+on <work item>: <what happened>`. It says what happened, where the work is (the
+branch, its commits and diff size since the target) and the pull request if
+there is one. It names no machine, and writes the runner's paths as
+`$TEND_STATE` and `~`. On a private repository it also quotes what the agent
+said last; on a public one, whose issues anyone can read, that stays on the
+runner in `$TEND_STATE/agents/<name>/`. You answer by closing it:
+
+- **as completed**: tend carries on. tend watch runs the attempt again on its
+  next pass, asking the agent that left nothing once more. If the question
+  needs something done first, such as a branch you push yourself, do it,
+  then close the issue.
+- **as not planned**: tend leaves the attempt as it is, and says so in its
+  status.
+
+Only a close by someone other than the publishing account counts, since
+every agent on the runner can act as that account. A run that stops the same
+way while the issue is open opens no second one; an attempt that carries on
+by other means, as when you run tend on it by hand, closes it saying how it
+stands. `run/decision` in the attempt's folder holds the issue, the record
+of the ask to make once more, and the question. The answer is read from
+GitHub, never from a file you edit.
+
+A failed read or repeatable write of GitHub, Git or Grove, such as a 502 from
+GitHub or a fetch that times out, is not a question: tend says so, waits (15
+seconds, doubling) and runs itself again from the start, which repeats
+nothing done, with its status `working` meanwhile. After 6 tries in a row it
+asks you. A push GitHub refuses (someone else's commits, a workflow file the
+account may not push, no access) is a question at once.
 
 ## Where the prototype reads progress
 

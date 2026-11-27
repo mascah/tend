@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -45,12 +46,22 @@ func watch(repos []string) {
 		started = append(started, done)
 		return done
 	}
+	for _, r := range repos {
+		if why := preflight(r); why != "" {
+			say("%s", why)
+			os.Exit(3)
+		}
+	}
 	for {
 		counted := map[string]bool{} // repositories kept under a count
 		for _, r := range repos {
 			r, err := abs(r)
 			if err != nil {
 				continue
+			}
+			for _, w := range orphans(r) {
+				say("%s's attempt is in flight on this machine with no run folder, as after a kill while claiming; running tend on it", w)
+				begin(r, w)
 			}
 			c := exec.Command("gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner")
 			c.Dir = r
@@ -147,8 +158,11 @@ func countIn(r string, sync bool) int {
 // it died (stopped); and it waits for no person.
 func rerun(d string) string {
 	a := strings.Split(cat(d+"/attempt"), "\n")
-	if len(a) < 2 || needsYou(d+"/status") {
+	if len(a) < 2 {
 		return ""
+	}
+	if needsYou(d + "/status") {
+		return answered(d, a[0])
 	}
 	if p := cat(d + "/pr"); p != "" {
 		// An approval holds for a head carried from the approved one: carried-<head>
@@ -281,4 +295,67 @@ func unattended(r string) string {
 		}
 	}
 	return best
+}
+
+// Grove's attempts in flight on this machine whose run folder tend never made,
+// as when it was killed between the claim and making it, in a worktree tend
+// made (named tend-<time>-<pid>) that still holds their branch: each its work item, run again so that its claim is
+// not stranded. None while a tend is on it.
+func orphans(r string) []string {
+	g, err := groveIn(r)
+	if err != nil {
+		return nil
+	}
+	host, _ := os.Hostname()
+	var ws []string
+	for _, x := range list(get(g, "runs")) {
+		w := str(get(x, "cycle"))
+		if cs := list(get(x, "changes")); w == "" && len(cs) == 1 {
+			w = str(cs[0])
+		}
+		d := str(get(x, "checkout"))
+		if get(x, "in_flight") != true || str(get(x, "host")) != host || w == "" || exists(state+"/runs/"+str(get(x, "id"))) ||
+			!regexp.MustCompile(`tend-[0-9]{6}-[0-9]+$`).MatchString(d) || // a worktree tend made, not a person's claim
+
+			str(get(itemRun(g, w), "id")) != str(get(x, "id")) || !exists(d) || gitQ("-C", d, "branch", "--show-current") != str(get(x, "branch")) || held(r, w) {
+			continue
+		}
+		ws = append(ws, w)
+	}
+	return ws
+}
+
+// Why tend watch would leave repository r unable to tell its owner anything
+// once no one is at this terminal, or "": its origin is not published, or
+// the account it publishes as cannot push to it or holds a token with the
+// workflow scope.
+func preflight(r string) string {
+	r, err := abs(r)
+	if err != nil {
+		return ""
+	}
+	if _, err := quiet("git", "-C", r, "remote", "get-url", "origin"); err != nil {
+		return ""
+	}
+	if account = accountIn(r); account == "" {
+		say("not publishing %s: its origin is not listed in %s/publish, so its pull requests and questions stay on this machine", r, state)
+		return ""
+	}
+	was := os.Getenv("GH_TOKEN")
+	defer os.Setenv("GH_TOKEN", was)
+	t, err := quiet("gh", "auth", "token", "--user", account)
+	if err != nil {
+		return fmt.Sprintf("gh holds no token for %s, which %s publishes as; sign it in with gh auth login, then switch back", account, r)
+	}
+	os.Setenv("GH_TOKEN", t)
+	if w := workflowScope(); w != "" {
+		return w
+	}
+	c := exec.Command("gh", "repo", "view", "--json", "viewerPermission", "--jq", ".viewerPermission")
+	c.Dir = r
+	b, err := c.Output()
+	if p := strings.TrimSpace(string(b)); err == nil && !slices.Contains([]string{"WRITE", "MAINTAIN", "ADMIN"}, p) {
+		return fmt.Sprintf("%s cannot push to %s's origin (GitHub gives it %s): add it as a collaborator with write access, then start tend watch again", account, r, strings.ToLower(p))
+	}
+	return ""
 }
