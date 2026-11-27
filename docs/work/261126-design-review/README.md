@@ -17,8 +17,8 @@ and [the autonomous direction](../261121-autonomous-direction/direction.md).
   The numbers are those of the single file this folder was split from on
   2026-11-26, text unchanged, so every reference still resolves. The table
   says which file holds which numbers.
-- A new thread gets its own file and the next section number (20 for
-  thread 5).
+- A new thread gets its own file and the next section number (21 for the
+  next; thread 10 took 20).
 - A decision is recorded in its thread's file, with its evidence, and as
   one line under "Where each thread stands" here.
 
@@ -32,6 +32,7 @@ and [the autonomous direction](../261121-autonomous-direction/direction.md).
 | [thread-3-authorization.md](thread-3-authorization.md) | 18 | Thread 3, authorization, with the GitHub sandbox results |
 | [thread-4-intake.md](thread-4-intake.md) | 19 | Thread 4, intake batching |
 | [thread-4-codex-second-opinion.md](thread-4-codex-second-opinion.md) | | Codex's reply on thread 4, kept whole; 19.9 checks it |
+| [thread-10-work.md](thread-10-work.md) | 20 | Thread 10, work as a first-class thing, with the stores compared |
 
 ## Where each thread stands
 
@@ -92,6 +93,19 @@ what is left)
 
 **Threads 5 to 9: not started.** Section 17 lists them.
 
+**Thread 10, work as a first-class thing: opened 2026-11-27, nothing
+decided** (start at 20.1)
+
+- The owner raised moving "what needs to be done" out of Grove into a
+  third tool beside Tend and Grove, in the manner of Beads, and is open
+  to Dolt (20.1).
+- 20.2 to 20.5 hold the evidence: what "tasks" is in Grove today, what
+  would be gained, what stands in the way, and the stores compared.
+- 20.6 is Claude's view, which is opinion. 20.8 lists the open questions.
+- 20.7 says what it would touch in what is decided: if adopted it amends
+  14.2 and moves what 14.4 adds to the ledger, which is why its timing
+  depends on Tend's rewrite.
+
 ## 12. What the owner has said (2026-11-26)
 
 - The aim is the middle between supervised and fully autonomous, not a dark
@@ -150,6 +164,10 @@ Remaining, in order:
    proposal meaningful. Raised by the owner on 2026-11-26 as something
    keyborg needs before it runs unattended (direction decision 4 and its
    open questions).
+10. Work as a first-class thing: whether "what needs to be done" leaves
+    Grove for a third tool, and where it is stored. Raised by the owner
+    on 2026-11-27 and opened the same day. Its place in this order is
+    not settled: 20.7 says why it bears on the rewrite of 14.2.
 
-Thread 3 continues from 18.7, thread 4 from 19.10. What to read first is
-at the top of this file.
+Thread 3 continues from 18.7, thread 4 from 19.10, thread 10 from 20.8.
+What to read first is at the top of this file.
