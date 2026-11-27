@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/mascah/tend/compare/v0.6.0...v0.7.0) (2026-11-27)
+
+
+### Features
+
+* run agents headless and ask the owner on GitHub ([#61](https://github.com/mascah/tend/issues/61)) ([f320996](https://github.com/mascah/tend/commit/f32099607c560ad3fe3ddee6f56adca821340e1e))
+
 ## [0.6.0](https://github.com/mascah/tend/compare/v0.5.0...v0.6.0) (2026-11-26)
 
 
