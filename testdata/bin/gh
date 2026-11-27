@@ -17,11 +17,17 @@
 # it passed, BEFORE_MERGE is a script run once before the first merge, DURING_CHECKS
 # one run once as check runs are first read, CHECKS_SLEEP seconds slept in
 # each read of check runs, each read's start in seconds going to check-reads, and
-# MERGE_HOLD holds every merge until the file it names exists.
+# MERGE_HOLD holds every merge until the file it names exists. GH_FAIL fails
+# the first call whose arguments match it, once, as a blip.
 set -euo pipefail
 s=$HERDR_STATE
 printf 'gh %s\n' "$*" >>"$s/log"
 by=${GH_TOKEN:-owner} by=${by#tok-}
+if [ -n "${GH_FAIL:-}" ] && [ ! -e "$s/gh-failed" ] && [[ "$*" == *$GH_FAIL* ]]; then
+	touch "$s/gh-failed"
+	echo "gh: HTTP 502: Bad Gateway" >&2
+	exit 1
+fi
 arg() { local flag=$1; shift; while [ $# -gt 1 ]; do [ "$1" != "$flag" ] || { echo "$2"; return; }; shift; done; }
 case "$1 $2" in
 "auth token") echo "tok-$(arg --user "$@")" ;;
@@ -39,12 +45,17 @@ case "$1 $2" in
 	done | jq -s --arg h "$(arg --head "$@")" --arg a "$(arg --author "$@")" --arg st "$(arg --state "$@")" '
 		if $h != "" then map(select(.headRefName == $h)) elif $a != "" then map(select(.author == $a and .state == "OPEN")) elif $st == "all" then . else map(select(.state == "OPEN")) end' |
 		if q=$(arg --jq "$@") && [ -n "$q" ]; then jq -r "$q"; else cat; fi ;;
-"repo view") case "$*" in *defaultBranchRef*) echo main ;; *) echo o/r ;; esac ;;
+"repo view") case "$*" in *defaultBranchRef*) echo main ;; *viewerPermission*) echo "${PERMISSION:-WRITE}" ;; *) echo o/r ;; esac ;;
 "issue list") jq '[.[] | select(.state == "OPEN" and (.labels | index("tend")))]' "$s/issues" | jq -r "$(arg --jq "$@")" ;;
 "issue view") jq --argjson n "$3" '.[] | select(.number == $n) | {title, body, url, state, labels: (.labels | map({name: .}))}' "$s/issues" ;;
 "issue comment")
 	[ -f "$s/comments" ] || echo '[]' >"$s/comments"
 	jq --argjson n "$3" --arg by "$by" --rawfile b /dev/stdin '. + [{issue: $n, body: $b, user: {login: $by}}]' "$s/comments" >"$s/c.new" && mv "$s/c.new" "$s/comments" ;;
+"issue create") # a decision tend asks: issue-<n> holds its body, issue-<n>.title its title, issue-<n>.state "open" or "closed <reason> <login>"
+	n=$(($(cat "$s/issues-made" 2>/dev/null || echo 99) + 1)) && echo "$n" >"$s/issues-made"
+	cat >"$s/issue-$n" && arg --title "$@" >"$s/issue-$n.title" && echo "$by" >"$s/issue-$n.by" && echo open >"$s/issue-$n.state"
+	echo "https://github.com/o/r/issues/$n" ;;
+"issue close") echo "closed completed $by" >"$s/issue-${3##*/}.state" ;;
 "issue edit")
 	[ -z "${EDIT_FAIL:-}" ] || [ -e "$s/edit-failed" ] || { touch "$s/edit-failed"; exit 1; }
 	jq --argjson n "$3" --arg l "$(arg --remove-label "$@")" 'map(if .number == $n then .labels -= [$l] else . end)' "$s/issues" >"$s/i.new" && mv "$s/i.new" "$s/issues" ;;
@@ -103,11 +114,18 @@ api*)
 		echo '{"merged": true}' | jq -r "$(arg --jq "$@")"
 		exit 0
 	fi
+	if [ "$2" = -i ] && [ "$3" = user ]; then # the token's scopes, from scopes
+		printf 'HTTP/2.0 200 OK\nX-Oauth-Scopes: %s\n\n{}\n' "$(cat "$s/scopes" 2>/dev/null || echo repo)"
+		exit 0
+	fi
 	case $2 in
 	*/issues/*/comments)
 		[ -f "$s/comments" ] || echo '[]' >"$s/comments"
 		n=${2%/comments} n=${n##*/}
 		jq --arg n "$n" '[.[] | select((.issue | tostring) == $n)]' "$s/comments" | jq -r "$(arg --jq "$@")" ;;
+	*/issues/[0-9]*)
+		read -r st why who <"$s/issue-${2##*/}.state"
+		jq -n --arg st "$st" --arg why "${why:-}" --arg who "${who:-}" '{state: $st, state_reason: (if $why == "" then null else $why end), closed_by: (if $who == "" then null else {login: $who} end)}' | jq -r "$(arg --jq "$@")" ;;
 	*/reviews/*/comments)
 		id=${2%/comments} id=${id##*/}
 		jq --argjson id "$id" '[.[] | select(.id == $id)][0].comments // []' "$s/reviews" | jq -r "$(arg --jq "$@")" ;;

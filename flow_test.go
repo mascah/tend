@@ -319,7 +319,8 @@ var flowScenarios = []scenario{
 		r := s.run("CHECK=none")
 		s.check("a step that leaves no result stops for a person", r.code == 3)
 		s.check("saying check wrote no check-<head>.json", r.said(`check wrote no check-[0-9a-f]{40}\.json`))
-		s.check("and no later step runs", s.creates() == 0 && s.count(s.log(), `^gh `) == 0)
+		s.check("and no later step runs", s.creates() == 0 && s.count(s.log(), `^gh (pr |api repos/.*/(reviews|statuses))`) == 0)
+		s.check("the owner is asked on GitHub", s.has(s.log(), `^gh issue create --title tend needs you on 261114-k0000: check wrote no check-`))
 	}},
 	{"flow-own-review-bar", func(s *sc) {
 		s.project("main", false)

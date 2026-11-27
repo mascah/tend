@@ -309,6 +309,7 @@ func attempt() {
 	}
 	verdict := parse(cat(v))
 	conclusion, h := str(get(verdict, "conclusion")), short(str(get(verdict, "head")))
+	settledDecision(fmt.Sprintf("%s is reviewed, %s", branch, conclusion))
 	if landed != "" {
 		term.notify("tend "+cycle+": landed", landed+" is merged", "done")
 		stage("done", fmt.Sprintf("landed %s, %s at %s, verdict %s", landed, branch, short(git("rev-parse", "HEAD")), v), "nothing: it is merged")

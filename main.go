@@ -1,7 +1,8 @@
 // tend takes one agreed work item through coding agents and brings back a
 // reviewed branch: a Grove cycle or a change in no cycle, or a GitHub issue of
-// a repository without Grove. Claude implements in a Herdr pane, Codex reviews the head, one repair
-// if the review asks, and with a listed origin a pull request as a bot account.
+// a repository without Grove. Claude implements, Codex reviews the head, one repair
+// if the review asks, and with a listed origin a pull request as a bot account. The agents run
+// headless, or in Herdr or rex panes with TEND_TERMINAL.
 //
 //	tend <repo> <cycle-id> | <change-id>
 //	tend <repo> issue-<n>
@@ -12,7 +13,7 @@
 //	tend version
 //
 // Exit 0: the head is reviewed and the verdict printed. Exit 3: a person is
-// needed, and a Herdr notification says why. Exit 4: another tend is on this
+// needed, and with a listed origin an issue on GitHub says why and how to answer. Exit 4: another tend is on this
 // work item. Progress is read again on every run from Git, Grove, GitHub, Herdr
 // and the run folders under TEND_STATE (default ~/.local/state/tend), never
 // from the candidate. After exit 3, or a kill, the same line carries on: an
@@ -32,6 +33,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -196,18 +198,52 @@ func stop(f string, a ...any) {
 	say("%s", msg)
 	stage("needs-you", msg, "a person deals with that, then runs tend again")
 	term.notify("tend "+cycle+" needs you", msg, "request")
+	if !stopping {
+		stopping = true // a stop while telling is not told
+		if u := tell(msg); u != "" {
+			stage("needs-you", msg, "a person answers "+u+"; tend watch reads the answer")
+		}
+	}
 	os.Exit(3)
+}
+
+var stopping bool
+
+// A failed read or a write that a rerun repeats safely, as of GitHub or Git:
+// tend runs itself again from the start after a pause, as tend watch does
+// after a kill, so a blip waits for nobody and what was done is not done
+// twice. After tries in a row it is a person's.
+const tries = 6
+
+func retry(f string, a ...any) {
+	msg := fmt.Sprintf(f, a...)
+	n, _ := strconv.Atoi(os.Getenv("TEND_TRIES"))
+	if n >= tries {
+		stop("%s, %d times in a row", msg, n+1)
+	}
+	d := time.Duration(15<<n) * time.Second // 15 s, doubling: about 16 minutes in all
+	if ms, err := strconv.Atoi(os.Getenv("TEND_RETRY_MS")); err == nil {
+		d = time.Duration(ms) * time.Millisecond
+	}
+	say("%s; trying again in %s", msg, d)
+	stage("working", fmt.Sprintf("%s; tend tries again at %s", msg, time.Now().Add(d).Format("15:04:05")), "tend runs again from the start, which repeats nothing done")
+	time.Sleep(d)
+	os.Setenv("TEND_TRIES", strconv.Itoa(n+1))
+	cd(startDir) // the arguments may be relative to it
+	must("", syscall.Exec(must(os.Executable()), os.Args, os.Environ())) // the locks' descriptors close, and are taken again
 }
 
 // What the attempt is doing, for tend status: when, a kind (working, needs-you
 // or done) and what, then the next action. Written whole or not at all.
-func stage(k, text, next string) {
-	if run == "" {
+func stage(k, text, next string) { stageIn(run, k, text, next) }
+
+func stageIn(d, k, text, next string) {
+	if d == "" {
 		return
 	}
 	s := fmt.Sprintf("%s %s: %s\nnext: %s\n", time.Now().Format("2006-01-02T15:04:05-0700"), k, text, next)
-	if os.WriteFile(run+"/status.tmp", []byte(s), 0o644) == nil {
-		os.Rename(run+"/status.tmp", run+"/status")
+	if os.WriteFile(d+"/status.tmp", []byte(s), 0o644) == nil {
+		os.Rename(d+"/status.tmp", d+"/status")
 	}
 }
 
@@ -219,8 +255,11 @@ func working(f string) bool {
 // The release, set at build time; "dev" for a build from a checkout.
 var version = "dev"
 
+var startDir string // where tend was started, for a retry
+
 func main() {
 	args := os.Args[1:]
+	startDir, _ = os.Getwd()
 	if len(args) == 1 && args[0] == "version" {
 		fmt.Println("tend " + version)
 		return
@@ -241,13 +280,15 @@ func main() {
 	must("", os.MkdirAll(state+"/runs", 0o755))
 	state = must(abs(state)) // tend changes into the attempt later
 
-	// The terminal the agents run in: TEND_TERMINAL, or rex when tend itself
-	// runs in rex rather than Herdr.
-	switch t := os.Getenv("TEND_TERMINAL"); {
-	case t == "rex", t == "" && os.Getenv("REX_SESSION") != "" && os.Getenv("HERDR_ENV") != "1":
+	// Where the agents run: headless, or in Herdr or rex where TEND_TERMINAL
+	// names one, to watch them in panes.
+	switch os.Getenv("TEND_TERMINAL") {
+	case "rex":
 		term = &rex{}
-	default:
+	case "herdr":
 		term = &herdr{}
+	default:
+		term = &headless{}
 	}
 	if mode == "watch" {
 		watch(args)
@@ -333,7 +374,7 @@ func groveJSON() (any, error) {
 func project() any {
 	s, err := out("grove", "changes", "--json")
 	if err != nil {
-		stop("grove changes --json failed in %s", os.Getenv("PWD"))
+		retry("grove changes --json failed in %s", os.Getenv("PWD"))
 	}
 	return parse(s)
 }
@@ -384,7 +425,7 @@ func fetchTarget() string {
 		return target
 	}
 	if syncTarget(repo, target) != nil {
-		stop("could not fetch %s from origin", target)
+		retry("could not fetch %s from origin", target)
 	}
 	return "origin/" + target
 }

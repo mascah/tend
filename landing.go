@@ -276,7 +276,7 @@ func landStep() string {
 				say("%s does not merge cleanly into %s; merged nothing", base, branch)
 				return "conflict"
 			}
-			if !pushAs(branch) {
+			if pushed, _, _ := pushAs(branch); !pushed {
 				stop("could not push %s to origin as %s; if it has commits this checkout lacks, look at them, then run tend again", branch, account)
 			}
 			h = git("rev-parse", "HEAD")
