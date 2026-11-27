@@ -238,6 +238,18 @@ var intakeScenarios = []scenario{
 		s.check("a head that also touches code gets no success", slices.Equal(s.statusesOn(c), []string{"failure the-bot"}))
 		s.check("its description names the path", s.has(s.cat(s.st+"/descriptions"), `^`+c+` Changes intake.go, outside`))
 	}},
+	{"propose-vouch-resumed", func(s *sc) {
+		s.project("main", true)
+		s.allow()
+		s.issues("1:tend")
+		r := s.propose("STATUS_FAIL=1")
+		drafted := s.git(s.repo+".git", "rev-parse", "tend/issue-1")
+		s.check("a pass that could not set the status stops", r.code != 0 && len(s.statusesOn(drafted)) == 0)
+		c := s.pushTo("tend/issue-1", "main", "intake.go")
+		r = s.propose()
+		s.check("resuming, the drafter's commit, no longer the head, gets no status", r.code == 0 && len(s.statusesOn(drafted)) == 0)
+		s.check("the head a person pushed gets failure", slices.Equal(s.statusesOn(c), []string{"failure the-bot"}))
+	}},
 	{"propose-vouch-open", func(s *sc) {
 		s.project("main", true)
 		s.allow()
