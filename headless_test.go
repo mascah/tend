@@ -83,6 +83,14 @@ var headlessScenarios = []scenario{
 		s.check("closed as completed by the owner, tend carries on to a pull request", w.said("owner answered .*issues/100: carry on") && s.creates() == 1 && s.prompts("/grove-implement") == 4)
 		s.check("and the question is settled", !exists(s.runDir()+"/decision") && strings.Contains(s.status(), "done:"))
 	}},
+	{"decision-public", func(s *sc) {
+		s.project("main", true)
+		s.allow()
+		s.hrun("SILENT=impl", "VISIBILITY=PUBLIC")
+		q := s.issue(100)
+		s.check("on a public repository the issue asks without the agent's words", !strings.Contains(q, "the proposal names two files for one table") && strings.Contains(q, "is not posted to this public repository"))
+		s.check("and names no path or machine of the runner's", !strings.Contains(q, s.ts) && !strings.Contains(q, s.dir) && !strings.Contains(q, hostname()))
+	}},
 	{"decision-left", func(s *sc) {
 		s.project("main", true)
 		s.allow()
@@ -101,3 +109,5 @@ var headlessScenarios = []scenario{
 		s.check("a publishing token with the workflow scope publishes nothing", r.code == 3 && r.said("the-bot's token has the workflow scope") && s.creates() == 0)
 	}},
 }
+
+func hostname() string { h, _ := os.Hostname(); return h }

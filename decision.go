@@ -54,7 +54,7 @@ func tell(msg string) string {
 		}
 	}
 	token()
-	u, err := input(question(q), "gh", "issue", "create", "--title", "tend needs you on "+cycle+": "+clip(q, 90), "--body-file", "-")
+	u, err := input(scrub(question(q)), "gh", "issue", "create", "--title", "tend needs you on "+cycle+": "+clip(scrub(q), 90), "--body-file", "-")
 	if ls := strings.Split(u, "\n"); err == nil {
 		u = ls[len(ls)-1]
 	}
@@ -73,18 +73,20 @@ func question(q string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "tend stopped building `%s` (attempt `%s`, branch `%s`) and needs a decision from you.\n\n%s\n\n", cycle, id, branch, quote(q))
 	if a := stuckOn.agent; a != "" {
-		if s := strings.TrimSpace(term.read(a)); s != "" {
+		if s := strings.TrimSpace(term.read(a)); s == "" {
+		} else if v, err := quiet("gh", "repo", "view", "--json", "visibility", "--jq", ".visibility"); err == nil && v == "PRIVATE" {
 			fmt.Fprintf(&b, "**What %s said last:**\n\n%s\n\n", a, quote(clip(s, 4000)))
+		} else { // a public repository's issues are anyone's: the agent's words stay on the runner
+			fmt.Fprintf(&b, "What %s said last is on the runner, in `$TEND_STATE/agents/%s/`, and is not posted to this public repository.\n\n", a, a)
 		}
 	}
 	if dir != "" && exists(dir) {
-		host, _ := os.Hostname()
 		log := gitQ("-C", dir, "log", "--oneline", base+"..HEAD")
 		if log == "" {
 			log = "no commits"
 		}
-		fmt.Fprintf(&b, "**Where the work is:** the worktree `%s` on `%s`, at `%s`. Since `%s`:\n\n```text\n%s\n%s\n```\n\n",
-			dir, host, gitQ("-C", dir, "rev-parse", "--short", "HEAD"), base, log, gitQ("-C", dir, "diff", "--shortstat", base+"...HEAD"))
+		fmt.Fprintf(&b, "**Where the work is:** branch `%s` on the runner (`tend status` there names its worktree), at `%s`. Since `%s`:\n\n```text\n%s\n%s\n```\n\n",
+			branch, gitQ("-C", dir, "rev-parse", "--short", "HEAD"), base, log, gitQ("-C", dir, "diff", "--shortstat", base+"...HEAD"))
 	}
 	if p := cat(run + "/pr"); p != "" {
 		fmt.Fprintf(&b, "Its pull request is %s.\n\n", p)
@@ -93,7 +95,7 @@ func question(q string) string {
 	if stuckOn.rec != "" {
 		again = ", asking " + stuckOn.agent + " once more"
 	}
-	fmt.Fprintf(&b, "**To answer, close this issue**\n\n- as **completed** for tend to carry on%s. Where the question needs something done first, do it in the worktree above, then close it.\n- as **not planned** for tend to leave the attempt as it is.\n\ntend watch reads the answer on its next pass.\n\n<!-- tend:decision %s -->\n", again, id)
+	fmt.Fprintf(&b, "**To answer, close this issue**\n\n- as **completed** for tend to carry on%s. Where the question needs something done first, do it in the branch's worktree on the runner, then close it.\n- as **not planned** for tend to leave the attempt as it is.\n\ntend watch reads the answer on its next pass.\n\n<!-- tend:decision %s -->\n", again, id)
 	return b.String()
 }
 
@@ -152,6 +154,16 @@ func quote(s string) string { return "> " + strings.ReplaceAll(s, "\n", "\n> ") 
 func clip(s string, n int) string {
 	if r := []rune(s); len(r) > n {
 		return string(r[:n]) + "…"
+	}
+	return s
+}
+
+// Text for an issue, with the runner's own paths named as TEND_STATE and ~
+// rather than spelled out.
+func scrub(s string) string {
+	s = strings.ReplaceAll(s, state, "$TEND_STATE")
+	if h, err := os.UserHomeDir(); err == nil && h != "" {
+		s = strings.ReplaceAll(s, h, "~")
 	}
 	return s
 }

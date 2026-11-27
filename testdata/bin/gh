@@ -45,7 +45,7 @@ case "$1 $2" in
 	done | jq -s --arg h "$(arg --head "$@")" --arg a "$(arg --author "$@")" --arg st "$(arg --state "$@")" '
 		if $h != "" then map(select(.headRefName == $h)) elif $a != "" then map(select(.author == $a and .state == "OPEN")) elif $st == "all" then . else map(select(.state == "OPEN")) end' |
 		if q=$(arg --jq "$@") && [ -n "$q" ]; then jq -r "$q"; else cat; fi ;;
-"repo view") case "$*" in *defaultBranchRef*) echo main ;; *viewerPermission*) echo "${PERMISSION:-WRITE}" ;; *) echo o/r ;; esac ;;
+"repo view") case "$*" in *defaultBranchRef*) echo main ;; *viewerPermission*) echo "${PERMISSION:-WRITE}" ;; *visibility*) echo "${VISIBILITY:-PRIVATE}" ;; *) echo o/r ;; esac ;;
 "issue list") jq '[.[] | select(.state == "OPEN" and (.labels | index("tend")))]' "$s/issues" | jq -r "$(arg --jq "$@")" ;;
 "issue view") jq --argjson n "$3" '.[] | select(.number == $n) | {title, body, url, state, labels: (.labels | map({name: .}))}' "$s/issues" ;;
 "issue comment")

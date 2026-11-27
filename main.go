@@ -229,7 +229,7 @@ func retry(f string, a ...any) {
 	stage("working", fmt.Sprintf("%s; tend tries again at %s", msg, time.Now().Add(d).Format("15:04:05")), "tend runs again from the start, which repeats nothing done")
 	time.Sleep(d)
 	os.Setenv("TEND_TRIES", strconv.Itoa(n+1))
-	cd(startDir) // the arguments may be relative to it
+	cd(startDir)                                                         // the arguments may be relative to it
 	must("", syscall.Exec(must(os.Executable()), os.Args, os.Environ())) // the locks' descriptors close, and are taken again
 }
 

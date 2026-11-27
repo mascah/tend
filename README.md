@@ -327,10 +327,12 @@ notifies.
 
 When an attempt stops for a person and its origin is listed in `publish`, the
 publishing account opens one issue on the repository, titled `tend needs you
-on <work item>: <what happened>`. It says what happened, what the agent said
-last, where the work is (the worktree on the runner, its commits and diff
-size since the target) and the pull request if there is one. You answer by
-closing it:
+on <work item>: <what happened>`. It says what happened, where the work is (the
+branch, its commits and diff size since the target) and the pull request if
+there is one. It names no machine, and writes the runner's paths as
+`$TEND_STATE` and `~`. On a private repository it also quotes what the agent
+said last; on a public one, whose issues anyone can read, that stays on the
+runner in `$TEND_STATE/agents/<name>/`. You answer by closing it:
 
 - **as completed**: tend carries on. tend watch runs the attempt again on its
   next pass, asking the agent that left nothing once more. If the question
